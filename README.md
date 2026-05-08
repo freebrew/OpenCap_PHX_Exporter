@@ -1,6 +1,6 @@
 # PHX FieldCap — Data Export & Field Reporting Ecosystem
 
-**Chrome Extension + Excel VBA + WITSML Probe**
+**Chrome Extension + Excel VBA Dashboard**
 *Bridging wellsite data capture, office reporting, and equipment lifecycle tracking.*
 
 ---
@@ -9,13 +9,12 @@
 
 PHX FieldCap is an integrated toolset that extracts operational drilling data from the [FieldCap](https://fieldcap-cdn.phxtech.com) web application and delivers it into structured formats for downstream use in Excel-based field reports, custom dashboards, and (planned) web-based office/field ecosystems.
 
-The system consists of three main components:
+The system consists of two main components:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | Chrome Extension | `src/chrome-extension/` | Extracts job, crew, and BHA equipment data from FieldCap via OData API + DOM scraping |
 | Excel VBA Module | `src/excel/MDL_DDTools.bas` | Imports exported CSVs and renders an interactive DD Tools dashboard with BHA selectors, hour/meter tracking, and fatigue warnings |
-| WITSML Probe | `src/excel/MDL_WITSML_Probe.bas` | Probes wellsite WITSML terminals for survey (trajectory) and pipe tally (tubular) data |
 
 ---
 
@@ -153,38 +152,6 @@ See [`src/excel/DD_TOOLS_SETUP.md`](src/excel/DD_TOOLS_SETUP.md) for detailed se
 
 ---
 
-## WITSML Probe
-
-### What It Does
-
-A standalone VBA module for probing wellsite WITSML terminals to retrieve:
-- **Trajectory** (survey data — inclination, azimuth, MD, TVD)
-- **Tubular** (pipe tally — joint descriptions, lengths, weights)
-
-### Protocol
-
-Uses WITSML 1.4.1.1 SOAP (WMLS) protocol:
-1. `WMLS_GetCap` — discovers server capabilities
-2. `WMLS_GetFromStore` — queries for trajectory and tubular objects
-
-### Installation
-
-1. `Alt+F11` → File → Import File → select `src/excel/MDL_WITSML_Probe.bas`.
-2. Configure `TARGET_HOST` constant (default: `10.100.14.60`).
-3. Run macro: `WITSML_RunProbe`.
-4. Results appear in sheets `WITSML_PROBE` (summary) and `WITSML_PAYLOAD` (raw responses).
-
-### Configuration
-
-Edit constants at top of module:
-```vb
-Private Const TARGET_HOST As String = "10.100.14.60"
-Private Const WITSML_USER As String = ""   ' Basic auth username (if required)
-Private Const WITSML_PASS As String = ""   ' Basic auth password (if required)
-```
-
----
-
 ## Project Structure
 
 ```
@@ -210,7 +177,6 @@ PHX_FieldCap/
     │
     ├── excel/
     │   ├── MDL_DDTools.bas           (DD Tools dashboard VBA module)
-    │   ├── MDL_WITSML_Probe.bas     (WITSML terminal probe VBA module)
     │   └── DD_TOOLS_SETUP.md        (setup instructions)
     │
     ├── js/                           (legacy/diagnostic scripts)
@@ -230,7 +196,6 @@ PHX_FieldCap/
 ### Current State (v2.5.0)
 - Chrome extension exports structured CSVs from FieldCap
 - Excel VBA dashboard provides interactive BHA/fatigue tracking
-- WITSML probe connects to wellsite terminals for survey/pipe tally
 
 ### Planned: Web Spreadsheet & Office Integration
 - **Web-based spreadsheet interface** — browser-native viewer/editor for field reports without Excel dependency
@@ -242,7 +207,6 @@ PHX_FieldCap/
 - **Field → Office pipeline** — wellsite crew exports data; office receives formatted reports automatically
 - **Equipment lifecycle tracking** — serial-hour fatigue integrated with dispatch/return workflows
 - **Service company integration** — standardized data handoff for MWD/LWD tool rental tracking
-- **WITSML live feed** — real-time survey and pipe tally import from Pason/Totco terminals into the same dashboard ecosystem
 
 ---
 
@@ -257,7 +221,6 @@ PHX_FieldCap/
 ## Support
 
 For PHX Technology FieldCap platform issues: [phxtech.com](https://www.phxtech.com)
-For Pason WITSML/WITS terminal configuration: 1-877-255-3158 (24hr support)
 
 ---
 
