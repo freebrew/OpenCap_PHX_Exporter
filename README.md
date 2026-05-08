@@ -218,12 +218,12 @@ PHX_FieldCap/
 
 ---
 
-## Support
+## Disclaimer
 
-For PHX Technology FieldCap platform issues: [phxtech.com](https://www.phxtech.com)
+This project is an independent, unofficial tool. It is not affiliated with, endorsed by, or supported by PHX Technology, Pason Systems, or any other third party. All trademarks belong to their respective owners.
 
 ---
 
 ## License
 
-Proprietary — PHX Technology internal tooling. Not for public distribution.
+MIT — free to use, modify, and distribute.
