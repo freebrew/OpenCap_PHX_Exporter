@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FieldCap Exporter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent:      #004F4F;
+      --accent-h:    #0B6E6E;
+      --accent-dim:  rgba(0, 79, 79, 0.18);
+      --accent-line: rgba(0, 79, 79, 0.55);
+      --bg:          #181A1B;
+      --bg-card:     #202325;
+      --bg-input:    #25292C;
+      --border:      #2E3336;
+      --border-mid:  #3B4347;
+      --text:        #E8EEF0;
+      --text-sec:    #A3B0B5;
+      --text-dim:    #76848B;
+      --green:       #2a6a2a;
+      --green-h:     #378c37;
+      --green-text:  #5cbf5c;
+      --red:         #7a1a1a;
+      --red-text:    #e05555;
+      --amber:       #157575;
+      --amber-text:  #7FD3D3;
+      --blue-text:   #6EB8D4;
+    }
+
+    body {
+      font-family: 'Consolas', 'Courier New', ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--bg);
+      width: 380px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────────── */
+    .header {
+      background: #141617;
+      border-bottom: 2px solid var(--accent);
+      padding: 9px 12px 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo { width: 26px; height: 26px; object-fit: contain; }
+    .header-text h1 {
+      font-size: 11px; font-weight: 700; color: var(--text);
+      text-transform: uppercase; letter-spacing: 0.12em;
+    }
+    .header-text p {
+      font-size: 9px; color: var(--text-sec); margin-top: 1px;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .header-badge {
+      margin-left: auto;
+      font-size: 8px; font-weight: 700; letter-spacing: 0.1em;
+      color: var(--accent-h); text-transform: uppercase;
+      border: 1px solid var(--accent-line);
+      padding: 2px 6px; border-radius: 2px;
+    }
+
+    /* ── Body ───────────────────────────────────────────────────────────────── */
+    .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+    /* ── Section label ──────────────────────────────────────────────────────── */
+    .section-label {
+      font-size: 9px; font-weight: 700; color: var(--accent-h);
+      text-transform: uppercase; letter-spacing: 0.14em;
+      margin-bottom: 4px;
+    }
+
+    /* ── Field row ──────────────────────────────────────────────────────────── */
+    .field-row { display: flex; align-items: center; gap: 8px; }
+    label.fld  { font-size: 10px; font-weight: 700; color: var(--text-sec);
+                 white-space: nowrap; text-transform: uppercase; letter-spacing: 0.08em; }
+    input[type="number"],
+    input[type="text"] {
+      flex: 1; border: 1px solid var(--border-mid);
+      border-radius: 2px; padding: 5px 8px; font-size: 12px;
+      font-family: inherit; outline: none;
+      background: var(--bg-input); color: var(--text);
+    }
+    input:focus { border-color: var(--accent); }
+
+    /* ── Panel ──────────────────────────────────────────────────────────────── */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--accent-line);
+      border-radius: 2px;
+      padding: 8px 10px;
+    }
+
+    /* ── Folder row ─────────────────────────────────────────────────────────── */
+    .folder-row { display: flex; align-items: center; gap: 6px; }
+    .folder-icon { font-size: 13px; flex-shrink: 0; }
+    .folder-name {
+      flex: 1; font-size: 11px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    }
+    .folder-name.default { color: var(--text-sec); font-style: italic; }
+    .btn-choose {
+      padding: 4px 9px; border: 1px solid var(--accent-line); border-radius: 2px;
+      font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit;
+      background: var(--accent-dim); color: var(--amber-text);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      transition: background .15s, border-color .15s; white-space: nowrap; flex-shrink: 0;
+    }
+    .btn-choose:hover { background: var(--accent); color: var(--text); border-color: var(--accent-h); }
+    .btn-clear-folder {
+      padding: 3px 7px; border: 1px solid var(--border-mid); border-radius: 2px;
+      font-size: 10px; cursor: pointer; font-family: inherit;
+      background: transparent; color: var(--text-sec);
+      transition: border-color .15s, color .15s; flex-shrink: 0;
+    }
+    .btn-clear-folder:hover { border-color: var(--red-text); color: var(--red-text); }
+
+    /* ── Checkboxes ─────────────────────────────────────────────────────────── */
+    .checks {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--accent-line);
+      border-radius: 2px;
+      padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .check-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+    .check-row input[type="checkbox"] { accent-color: var(--accent-h); width: 13px; height: 13px; }
+
+    /* ── Action buttons ─────────────────────────────────────────────────────── */
+    .btn {
+      flex: 1; padding: 8px 10px; border: none; border-radius: 2px;
+      font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      transition: background .15s, opacity .15s;
+    }
+    .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent); color: var(--text);
+      border: 1px solid var(--accent-h);
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-h); }
+    .btn-danger  {
+      background: #2A1F22; color: var(--red-text);
+      border: 1px solid var(--red); font-size: 10px; padding: 6px 10px;
+    }
+    .btn-danger:hover:not(:disabled) { background: var(--red); color: var(--text); }
+    .btn-row { display: flex; gap: 6px; }
+
+    /* ── Data cards ─────────────────────────────────────────────────────────── */
+    .cards { display: flex; flex-direction: column; gap: 5px; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 7px 10px;
+    }
+    .card-header {
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 8px;
+    }
+    .card-title {
+      font-size: 10px; font-weight: 700; color: var(--text);
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .card-badge {
+      font-size: 9px; font-weight: 700; padding: 1px 6px;
+      border-radius: 2px; border: 1px solid var(--border-mid);
+      background: transparent; color: var(--text-sec);
+      letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .card-badge.ok   { border-color: var(--green); color: var(--green-text); }
+    .card-badge.warn { border-color: var(--amber); color: var(--amber-text); }
+    .card-badge.err  { border-color: var(--red);   color: var(--red-text);  }
+    .card-badge.busy { border-color: var(--accent-line); color: var(--amber-text); animation: pulse 1s infinite; }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .card-meta { font-size: 9px; color: var(--text-sec); margin-top: 3px; letter-spacing: 0.04em; }
+
+    /* ── Download All ───────────────────────────────────────────────────────── */
+    .btn-dl-all {
+      width: 100%; padding: 9px 10px; border: 1px solid var(--accent-h); border-radius: 2px;
+      font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
+      background: var(--accent); color: var(--text);
+      text-transform: uppercase; letter-spacing: 0.12em;
+      transition: background .15s, opacity .15s;
+    }
+    .btn-dl-all:disabled { opacity: 0.25; cursor: not-allowed; }
+    .btn-dl-all:hover:not(:disabled) { background: var(--accent-h); }
+
+    /* ── Divider ────────────────────────────────────────────────────────────── */
+    .hud-divider {
+      height: 1px; background: var(--border-mid); margin: 2px 0;
+    }
+
+    /* ── Status bar ─────────────────────────────────────────────────────────── */
+    .result {
+      display: none; flex-direction: column; gap: 2px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-left: 2px solid var(--accent-line);
+      border-radius: 2px; padding: 7px 10px;
+    }
+    .result.visible { display: flex; }
+    .result-ok  { font-size: 10px; color: var(--green-text); font-weight: 700; letter-spacing: 0.04em; }
+    .result-err { font-size: 10px; color: var(--red-text); word-break: break-word; }
+    .meta       { font-size: 9px; color: var(--text-sec); }
+
+    /* ── Footer ─────────────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      background: #141617;
+      padding: 4px 12px;
+      font-size: 9px; color: var(--text-dim);
+      text-align: center; letter-spacing: 0.08em; text-transform: uppercase;
+      display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
+    }
+    .btn-probe {
+      background: transparent; border: 1px solid var(--border-mid);
+      color: var(--text-dim); font-size: 9px; padding: 2px 6px; border-radius: 3px;
+      cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .btn-probe:hover { border-color: var(--accent-line); color: var(--amber-text); }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img class="logo" src="icons/icon48.png" alt="" />
+    <div class="header-text">
+      <h1>FieldCap Exporter</h1>
+      <p>OData API &middot; clean typed CSV</p>
+    </div>
+    <div class="header-badge">PHX</div>
+  </div>
+
+  <div class="body">
+
+    <!-- ── Job ID ──────────────────────────────────────────────────────────── -->
+    <div class="field-row">
+      <label class="fld" for="jobId">Job ID</label>
+      <input id="jobId" type="number" value="20786" min="1" step="1" />
+    </div>
+
+    <div class="hud-divider"></div>
+
+    <!-- ── Download folder ─────────────────────────────────────────────────── -->
+    <div class="panel">
+      <div class="section-label">Download Location</div>
+      <div class="folder-row">
+        <span class="folder-icon">&#128193;</span>
+        <span id="folderName" class="folder-name default">Chrome Downloads (default)</span>
+        <button class="btn-choose" id="btnChooseFolder">Choose&#8230;</button>
+        <button class="btn-clear-folder" id="btnClearFolder" title="Reset to default" hidden>&#10005;</button>
+      </div>
+    </div>
+
+    <!-- ── What to fetch ───────────────────────────────────────────────────── -->
+    <div class="checks">
+      <div class="section-label">Include</div>
+      <label class="check-row">
+        <input id="chkJob"  type="checkbox" checked />
+        Job Details &amp; Well Info
+      </label>
+      <label class="check-row">
+        <input id="chkCrew" type="checkbox" checked />
+        Crew / Personnel
+      </label>
+      <label class="check-row">
+        <input id="chkBha"  type="checkbox" checked />
+        BHA Equipment
+      </label>
+    </div>
+
+    <!-- ── Action buttons ──────────────────────────────────────────────────── -->
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnFetch">&#9654; Fetch &amp; Build CSVs</button>
+      <button class="btn btn-danger"  id="btnClear" title="Clear cached data">Clear</button>
+    </div>
+
+    <!-- ── Per-type status cards ───────────────────────────────────────────── -->
+    <div class="cards">
+
+      <div class="card" id="cardJob">
+        <div class="card-header">
+          <span class="card-title">Job Details / Well Info</span>
+          <span class="card-badge" id="badgeJob">&#8212;</span>
+        </div>
+        <div class="card-meta" id="metaJob"></div>
+      </div>
+
+      <div class="card" id="cardCrew">
+        <div class="card-header">
+          <span class="card-title">Crew / Personnel</span>
+          <span class="card-badge" id="badgeCrew">&#8212;</span>
+        </div>
+        <div class="card-meta" id="metaCrew"></div>
+      </div>
+
+      <div class="card" id="cardBha">
+        <div class="card-header">
+          <span class="card-title">BHA Equipment</span>
+          <span class="card-badge" id="badgeBha">&#8212;</span>
+        </div>
+        <div class="card-meta" id="metaBha"></div>
+      </div>
+
+    </div>
+
+    <!-- ── Download All ────────────────────────────────────────────────────── -->
+    <button class="btn-dl-all" id="btnDownloadAll" disabled>&#8659; Download All CSVs</button>
+
+    <!-- ── Status / error bar ──────────────────────────────────────────────── -->
+    <div class="result" id="resultArea">
+      <div id="resultText"></div>
+      <div class="meta" id="resultMeta"></div>
+    </div>
+
+  </div>
+
+  <footer>OData API mode &middot; v<span id="extVersion">?</span> &middot; PHX FieldCap
+    &ensp;<button class="btn-probe" id="btnProbe" title="Inspect raw ToolAssembly field names returned by the API">&#128269; Schema Probe</button>
+    &ensp;<button class="btn-probe" id="btnDebugState" title="Show live/cached capture counts">&#9881; Debug State</button>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>
