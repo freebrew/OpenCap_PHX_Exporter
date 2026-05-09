@@ -7,7 +7,7 @@
 
 ## Overview
 
-PHX FieldCap is an integrated toolset that extracts operational drilling data from the [FieldCap](https://fieldcap-cdn.phxtech.com) web application and delivers it into structured formats for downstream use in Excel-based field reports, custom dashboards, and (planned) web-based office/field ecosystems.
+PHX FieldCap is an integrated toolset that extracts operational drilling data from the [FieldCap](https://fieldcap.com/) web application and delivers it into structured formats for downstream use in Excel-based field reports, custom dashboards, and (planned) web-based office/field ecosystems.
 
 The system consists of two main components:
 
@@ -245,7 +245,7 @@ PHX_FieldCap/
 
 ## Disclaimer
 
-This project is an independent, unofficial tool. It is not affiliated with, endorsed by, or supported by PHX Technology, Pason Systems, or any other third party. All trademarks belong to their respective owners.
+This project is an independent, unofficial tool. It is not affiliated with, endorsed by, or supported by PHX Technology, FieldCap, or any other third party. All trademarks belong to their respective owners.
 
 ---
 
