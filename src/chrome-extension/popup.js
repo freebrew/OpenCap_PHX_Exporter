@@ -1,4 +1,4 @@
-// FieldCap Data Exporter — Popup v2.5.0
+// FieldCap Data Exporter — Popup v3.0.0
 
 (async () => {
   "use strict";
@@ -13,19 +13,22 @@
   const btnChooseFolder = document.getElementById("btnChooseFolder");
   const btnClearFolder  = document.getElementById("btnClearFolder");
 
-  const chkJob  = document.getElementById("chkJob");
-  const chkCrew = document.getElementById("chkCrew");
-  const chkBha  = document.getElementById("chkBha");
+  const chkJob   = document.getElementById("chkJob");
+  const chkCrew  = document.getElementById("chkCrew");
+  const chkBha   = document.getElementById("chkBha");
+  const chkSlide = document.getElementById("chkSlide");
   const btnFetch       = document.getElementById("btnFetch");
   const btnClear       = document.getElementById("btnClear");
   const btnDownloadAll = document.getElementById("btnDownloadAll");
 
-  const badgeJob  = document.getElementById("badgeJob");
-  const badgeCrew = document.getElementById("badgeCrew");
-  const badgeBha  = document.getElementById("badgeBha");
-  const metaJob   = document.getElementById("metaJob");
-  const metaCrew  = document.getElementById("metaCrew");
-  const metaBha   = document.getElementById("metaBha");
+  const badgeJob   = document.getElementById("badgeJob");
+  const badgeCrew  = document.getElementById("badgeCrew");
+  const badgeBha   = document.getElementById("badgeBha");
+  const badgeSlide = document.getElementById("badgeSlide");
+  const metaJob    = document.getElementById("metaJob");
+  const metaCrew   = document.getElementById("metaCrew");
+  const metaBha    = document.getElementById("metaBha");
+  const metaSlide  = document.getElementById("metaSlide");
 
   const resultArea = document.getElementById("resultArea");
   const resultText = document.getElementById("resultText");
@@ -147,10 +150,11 @@
   const KEY_CSV_JOB  = "fieldcap_csv_job";
   const KEY_CSV_CREW = "fieldcap_csv_crew";
   const KEY_CSV_BHA  = "fieldcap_csv_bha";
+  const KEY_CSV_SLIDE_DAY = "fieldcap_csv_slide_by_day";
 
   // ── Restore cached CSV state ──────────────────────────────────────────────
   const storedAll = await chrome.storage.local.get([
-    KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA,
+    KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY,
   ]);
 
   const meta = storedAll[KEY_META];
@@ -171,7 +175,11 @@
       setBadge(badgeBha, `${meta.bhaRows ?? "?"} rows`, "ok");
       metaBha.textContent = `fieldcap-job-${meta.jobId}-bha-equipment.csv · ${meta.bhaCount ?? "?"} BHAs`;
     }
-    if (storedAll[KEY_CSV_JOB] || storedAll[KEY_CSV_CREW] || storedAll[KEY_CSV_BHA]) {
+    if (storedAll[KEY_CSV_SLIDE_DAY]) {
+      setBadge(badgeSlide, `${meta.slideByDayRows ?? "?"} rows`, "ok");
+      metaSlide.textContent = `fieldcap-job-${meta.jobId}-slide-rotate-metres-by-day.csv`;
+    }
+    if (storedAll[KEY_CSV_JOB] || storedAll[KEY_CSV_CREW] || storedAll[KEY_CSV_BHA] || storedAll[KEY_CSV_SLIDE_DAY]) {
       btnDownloadAll.disabled = false;
     }
   }
@@ -185,9 +193,10 @@
       jobDetails: chkJob.checked,
       crew:       chkCrew.checked,
       bha:        chkBha.checked,
+      slideDay:   chkSlide.checked,
     };
 
-    if (!flags.jobDetails && !flags.crew && !flags.bha) {
+    if (!flags.jobDetails && !flags.crew && !flags.bha && !flags.slideDay) {
       showErr("Select at least one data type to fetch.");
       return;
     }
@@ -195,9 +204,10 @@
     btnFetch.disabled = true;
     hideResult();
 
-    if (flags.jobDetails) { setBadge(badgeJob,  "Fetching…", "busy"); metaJob.textContent  = ""; }
-    if (flags.crew)       { setBadge(badgeCrew, "Fetching…", "busy"); metaCrew.textContent = ""; }
-    if (flags.bha)        { setBadge(badgeBha,  "Fetching…", "busy"); metaBha.textContent  = ""; }
+    if (flags.jobDetails) { setBadge(badgeJob,   "Fetching…", "busy"); metaJob.textContent   = ""; }
+    if (flags.crew)       { setBadge(badgeCrew,  "Fetching…", "busy"); metaCrew.textContent  = ""; }
+    if (flags.bha)        { setBadge(badgeBha,   "Fetching…", "busy"); metaBha.textContent   = ""; }
+    if (flags.slideDay)   { setBadge(badgeSlide, "Fetching…", "busy"); metaSlide.textContent = ""; }
 
     showInfo("Fetching from FieldCap OData API…");
 
@@ -206,17 +216,19 @@
 
       if (chrome.runtime.lastError) {
         showErr(chrome.runtime.lastError.message);
-        if (flags.jobDetails) setBadge(badgeJob,  "Error", "err");
-        if (flags.crew)       setBadge(badgeCrew, "Error", "err");
-        if (flags.bha)        setBadge(badgeBha,  "Error", "err");
+        if (flags.jobDetails) setBadge(badgeJob,   "Error", "err");
+        if (flags.crew)       setBadge(badgeCrew,  "Error", "err");
+        if (flags.bha)        setBadge(badgeBha,   "Error", "err");
+        if (flags.slideDay)   setBadge(badgeSlide, "Error", "err");
         return;
       }
 
       if (!res?.ok) {
         showErr(res?.error ?? "Fetch failed. Make sure you are logged into FieldCap.");
-        if (flags.jobDetails) setBadge(badgeJob,  "Error", "err");
-        if (flags.crew)       setBadge(badgeCrew, "Error", "err");
-        if (flags.bha)        setBadge(badgeBha,  "Error", "err");
+        if (flags.jobDetails) setBadge(badgeJob,   "Error", "err");
+        if (flags.crew)       setBadge(badgeCrew,  "Error", "err");
+        if (flags.bha)        setBadge(badgeBha,   "Error", "err");
+        if (flags.slideDay)   setBadge(badgeSlide, "Error", "err");
         return;
       }
 
@@ -232,6 +244,16 @@
         setBadge(badgeBha, `${res.bhaRows} rows`, "ok");
         metaBha.textContent = `fieldcap-job-${jobId}-bha-equipment.csv · ${res.bhaCount} BHAs`;
       }
+      const slideDayRows = Number(res.slideByDayRows ?? 0);
+      if (flags.slideDay) {
+        if (slideDayRows > 0) {
+          setBadge(badgeSlide, `${slideDayRows} rows`, "ok");
+          metaSlide.textContent = `fieldcap-job-${jobId}-slide-rotate-metres-by-day.csv`;
+        } else {
+          setBadge(badgeSlide, "0 rows", "warn");
+          metaSlide.textContent = "No ActivityLogs found for this job.";
+        }
+      }
       btnDownloadAll.disabled = false;
 
       const folderNote = dirHandle ? ` → ${dirHandle.name}/` : "";
@@ -239,13 +261,11 @@
       if (flags.jobDetails) parts.push("job details");
       if (flags.crew)       parts.push(`${res.crewRows} crew`);
       if (flags.bha)        parts.push(`${res.bhaRows} BHA rows (${res.bhaCount} BHAs)`);
+      if (flags.slideDay && slideDayRows > 0) parts.push(`${slideDayRows} slide/rotate rows`);
+
       const liveBha = Number(res.liveBhaRows ?? 0);
       const liveAct = Number(res.liveActivityRows ?? 0);
-
-      let fetchMeta = `${new Date().toLocaleString()} · live bhaRows=${liveBha} · live activityRows=${liveAct}`;
-      if (flags.bha && liveAct === 0) {
-        fetchMeta += " · Open the FieldCap Activities tab for this job before Fetch to populate Mtrs Slid/Rot.";
-      }
+      const fetchMeta = `${new Date().toLocaleString()} · live bhaRows=${liveBha} · live activityRows=${liveAct}`;
 
       showOk(`Fetched: ${parts.join(" · ")}${folderNote}`, fetchMeta);
     });
@@ -269,10 +289,31 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  /** When directory picker writes hit OS/Chrome policy (common on 2nd+ overwrite), fall back. */
+  const downloadViaChromeDownloads = (csvText, filename) =>
+    new Promise((resolve, reject) => {
+      const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      chrome.downloads.download(
+        {
+          url,
+          filename,
+          saveAs: false,
+          conflictAction: "overwrite",
+        },
+        () => {
+          URL.revokeObjectURL(url);
+          const err = chrome.runtime.lastError;
+          if (err) reject(new Error(err.message));
+          else resolve(true);
+        }
+      );
+    });
+
   const download = async (which) => {
     const jobId = parseInt(jobIdInput.value, 10);
 
-    const keyMap  = { job: KEY_CSV_JOB, crew: KEY_CSV_CREW, bha: KEY_CSV_BHA };
+    const keyMap  = { job: KEY_CSV_JOB, crew: KEY_CSV_CREW, bha: KEY_CSV_BHA, slideDay: KEY_CSV_SLIDE_DAY };
     const stored  = await chrome.storage.local.get([keyMap[which], KEY_META]);
     const csv     = stored[keyMap[which]];
     const cached  = stored[KEY_META] ?? {};
@@ -284,6 +325,7 @@
       job:  `fieldcap-job-${id}-job-details.csv`,
       crew: `fieldcap-job-${id}-crew.csv`,
       bha:  `fieldcap-job-${id}-bha-equipment.csv`,
+      slideDay: `fieldcap-job-${id}-slide-rotate-metres-by-day.csv`,
     };
     const filename = names[which];
 
@@ -332,7 +374,14 @@
       }
     }
 
-    throw new Error(`${filename} failed to save: ${lastMsg}`);
+    try {
+      await downloadViaChromeDownloads(csv, filename);
+      return `${filename} → Chrome Downloads (folder write blocked by browser/OS policy)`;
+    } catch (fallbackErr) {
+      throw new Error(
+        `${filename} failed to save: ${lastMsg} | Fallback download: ${String(fallbackErr?.message ?? fallbackErr)}`
+      );
+    }
   };
 
   btnDownloadAll.addEventListener("click", async () => {
@@ -341,20 +390,21 @@
       await ensureWritableFolder();
       const saved = [];
       const failed = [];
-      for (const which of ["job", "crew", "bha"]) {
+      for (const which of ["job", "crew", "bha", "slideDay"]) {
         try {
           const name = await download(which);
           if (name) saved.push(name);
         } catch (e) {
           failed.push(String(e?.message ?? e));
         }
+        await sleep(120);
       }
       if (saved.length === 0 && failed.length === 0) {
         showErr("No cached data. Click Fetch first.");
         return;
       }
       if (failed.length > 0) {
-        showErr(`Saved ${saved.length}/3 files. ${failed.join(" | ")}`);
+        showErr(`Saved ${saved.length} file(s). ${failed.join(" | ")}`);
         return;
       }
       const dest = dirHandle ? dirHandle.name : "Downloads";
@@ -369,12 +419,14 @@
   // ── Clear ─────────────────────────────────────────────────────────────────
   btnClear.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "CLEAR_CACHE" }, () => {
-      setBadge(badgeJob,  "\u2014", "");
-      setBadge(badgeCrew, "\u2014", "");
-      setBadge(badgeBha,  "\u2014", "");
-      metaJob.textContent  = "";
-      metaCrew.textContent = "";
-      metaBha.textContent  = "";
+      setBadge(badgeJob,   "\u2014", "");
+      setBadge(badgeCrew,  "\u2014", "");
+      setBadge(badgeBha,   "\u2014", "");
+      setBadge(badgeSlide, "\u2014", "");
+      metaJob.textContent   = "";
+      metaCrew.textContent  = "";
+      metaBha.textContent   = "";
+      metaSlide.textContent = "";
       btnDownloadAll.disabled = true;
       hideResult();
     });

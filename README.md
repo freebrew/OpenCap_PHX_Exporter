@@ -13,7 +13,7 @@ The system consists of two main components:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Chrome Extension | `src/chrome-extension/` | Extracts job, crew, and BHA equipment data from FieldCap via OData API + DOM scraping |
+| Chrome Extension | `src/chrome-extension/` | Extracts job, crew, BHA equipment, and daily slide/rotate metre data from FieldCap via OData API |
 | Excel VBA Module | `src/excel/MDL_DDTools.bas` | Imports exported CSVs and renders an interactive DD Tools dashboard with BHA selectors, hour/meter tracking, and fatigue warnings |
 
 ---
@@ -33,25 +33,27 @@ The system consists of two main components:
 │  │content.js│  │injected-spy.js│  │    background.js          │  │
 │  │DOM scrape│  │XHR/Fetch hook │  │  OData fetch + normalize  │  │
 │  └────┬─────┘  └──────┬───────┘  │  CSV generation           │  │
-│       │               │          │  Activity meter parsing    │  │
+│       │               │          │  ActivityLog metre parsing │  │
 │       └───────────────┴──────────┤                            │  │
 │                                  └────────────┬───────────────┘  │
 │                                               │                  │
 │  ┌──────────────────────────────────────────┐ │                  │
 │  │           popup.js + popup.html          │ │                  │
 │  │  • Job ID input                          │◄┘                  │
+│  │  • 4-checkbox export selector            │                    │
 │  │  • Fetch & Build CSVs                    │                    │
 │  │  • File System Access API download       │                    │
-│  │  • Debug state / live metrics            │                    │
+│  │  • Per-export status cards               │                    │
 │  └──────────────────────┬───────────────────┘                    │
 └─────────────────────────┼────────────────────────────────────────┘
-                          │  3 CSV files
+                          │  4 CSV files
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Local File System                              │
 │  fieldcap-job-{id}-job-details.csv                               │
 │  fieldcap-job-{id}-crew.csv                                      │
 │  fieldcap-job-{id}-bha-equipment.csv                             │
+│  fieldcap-job-{id}-slide-rotate-metres-by-day.csv                │
 └─────────────────────────┬────────────────────────────────────────┘
                           │  VBA Refresh import
                           ▼
@@ -71,10 +73,10 @@ The system consists of two main components:
 
 ### What It Does
 
-1. **Fetches** job details, crew schedules, and BHA equipment data directly from FieldCap's OData API using your active browser session (no separate login needed).
-2. **Intercepts** FieldCap's own internal API calls (XHR/Fetch) to capture hour statistics and metric fields that are not exposed on the public OData endpoints.
-3. **Scrapes** the visible DOM (BHA grid, Activities tab) to capture real-time values like slide/rotate meters per daily operation.
-4. **Generates** 3 clean, properly-typed CSV files ready for Excel or any downstream system.
+1. **Fetches** job details, crew schedules, BHA equipment data, and daily slide/rotate metre totals directly from FieldCap's OData API using your active browser session — no separate login needed.
+2. **Intercepts** FieldCap's own internal API calls (XHR/Fetch) to capture hour statistics and metric fields not exposed on the public OData endpoints.
+3. **Scrapes** the visible DOM (BHA grid) to capture real-time component values.
+4. **Generates** 4 clean, properly-typed CSV files ready for Excel or any downstream system.
 
 ### CSV Outputs
 
@@ -83,6 +85,22 @@ The system consists of two main components:
 | `fieldcap-job-{id}-job-details.csv` | Core job metadata + all custom field key-value pairs |
 | `fieldcap-job-{id}-crew.csv` | One row per crew member with role, contact, dates |
 | `fieldcap-job-{id}-bha-equipment.csv` | One row per BHA component with serial, hours, meters, fatigue data |
+| `fieldcap-job-{id}-slide-rotate-metres-by-day.csv` | Daily slide and rotate metres per BHA, sourced directly from ActivityLogs |
+
+### Slide / Rotate Metres by Day
+
+The `slide-rotate-metres-by-day` CSV is built directly from the FieldCap `ActivityLogs` OData endpoint — the same source that powers the Slide Sheet tab inside FieldCap. Each row represents one calendar day of drilling for a specific BHA.
+
+| Column | Description |
+|--------|-------------|
+| `Job ID` | FieldCap job number |
+| `Date` | Calendar date (`YYYY-MM-DD`) from `StartDateTime` |
+| `BHA #` | BHA assembly number |
+| `Slide Metres` | Sum of `End MD − Start MD` where `ActivityType = 'Sliding'` |
+| `Rotate Metres` | Sum of `End MD − Start MD` where `ActivityType = 'Drilling'` |
+| `Survey Course Sum` | Total of slide + rotate for the day |
+
+This replaces the previous `SurveySheetEntries`-based calculation which was producing incorrect (often doubled) totals. The ActivityLogs source exactly matches what FieldCap displays on its Slide Sheet tab.
 
 ### BHA Equipment Columns
 
@@ -96,14 +114,6 @@ Length, Accum Length, Top, Bottom, Max OD, Min ID,
 Job Hours, HSLS, Strapped, Shipping Status, Dispatched On, Returned On
 ```
 
-### Slide/Rotate Meter Extraction
-
-The extension captures per-BHA slide and rotate meters through a multi-tier approach:
-
-1. **Activities tab scraping** — detects rows with `Sliding`/`Code 2A` and `Rotating`/`Code 2` activities, sums the `Course` (meters) column per BHA.
-2. **Depth range delta** — if `Course` is blank, computes meters from `Start-End Depth` values.
-3. **Hour-proportional fallback** — if Activities data is unavailable, derives meter split from `Total Metres * (slide_hours / (slide_hours + rotate_hours))`.
-
 ### Installation
 
 1. Open `chrome://extensions` (or `edge://extensions`).
@@ -114,9 +124,10 @@ The extension captures per-BHA slide and rotate meters through a multi-tier appr
 
 ### Usage Tips
 
-- Keep the **Activities tab** open/loaded before fetching to get slide/rotate meter data.
-- Keep the **BHAs tab** visited to capture hour data from FieldCap's internal API calls.
-- The popup shows `live bhaRows` and `live activityRows` counts after each fetch — if `activityRows=0`, Activities data was not captured for that run.
+- All 4 export types are selected by default. Uncheck any you don't need before fetching.
+- The popup shows 4 independent status cards — each updates as its data finishes fetching.
+- Slide/Rotate Metres by Day requires no special tab to be open; it is fetched entirely via OData.
+- `live bhaRows` and `live activityRows` counts in the status bar reflect DOM-captured data for the BHA equipment CSV.
 
 ---
 
@@ -124,7 +135,7 @@ The extension captures per-BHA slide and rotate meters through a multi-tier appr
 
 ### What It Does
 
-Imports the 3 exported CSVs and renders a fully interactive directional drilling dashboard:
+Imports the exported CSVs and renders a fully interactive directional drilling dashboard:
 
 - **BHA selector buttons** — embedded Form Control buttons in the header, one per BHA
 - **Per-BHA statistics** — total meters, slide/rotate meters, hours breakdown, below-rotate hours
@@ -159,15 +170,14 @@ PHX_FieldCap/
 ├── README.md
 ├── .gitignore
 ├── fieldcap-job-20786-*.csv          (sample exports — not committed)
-├── FieldCap-Exporter-Extension*.png  (screenshots)
 │
 └── src/
     ├── chrome-extension/
-    │   ├── manifest.json             (Manifest V3, v2.5.0)
-    │   ├── background.js            (OData fetch, CSV generation, activity parsing)
+    │   ├── manifest.json             (Manifest V3, v3.0.0)
+    │   ├── background.js            (OData fetch, CSV generation, ActivityLog parsing)
     │   ├── content.js               (DOM scraping, table detection, auto-scrape)
     │   ├── injected-spy.js          (page-context XHR/Fetch interception)
-    │   ├── popup.html               (extension UI — PHX dark/teal theme)
+    │   ├── popup.html               (extension UI — PHX dark/teal theme, 4-export layout)
     │   ├── popup.js                 (popup logic, File System Access API downloads)
     │   └── icons/
     │       ├── icon16.png
@@ -191,11 +201,26 @@ PHX_FieldCap/
 
 ---
 
-## Roadmap: Field-Office-Equipment Ecosystem
+## Changelog
 
-### Current State (v2.5.0)
-- Chrome extension exports structured CSVs from FieldCap
-- Excel VBA dashboard provides interactive BHA/fatigue tracking
+### v3.0.0 — Major Release
+- **New export: Slide / Rotate Metres by Day** — 4th CSV output sourced directly from the FieldCap `ActivityLogs` OData endpoint, exactly matching the FieldCap Slide Sheet tab.
+  - `ActivityType = 'Sliding'` → slide metres (`End MD − Start MD`)
+  - `ActivityType = 'Drilling'` → rotate metres (`End MD − Start MD`)
+  - Grouped by calendar date and BHA number
+- **UI overhaul** — popup now has 4 independent checkboxes and 4 status cards (one per export type)
+- **Fixed**: slide/rotate totals were previously calculated from `SurveySheetEntries` which produced incorrect (often doubled) values; now uses `ActivityLogs` as the authoritative source
+- **Fixed**: date parsing of FieldCap's compact `YYYYMMDDHHMI` integer format (eliminated phantom 1976 dates)
+
+### v2.5.x
+- OData-driven export of job details, crew, and BHA equipment
+- File System Access API for direct-to-folder downloads
+- XHR/Fetch interception for hour statistics
+- DOM scraping fallback for activity metre data
+
+---
+
+## Roadmap
 
 ### Planned: Web Spreadsheet & Office Integration
 - **Web-based spreadsheet interface** — browser-native viewer/editor for field reports without Excel dependency
