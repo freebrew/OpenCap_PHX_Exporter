@@ -1,3 +1,4 @@
+Attribute VB_Name = "MDL_Setup"
 Option Explicit
 
 ' ================================================================================
@@ -338,7 +339,9 @@ End Sub
 ' ================================================================================
 
 Private Sub DrawHeader(ws As Worksheet)
-    With ws.Range(ws.Cells(R_HDR, 1), ws.Cells(R_HDR, C_LAST))
+    ' Extend to col 23 (W) to cover the AC table in columns S-W
+    Const C_FULL As Long = 23
+    With ws.Range(ws.Cells(R_HDR, 1), ws.Cells(R_HDR, C_FULL))
         .Merge
         .Value              = "  OPENCAP  |  WELL DATABASE & SETUP"
         .Interior.Color     = cTeal()
@@ -349,7 +352,7 @@ Private Sub DrawHeader(ws As Worksheet)
         .VerticalAlignment  = xlVAlignCenter
         .HorizontalAlignment = xlHAlignLeft
     End With
-    With ws.Range(ws.Cells(R_DIV, 1), ws.Cells(R_DIV, C_LAST))
+    With ws.Range(ws.Cells(R_DIV, 1), ws.Cells(R_DIV, C_FULL))
         .Interior.Color = cLine()
     End With
 End Sub
@@ -1395,6 +1398,26 @@ Public Sub ImportAntiCollision()
     Dim aRefMD(200) As Double, aBetween(200) As Double, aSF(200) As Double
     nHits = ParseAcSummary(pdfText, aRefMD, aBetween, aSF)
 
+    ' DEBUG: when nothing found, save full text and show context around "Summary"
+    If nHits = 0 And Len(pdfText) > 0 Then
+        Dim dbgFile As String: dbgFile = Environ("TEMP") & "\oc_pdf_debug.txt"
+        Dim dbgNum As Integer: dbgNum = FreeFile
+        Open dbgFile For Output As #dbgNum
+        Print #dbgNum, pdfText
+        Close #dbgNum
+        Dim sumPos As Long: sumPos = InStr(1, pdfText, "Summary", vbTextCompare)
+        Dim dbgSnip As String
+        If sumPos > 0 Then
+            Dim s0 As Long: s0 = IIf(sumPos > 100, sumPos - 100, 1)
+            dbgSnip = "Context around 'Summary' (pos " & sumPos & " of " & Len(pdfText) & "):" _
+                      & Chr(10) & Mid(pdfText, s0, 1500)
+        Else
+            dbgSnip = "'Summary' NOT FOUND in " & Len(pdfText) & " chars." & Chr(10) & _
+                      "First 800 chars:" & Chr(10) & Left(pdfText, 800)
+        End If
+        MsgBox dbgSnip, vbInformation, "AC Debug"
+    End If
+
     ' Write to hidden sheet
     acWs.Cells(2, 1).Value = "Ref MD (m)"
     acWs.Cells(2, 2).Value = "Between Centres (m)"
@@ -1413,37 +1436,72 @@ Public Sub ImportAntiCollision()
     Application.StatusBar = "AC import complete: " & nHits & " critical separation(s) found (SF < 2.0)."
 End Sub
 
-' ---- PDF text extraction (two strategies) ----
+' ---- PDF text extraction (three strategies, zero required installs) ----
 Private Function ExtractPdfText(pdfPath As String) As String
     ExtractPdfText = ""
+    Dim tmpOut As String: tmpOut = Environ("TEMP") & "\oc_pdf_text.txt"
+    Dim fNum As Integer
+    Dim content As String, ln As String
 
-    ' Strategy 1: pdftotext (Poppler) via Shell
-    Dim tmpFile As String: tmpFile = Environ("TEMP") & "\oc_pdf_extract.txt"
-    On Error Resume Next: Kill tmpFile: On Error GoTo 0
-
-    Shell "cmd /c pdftotext -layout """ & pdfPath & """ """ & tmpFile & """", vbHide
+    ' ----------------------------------------------------------------
+    ' Strategy 1: pdftotext (Poppler) - optional, best layout fidelity
+    '   Checks PATH only; no bundled DLLs needed
+    ' ----------------------------------------------------------------
+    On Error Resume Next: Kill tmpOut: On Error GoTo 0
+    Shell "cmd /c pdftotext -layout """ & pdfPath & """ """ & tmpOut & """ 2>nul", vbHide
 
     Dim deadline As Date: deadline = Now + TimeValue("00:00:06")
-    Do While Dir(tmpFile) = "" And Now < deadline
-        Application.Wait Now + 500
+    Do While Dir(tmpOut) = "" And Now < deadline
+        Application.Wait Now + TimeValue("00:00:01")
     Loop
 
-    If Dir(tmpFile) <> "" Then
-        Dim fNum As Integer: fNum = FreeFile
-        On Error GoTo TryAcrobat
-        Open tmpFile For Input As #fNum
-        Dim content As String, ln As String
+    If Dir(tmpOut) <> "" Then
+        fNum = FreeFile: content = ""
+        Open tmpOut For Input As #fNum
         Do While Not EOF(fNum): Line Input #fNum, ln: content = content & ln & Chr(10): Loop
         Close #fNum
-        On Error Resume Next: Kill tmpFile: On Error GoTo 0
+        On Error Resume Next: Kill tmpOut: On Error GoTo 0
         ExtractPdfText = content
         Exit Function
     End If
 
-TryAcrobat:
-    On Error Resume Next: Close fNum: On Error GoTo 0
+    ' ----------------------------------------------------------------
+    ' Strategy 2: Built-in PowerShell PDF parser
+    '   Uses only .NET Framework (Windows 7+) - no install required.
+    '   Handles FlateDecode (zlib) compressed content streams.
+    '   Reconstructs table rows by grouping text at the same Y position.
+    ' ----------------------------------------------------------------
+    Dim tmpScript As String: tmpScript = Environ("TEMP") & "\oc_pdf_parse.ps1"
+    On Error Resume Next: Kill tmpScript: Kill tmpOut: On Error GoTo 0
 
-    ' Strategy 2: Adobe Acrobat COM
+    fNum = FreeFile
+    Open tmpScript For Output As #fNum
+    Print #fNum, BuildPdfExtractScript()
+    Close #fNum
+
+    Shell "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", vbHide
+
+    deadline = Now + TimeValue("00:00:20")
+    Do While Dir(tmpOut) = "" And Now < deadline
+        Application.Wait Now + TimeValue("00:00:01")
+    Loop
+
+    If Dir(tmpOut) <> "" Then
+        fNum = FreeFile: content = ""
+        Open tmpOut For Input As #fNum
+        Do While Not EOF(fNum): Line Input #fNum, ln: content = content & ln & Chr(10): Loop
+        Close #fNum
+        On Error Resume Next: Kill tmpOut: Kill tmpScript: On Error GoTo 0
+        If Len(content) > 0 Then
+            ExtractPdfText = content
+            Exit Function
+        End If
+    End If
+    On Error Resume Next: Kill tmpScript: On Error GoTo 0
+
+    ' ----------------------------------------------------------------
+    ' Strategy 3: Adobe Acrobat COM (full Acrobat only, not Reader)
+    ' ----------------------------------------------------------------
     Dim acro As Object: Set acro = Nothing
     On Error Resume Next: Set acro = CreateObject("AcroExch.App"): On Error GoTo 0
     If acro Is Nothing Then Exit Function
@@ -1465,11 +1523,99 @@ TryAcrobat:
         Next pg
         ExtractPdfText = allText
     End If
-
     pdDoc.Close False
 End Function
 
+' ---- Returns a self-contained PowerShell PDF text extractor ----
+' No external tools required. Uses .NET DeflateStream (built into Windows 7+).
+' Parses PDF content streams, handles FlateDecode compression, and
+' reconstructs text lines by grouping glyphs at the same Y position.
+Private Function BuildPdfExtractScript() As String
+    Dim s As String
+    s = "param([string]$pdf, [string]$out)" & vbLf
+    s = s & "$enc  = [Text.Encoding]::GetEncoding(1252)" & vbLf
+    s = s & "$bytes = [IO.File]::ReadAllBytes($pdf)" & vbLf
+    s = s & "$raw   = $enc.GetString($bytes)" & vbLf
+    s = s & "" & vbLf
+    s = s & "function Inflate([byte[]]$b) {" & vbLf
+    s = s & "    try {" & vbLf
+    s = s & "        $skip = if($b.Length -gt 2 -and ($b[0] -band 0x0F) -eq 8){2}else{0}" & vbLf
+    s = s & "        $ms = [IO.MemoryStream]::new($b,$skip,$b.Length-$skip)" & vbLf
+    s = s & "        $ds = [IO.Compression.DeflateStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)" & vbLf
+    s = s & "        $os = [IO.MemoryStream]::new(); $ds.CopyTo($os)" & vbLf
+    s = s & "        return $enc.GetString($os.ToArray())" & vbLf
+    s = s & "    } catch { return '' }" & vbLf
+    s = s & "}" & vbLf
+    s = s & "" & vbLf
+    s = s & "function Parse-Stream([string]$cs) {" & vbLf
+    s = s & "    # Group text tokens by rounded Y position (Tm sets absolute coords)" & vbLf
+    s = s & "    $rows = [Collections.Generic.SortedDictionary[double,string]]::new()" & vbLf
+    s = s & "    $curY = 0.0" & vbLf
+    s = s & "    # Match: optional leading nums + operator  OR  string literal + Tj/TJ" & vbLf
+    s = s & "    $re = [regex]'(?s)(-?\d[\d.]*)\s+(-?\d[\d.]*)\s+(-?\d[\d.]*)\s+(-?\d[\d.]*)\s+(-?\d[\d.]*)\s+(-?\d[\d.]*)\s+Tm|\(([^)]*)\)\s*Tj|\[([^\]]*)\]\s*TJ'" & vbLf
+    s = s & "    foreach($m in $re.Matches($cs)) {" & vbLf
+    s = s & "        if($m.Groups[6].Success) {" & vbLf
+    s = s & "            $curY = [math]::Round([double]$m.Groups[6].Value, 1)" & vbLf
+    s = s & "        } elseif($m.Groups[7].Success) {" & vbLf
+    s = s & "            if(-not $rows.ContainsKey($curY)){$rows[$curY]=''}" & vbLf
+    s = s & "            $rows[$curY] += $m.Groups[7].Value + ' '" & vbLf
+    s = s & "        } elseif($m.Groups[8].Success) {" & vbLf
+    s = s & "            $inner = $m.Groups[8].Value" & vbLf
+    s = s & "            $words = [regex]::Matches($inner,'\(([^)]*)\)')" & vbLf
+    s = s & "            $piece = ($words | ForEach-Object{$_.Groups[1].Value}) -join ''" & vbLf
+    s = s & "            if(-not $rows.ContainsKey($curY)){$rows[$curY]=''}" & vbLf
+    s = s & "            $rows[$curY] += $piece + ' '" & vbLf
+    s = s & "        }" & vbLf
+    s = s & "    }" & vbLf
+    s = s & "    # Return lines sorted Y descending (PDF Y=0 is bottom of page)" & vbLf
+    s = s & "    return ($rows.Keys | Sort-Object -Descending | ForEach-Object{ $rows[$_].Trim() }) -join [char]10" & vbLf
+    s = s & "}" & vbLf
+    s = s & "" & vbLf
+    s = s & "$result = ''" & vbLf
+    s = s & "$pos = 0" & vbLf
+    s = s & "while($true) {" & vbLf
+    s = s & "    $si = $raw.IndexOf('stream',$pos); if($si -lt 0){break}" & vbLf
+    s = s & "    $di = $raw.LastIndexOf('<<',$si)" & vbLf
+    s = s & "    $dict = if($di -ge 0){$raw.Substring($di,$si-$di)}else{''}" & vbLf
+    s = s & "    # Skip image/font/metadata streams" & vbLf
+    s = s & "    if($dict -match '/Subtype\s*/Image' -or $dict -match '/Type\s*/FontDescriptor'){$pos=$si+6;continue}" & vbLf
+    s = s & "    $ss = $si+6" & vbLf
+    s = s & "    if($ss -lt $raw.Length -and $raw[$ss] -eq [char]13){$ss++}" & vbLf
+    s = s & "    if($ss -lt $raw.Length -and $raw[$ss] -eq [char]10){$ss++}" & vbLf
+    s = s & "    $ei = $raw.IndexOf('endstream',$ss); if($ei -lt 0){break}" & vbLf
+    s = s & "    $slen = $ei - $ss" & vbLf
+    s = s & "    if($slen -gt 0 -and $slen -lt 5000000) {" & vbLf
+    s = s & "        $cs = ''" & vbLf
+    s = s & "        if($dict -match '/FlateDecode|/Fl\b') {" & vbLf
+    s = s & "            $cb = $bytes[$ss..($ei-1)]" & vbLf
+    s = s & "            $cs = Inflate $cb" & vbLf
+    s = s & "        } else {" & vbLf
+    s = s & "            $cs = $raw.Substring($ss,$slen)" & vbLf
+    s = s & "        }" & vbLf
+    s = s & "        if($cs){ $result += (Parse-Stream $cs) + [char]10 }" & vbLf
+    s = s & "    }" & vbLf
+    s = s & "    $pos = $ei+9" & vbLf
+    s = s & "}" & vbLf
+    s = s & "[IO.File]::WriteAllText($out,$result,[Text.Encoding]::UTF8)" & vbLf
+    BuildPdfExtractScript = s
+End Function
+
 ' ---- Parse PDF text for Summary table rows with SF < 2.0 ----
+' Actual extracted line format (COMPASS AC report):
+'   [Level N ,] [SF|CC|ES...] RefMD OffsetMD BetweenCentres BetweenEllipses SF [well name] JobNum
+'
+' Two-pattern approach that handles the COMPASS summary table format exactly.
+'
+' The summary rows look like (recovered text, columns reversed by PDF stream order):
+'   "Level 4 , SF 2,604.552,604.1018.567.201.634 TOURMALINE HZ SUNDOWN H04..."
+'
+' Pattern A: comma-formatted large MDs  e.g. "2,604.55"  (requires at least one ,\d{3} group)
+' Pattern B: concatenated BC/BE/SF triplet e.g. "18.567.201.634"
+'            → (\d{1,2})\.(\d{2}) (\d{1,2})\.(\d{2}) (\d)\.(\d{3})
+'            → BC=18.56  BE=7.20  SF=1.634
+'
+' The ", SF" guard additionally rejects per-well detail rows that embed
+' "Level N" in the middle of their data (those rows have no ", SF").
 Private Function ParseAcSummary(pdfText As String, _
         aRefMD() As Double, aBetween() As Double, aSF() As Double) As Long
     ParseAcSummary = 0
@@ -1478,24 +1624,56 @@ Private Function ParseAcSummary(pdfText As String, _
     Dim nHits As Long: nHits = 0
     Dim i As Long
 
+    ' Pattern A: comma-formatted large measured-depth values (require ≥1 comma group)
+    Dim reMD As Object: Set reMD = CreateObject("VBScript.RegExp")
+    reMD.Global = True
+    reMD.Pattern = "\d{1,3}(?:,\d{3})+\.\d{2}"
+
+    ' Pattern B: the concatenated BetweenCentres / BetweenEllipses / SF triplet.
+    ' "18.567.201.634" → G(0)=18 G(1)=56 G(2)=7 G(3)=20 G(4)=1 G(5)=634
+    ' Works because the "Level" keyword interrupts the sequence in per-well table rows.
+    Dim reTriplet As Object: Set reTriplet = CreateObject("VBScript.RegExp")
+    reTriplet.Global = False
+    reTriplet.Pattern = "(\d{1,2})\.(\d{2})(\d{1,2})\.(\d{2})(\d)\.(\d{3})"
+
     For i = 0 To UBound(lines)
         Dim ln As String: ln = Trim(lines(i))
         If InStr(1, ln, "Summary", vbTextCompare) > 0 Then inSummary = True
         If Not inSummary Then GoTo NextAcLine
 
-        ' Extract numeric tokens from the line
-        Dim nums() As Double: Dim nNums As Long
-        nNums = ExtractNums(ln, nums)
-        ' Expect at least 3 numbers: RefMD, BetweenCentres, SepFactor (SF is typically 3rd)
-        If nNums >= 3 Then
-            Dim sf As Double: sf = nums(2)
-            If sf > 0 And sf < 2# Then
-                aRefMD(nHits)   = nums(0)
-                aBetween(nHits) = nums(1)
-                aSF(nHits)      = sf
-                nHits = nHits + 1
-                If nHits > 200 Then Exit For
-            End If
+        ' Must be an explicit Level N critical SF row (has both "Level" and ", SF").
+        ' Rejects: "Warning Levels ...", "CC/ES plain rows", per-well table detail rows.
+        If InStr(1, ln, "Level", vbTextCompare) = 0 Then GoTo NextAcLine
+        If InStr(1, ln, ", SF", vbTextCompare) = 0 Then GoTo NextAcLine
+
+        ' --- Pattern A: get RefMD from first comma-formatted large MD ---
+        Dim mdMs As Object: Set mdMs = reMD.Execute(ln)
+        If mdMs.Count < 2 Then GoTo NextAcLine
+        Dim refMdVal As Double: refMdVal = CDbl(Replace(mdMs(0).Value, ",", ""))
+
+        ' Clip to the text AFTER the SECOND comma-MD (the OffsetMD).
+        ' Using the second match (index 1), not the last match, avoids false
+        ' anchoring on large non-depth values like "10,000.000" (risk probability)
+        ' that appear later in the same summary line and push the clip point
+        ' past the BC/BE/SF triplet.
+        ' FirstIndex is 0-based; Mid() is 1-based, hence the +1.
+        Dim lastMd As Object: Set lastMd = mdMs(1)
+        Dim afterMDs As String
+        afterMDs = Mid(ln, lastMd.FirstIndex + lastMd.Length + 1)
+
+        ' --- Pattern B: extract BC / BE / SF from concatenated triplet ---
+        Dim tripMs As Object: Set tripMs = reTriplet.Execute(afterMDs)
+        If tripMs.Count = 0 Then GoTo NextAcLine
+        Dim tm As Object: Set tm = tripMs(0)
+        Dim bcVal As Double: bcVal = CDbl(tm.SubMatches(0) & "." & tm.SubMatches(1))
+        Dim sfVal As Double: sfVal = CDbl(tm.SubMatches(4) & "." & tm.SubMatches(5))
+
+        If sfVal > 0 And sfVal < 2# Then
+            aRefMD(nHits)   = refMdVal
+            aBetween(nHits) = bcVal
+            aSF(nHits)      = sfVal
+            nHits = nHits + 1
+            If nHits > 200 Then Exit For
         End If
 NextAcLine:
     Next i
@@ -1503,17 +1681,23 @@ NextAcLine:
 End Function
 
 Private Function ExtractNums(s As String, nums() As Double) As Long
+    ' Extracts numbers that have a decimal point (2 or 3 decimal places).
+    ' This naturally skips integers like job numbers (34783) and Level markers (4, 5).
+    ' Handles comma-formatted numbers (2,604.55) and concatenated runs (2,604.552,604.10...).
+    ' Pattern: 3-decimal tried first to avoid "23.91" matching inside "23.915".
     ReDim nums(50)
-    Dim parts() As String: parts = Split(s, " ")
     Dim n As Long: n = 0
-    Dim p As Variant
-    For Each p In parts
-        Dim t As String: t = Trim(Replace(CStr(p), ",", ""))
-        If IsNumeric(t) And Len(t) > 0 Then
-            nums(n) = CDbl(t): n = n + 1
-            If n > 50 Then Exit For
-        End If
-    Next p
+    Dim re As Object
+    Set re = CreateObject("VBScript.RegExp")
+    re.Global = True
+    re.Pattern = "\d+\.\d{3}|\d{1,3}(?:,\d{3})*\.\d{2}"
+    Dim ms As Object: Set ms = re.Execute(s)
+    Dim m As Object
+    For Each m In ms
+        Dim t As String: t = Replace(m.Value, ",", "")
+        nums(n) = CDbl(t): n = n + 1
+        If n > 50 Then Exit For
+    Next m
     ExtractNums = n
 End Function
 
@@ -1521,30 +1705,38 @@ End Function
 Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
         aBetween() As Double, aSF() As Double, srcPath As String)
 
+    ' Render the AC summary table on the Setup sheet, anchored at S3.
     Dim ws As Worksheet
-    On Error Resume Next: Set ws = ThisWorkbook.Sheets("Sheet1"): On Error GoTo 0
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(SH_SETUP): On Error GoTo 0
     If ws Is Nothing Then Exit Sub
 
-    ws.Cells.UnMerge
-    ws.Cells.Clear
-    ws.Tab.Color = cTeal()
+    Const BASE_ROW As Long = 3   ' row  3  = S3 anchor row
+    Const BASE_COL As Long = 19  ' col 19  = column S
 
-    Dim r As Long: r = 1
-
-    ' Title bar
-    ws.Rows(r).RowHeight = 28
-    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 5))
-        .Merge
-        .Value = "  ANTI-COLLISION SUMMARY  |  Separation Factor < 2.0"
-        .Interior.Color = cTeal(): .Font.Color = RGB(255, 255, 255)
-        .Font.Bold = True: .Font.Name = "Consolas": .Font.Size = 11
-        .VerticalAlignment = xlVAlignCenter
+    ' Clear only the AC table region (250 rows should always be enough)
+    With ws.Range(ws.Cells(BASE_ROW, BASE_COL), ws.Cells(BASE_ROW + 250, BASE_COL + 4))
+        .UnMerge
+        .Clear
     End With
+
+    ' Column widths for S-W only
+    ws.Columns(BASE_COL).ColumnWidth     = 5   ' #
+    ws.Columns(BASE_COL + 1).ColumnWidth = 15  ' Ref MD (m)
+    ws.Columns(BASE_COL + 2).ColumnWidth = 20  ' Between Centres (m)
+    ws.Columns(BASE_COL + 3).ColumnWidth = 17  ' Separation Factor
+    ws.Columns(BASE_COL + 4).ColumnWidth = 10  ' Risk
+
+    Dim r As Long: r = BASE_ROW
+
+    ' Section header — same style as CREW MANIFEST, OPENCAP EXPORT FILES, etc.
+    SectionBar ws, r, BASE_COL, BASE_COL + 4, _
+               "  ANTI-COLLISION SUMMARY  |  Separation Factor < 2.0", _
+               cTeal(), RGB(255, 255, 255)
     r = r + 1
 
-    ' Source path
-    ws.Rows(r).RowHeight = 14
-    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 5))
+    ' Source path sub-row
+    ws.Rows(r).RowHeight = 13
+    With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4))
         .Merge
         .Value = "  Source: " & srcPath
         .Interior.Color = cBg(): .Font.Color = cDk()
@@ -1553,24 +1745,14 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
     End With
     r = r + 1
 
-    ' Column widths
-    ws.Columns(1).ColumnWidth = 5
-    ws.Columns(2).ColumnWidth = 18
-    ws.Columns(3).ColumnWidth = 22
-    ws.Columns(4).ColumnWidth = 18
-    ws.Columns(5).ColumnWidth = 12
-
     ' Column headers
     ws.Rows(r).RowHeight = 18
     Dim hdrs(4) As String
-    hdrs(0) = "#"
-    hdrs(1) = "Ref MD (m)"
-    hdrs(2) = "Between Centres (m)"
-    hdrs(3) = "Separation Factor"
-    hdrs(4) = "Risk"
+    hdrs(0) = "#": hdrs(1) = "Ref MD (m)": hdrs(2) = "Between Centres (m)"
+    hdrs(3) = "Separation Factor": hdrs(4) = "Risk"
     Dim c As Long
     For c = 0 To 4
-        With ws.Cells(r, c + 1)
+        With ws.Cells(r, BASE_COL + c)
             .Value = hdrs(c)
             .Interior.Color = cDk(): .Font.Color = RGB(255, 255, 255)
             .Font.Bold = True: .Font.Name = "Consolas": .Font.Size = 8
@@ -1578,14 +1760,14 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
             .VerticalAlignment = xlVAlignCenter
         End With
     Next c
-    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Borders(xlEdgeBottom)
+    With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous: .Color = cMed(): .Weight = xlThin
     End With
     r = r + 1
 
     If nHits = 0 Then
         ws.Rows(r).RowHeight = 20
-        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 5))
+        With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4))
             .Merge
             .Value = "  No critical separations found  (all SF >= 2.0)"
             .Interior.Color = cGrnRow(): .Font.Color = cGrnTxt()
@@ -1596,15 +1778,19 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
     Else
         Dim i As Long
         For i = 0 To nHits - 1
-            ws.Rows(r).RowHeight = 18
+            ws.Rows(r).RowHeight = 16
             Dim sf As Double: sf = aSF(i)
-            Dim rowBg As Long: rowBg = IIf(sf < 1.5, RGB(255, 235, 235), RGB(255, 253, 235))
-            Dim rowFg As Long: rowFg = IIf(sf < 1.5, cRedTxt(), RGB(140, 90, 0))
+
+            ' Alternating background matches the rest of the Setup page
+            Dim rowBg As Long: rowBg = IIf(i Mod 2 = 0, cWh(), cBg())
+
+            ' Risk label and its accent colour (text only — background stays page-themed)
             Dim risk As String
+            Dim riskFg As Long
             Select Case True
-                Case sf < 1.0: risk = "CRITICAL"
-                Case sf < 1.5: risk = "HIGH"
-                Case Else:     risk = "CAUTION"
+                Case sf < 1.0: risk = "CRITICAL": riskFg = cRedTxt()
+                Case sf < 1.5: risk = "HIGH":     riskFg = cRedTxt()
+                Case Else:     risk = "CAUTION":  riskFg = RGB(140, 90, 0)
             End Select
 
             Dim vals(4) As Variant
@@ -1612,33 +1798,37 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
             vals(2) = aBetween(i): vals(3) = sf: vals(4) = risk
 
             For c = 0 To 4
-                With ws.Cells(r, c + 1)
+                With ws.Cells(r, BASE_COL + c)
                     .Value = vals(c)
-                    .Interior.Color = rowBg: .Font.Color = rowFg
-                    .Font.Name = "Consolas": .Font.Size = 9
+                    .Interior.Color = rowBg
+                    ' Risk column uses accent colour; SF uses red/amber; rest uses page dark
+                    Select Case c
+                        Case 3: .Font.Color = riskFg   ' SF value
+                        Case 4: .Font.Color = riskFg   ' Risk label
+                        Case Else: .Font.Color = cBlk()
+                    End Select
+                    .Font.Bold = (c = 4)
+                    .Font.Name = "Consolas": .Font.Size = 8
                     .HorizontalAlignment = IIf(c = 0 Or c = 4, xlHAlignCenter, xlHAlignRight)
                     .VerticalAlignment = xlVAlignCenter
                     If c = 3 Then .NumberFormat = "0.000"
                     If c = 1 Or c = 2 Then .NumberFormat = "0.00"
                 End With
             Next c
-            With ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Borders(xlEdgeBottom)
-                .LineStyle = xlContinuous: .Color = RGB(220, 220, 220): .Weight = xlHairline
+            With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4)).Borders(xlEdgeBottom)
+                .LineStyle = xlContinuous: .Color = RGB(235, 235, 235): .Weight = xlHairline
             End With
             r = r + 1
         Next i
     End If
 
-    ' Outer border
-    With ws.Range(ws.Cells(3, 1), ws.Cells(r - 1, 5))
+    ' Outer border around header + data rows
+    With ws.Range(ws.Cells(BASE_ROW + 2, BASE_COL), ws.Cells(r - 1, BASE_COL + 4))
         .Borders(xlEdgeLeft).LineStyle   = xlContinuous: .Borders(xlEdgeLeft).Color   = cMed()
         .Borders(xlEdgeRight).LineStyle  = xlContinuous: .Borders(xlEdgeRight).Color  = cMed()
         .Borders(xlEdgeBottom).LineStyle = xlContinuous: .Borders(xlEdgeBottom).Color = cMed()
         .Borders(xlEdgeTop).LineStyle    = xlContinuous: .Borders(xlEdgeTop).Color    = cMed()
     End With
-
-    ws.Activate
-    ws.Cells(1, 1).Select
 End Sub
 
 ' Refresh path cells on the Setup sheet after an import
@@ -1659,14 +1849,15 @@ End Sub
 '  Call this once after RebuildSetup to show what the AC table looks like.
 ' ================================================================================
 Public Sub DemoAcTable()
-    Dim nHits As Long: nHits = 5
-    Dim aR(4) As Double, aB(4) As Double, aS(4) As Double
-    ' Sample critical-separation data representative of a P3 AC check
-    aR(0) = 597.00:  aB(0) = 18.4:  aS(0) = 1.82
-    aR(1) = 1203.50: aB(1) = 11.2:  aS(1) = 1.44
-    aR(2) = 2664.50: aB(2) = 8.7:   aS(2) = 0.97
-    aR(3) = 3812.00: aB(3) = 14.1:  aS(3) = 1.63
-    aR(4) = 5490.25: aB(4) = 9.3:   aS(4) = 1.18
+    ' Three critical separations (SF < 2.0) from a P3 AC check — demo data only
+    '   Offset Well H -- Level 4 proximity at 2604.55 m MD
+    '   Offset Well J -- Level 5 proximity at 2610.00 m MD  (closest approach)
+    '   Offset Well J -- Level 5 proximity at 2460.00 m MD
+    Dim nHits As Long: nHits = 3
+    Dim aR(2) As Double, aB(2) As Double, aS(2) As Double
+    aR(0) = 2604.55: aB(0) = 18.56: aS(0) = 1.634
+    aR(1) = 2610.00: aB(1) = 20.81: aS(1) = 1.842
+    aR(2) = 2460.00: aB(2) = 18.76: aS(2) = 1.797
     BuildAcTable nHits, aR, aB, aS, _
-        "D:\Tourmaline Sundown\34784 I Well\Well Plans\TOURMALINE HZ SUNDOWN I04-04-077-17 P3 AC.pdf (DEMO)"
+        "D:\Demo Project\34784 I Well\Well Plans\RIDGELINE HZ CLEARWATER I07-12-083-22 P3 AC.pdf (DEMO)"
 End Sub
