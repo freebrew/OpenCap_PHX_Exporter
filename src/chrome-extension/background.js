@@ -1,4 +1,4 @@
-// FieldCap Data Exporter — Background Service Worker v3.0.0
+// FieldCap Data Exporter — Background Service Worker v3.1.0
 // Fetches data directly from FieldCap's OData API using the active session.
 // Produces typed CSVs including:
 //   • job-details, crew, bha-equipment
@@ -1693,9 +1693,11 @@ const buildBhaCsv = (
 };
 
 // ── Main fetch orchestrator ───────────────────────────────────────────────────
-const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = []) => {
+const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = [], onProgress = null) => {
+  const prog = (pct, label) => { try { onProgress?.(pct, label); } catch (_) {} };
   const results = {};
 
+  prog(10, "Job details…");
   if (flags.jobDetails) {
     const [raw, customValues] = await Promise.all([
       fetchJobDetails(jobId),
@@ -1704,12 +1706,14 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = []) =
     results.jobDetailsCsv = buildJobDetailsCsv(raw, customValues);
   }
 
+  prog(28, "Crew / Personnel…");
   if (flags.crew) {
     const raw = await fetchCrew(jobId);
     results.crew = raw.map((s) => normalizeCrewRow(s, jobId));
     results.crewCsv = buildCsvString(CREW_COLUMNS, results.crew);
   }
 
+  prog(45, "BHA assemblies…");
   if (flags.bha) {
     const [assembliesList, items, tools, stored] = await Promise.all([
       fetchToolAssemblies(jobId),
@@ -1717,8 +1721,10 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = []) =
       fetchJobTools(jobId),
       new Promise((res) => chrome.storage.local.get([KEY_INTERCEPT, KEY_BHA_GRID], res)),
     ]);
+    prog(60, "BHA components…");
     const assemblies = await enrichToolAssembliesFromDetail(assembliesList);
     const customAsmMap = await fetchToolAssemblyCustomValuesForJob(assemblies);
+    prog(72, "Activity data…");
     let odataActivityRows = [];
     try {
       odataActivityRows = await fetchJobActivitiesOData(jobId, assemblies);
@@ -1726,6 +1732,7 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = []) =
       odataActivityRows = [];
     }
     const mergedActivityRows = [...liveActivityRows, ...odataActivityRows];
+    prog(83, "Slide / rotate metres…");
     let activityLogMap = {};
     let slideByDayCsv = "";
     let slideByDayRowCount = 0;
@@ -1755,6 +1762,7 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = []) =
     for (const [k, v] of Object.entries(liveActivityMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
     // Highest-fidelity source: ActivityLogs ⨯ SurveySheetEntries time-window join.
     for (const [k, v] of Object.entries(activityLogMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
+    prog(92, "Building CSV…");
     results.bhaCsv      = buildBhaCsv(assemblies, items, tools, interceptedMap, bhaGridMap, customAsmMap, itemAsmMap);
     results.bhaRowCount = results.bhaCsv.split("\r\n").length - 1;
     results.bhaCount    = assemblies.length;
@@ -1764,6 +1772,78 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = []) =
 
   return results;
 };
+
+// ── Port handler — streams progress back to popup during fetch ────────────────
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "fieldcap-fetch") return;
+
+  port.onMessage.addListener(async (msg) => {
+    if (msg.type !== "FETCH_ALL") return;
+
+    const { jobId, flags = { jobDetails: true, crew: true, bha: true } } = msg;
+    const send = (obj) => { try { port.postMessage(obj); } catch (_) {} };
+
+    if (!jobId) {
+      send({ type: "DONE", ok: false, error: "Job ID is required." });
+      return;
+    }
+
+    try {
+      send({ type: "PROGRESS", pct: 3, label: "Scraping live data…" });
+      let liveData = flags.bha ? await scrapeNowFromFieldCapTabs(jobId) : { bhaRows: [], activityRows: [] };
+      if (flags.bha && liveData.bhaRows.length === 0) {
+        await sleep(1200);
+        liveData = await scrapeNowFromFieldCapTabs(jobId);
+      }
+
+      if (flags.bha && (liveData.bhaRows.length > 0 || liveData.activityRows.length > 0)) {
+        const liveMap         = toBhaGridMap(liveData.bhaRows);
+        const liveActivityMap = toActivityMetresMap(liveData.activityRows);
+        chrome.storage.local.get([KEY_BHA_GRID], (storedGrid) => {
+          const byJob      = storedGrid[KEY_BHA_GRID] ?? {};
+          const mergedJob  = { ...(byJob[String(jobId)] ?? {}) };
+          for (const [k, v] of Object.entries(liveMap))         mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
+          for (const [k, v] of Object.entries(liveActivityMap)) mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
+          byJob[String(jobId)] = mergedJob;
+          chrome.storage.local.set({ [KEY_BHA_GRID]: byJob });
+        });
+      }
+
+      const results = await fetchAll(
+        jobId, flags,
+        liveData.bhaRows, liveData.activityRows,
+        (pct, label) => send({ type: "PROGRESS", pct, label })
+      );
+
+      const meta = {
+        jobId,
+        builtAt:          new Date().toISOString(),
+        crewRows:         results.crew?.length          ?? 0,
+        bhaRows:          results.bhaRowCount           ?? 0,
+        bhaCount:         results.bhaCount              ?? 0,
+        slideByDayRows:   results.slideByDayRowCount    ?? 0,
+        liveBhaRows:      liveData.bhaRows.length,
+        liveActivityRows: liveData.activityRows.length,
+        flags,
+      };
+
+      send({ type: "PROGRESS", pct: 96, label: "Storing to cache…" });
+
+      const stored = {};
+      if (results.jobDetailsCsv) stored[KEY_CSV_JOB]       = results.jobDetailsCsv;
+      if (results.crewCsv)       stored[KEY_CSV_CREW]       = results.crewCsv;
+      if (results.bhaCsv)        stored[KEY_CSV_BHA]        = results.bhaCsv;
+      if (results.slideByDayCsv) stored[KEY_CSV_SLIDE_DAY]  = results.slideByDayCsv;
+      stored[KEY_META] = meta;
+
+      chrome.storage.local.set(stored, () => {
+        send({ type: "DONE", ok: true, ...meta });
+      });
+    } catch (err) {
+      send({ type: "DONE", ok: false, error: err.message });
+    }
+  });
+});
 
 // ── Message handler ───────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
