@@ -7,7 +7,7 @@
 
 ## Overview
 
-PHX OpenCap is an independent toolset that extracts operational drilling data from the [FieldCap]([(https://fieldcap.com/)]) web application and delivers it into structured formats for downstream use in Excel-based field reports, custom dashboards, and (planned) web-based office/field ecosystems.
+PHX OpenCap is an independent toolset that extracts operational drilling data from the [FieldCap](https://fieldcap.com/) web application and delivers it into structured formats for downstream use in Excel-based field reports, custom dashboards, and (planned) web-based office/field ecosystems.
 
 The system consists of two main components:
 
