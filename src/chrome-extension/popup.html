@@ -45,12 +45,12 @@
     .header {
       background: #141617;
       border-bottom: 2px solid var(--accent);
-      padding: 9px 12px 8px;
+      padding: 7px 12px 6px;
       display: flex;
       align-items: center;
       gap: 10px;
     }
-    .logo { width: 26px; height: 26px; object-fit: contain; }
+    .logo { width: 24px; height: 24px; object-fit: contain; }
     .header-text h1 {
       font-size: 11px; font-weight: 700; color: var(--text);
       text-transform: uppercase; letter-spacing: 0.12em;
@@ -68,7 +68,7 @@
     }
 
     /* ── Body ───────────────────────────────────────────────────────────────── */
-    .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .body { padding: 7px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
 
     /* ── Section label ──────────────────────────────────────────────────────── */
     .section-label {
@@ -97,10 +97,10 @@
       border: 1px solid var(--border);
       border-left: 3px solid var(--xl-green);
       border-radius: 2px;
-      padding: 10px 12px;
+      padding: 7px 10px;
     }
     .folder-panel-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
     }
     .xl-badge {
       font-size: 9px; font-weight: 900; letter-spacing: 0.08em;
@@ -144,15 +144,15 @@
       border: 1px solid var(--border);
       border-left: 2px solid var(--accent-line);
       border-radius: 2px;
-      padding: 8px 10px;
-      display: flex; flex-direction: column; gap: 5px;
+      padding: 6px 10px;
+      display: flex; flex-direction: column; gap: 4px;
     }
     .check-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
     .check-row input[type="checkbox"] { accent-color: var(--accent-h); width: 13px; height: 13px; }
 
     /* ── Action buttons ─────────────────────────────────────────────────────── */
     .btn {
-      flex: 1; padding: 8px 10px; border: none; border-radius: 2px;
+      flex: 1; padding: 7px 10px; border: none; border-radius: 2px;
       font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
       text-transform: uppercase; letter-spacing: 0.1em;
       transition: background .15s, opacity .15s;
@@ -165,7 +165,7 @@
     .btn-primary:hover:not(:disabled) { background: var(--accent-h); }
     .btn-danger  {
       background: #2A1F22; color: var(--red-text);
-      border: 1px solid var(--red); font-size: 10px; padding: 6px 10px;
+      border: 1px solid var(--red); font-size: 10px; padding: 5px 10px;
     }
     .btn-danger:hover:not(:disabled) { background: var(--red); color: var(--text); }
     .btn-row { display: flex; gap: 6px; }
@@ -210,13 +210,13 @@
     .progress-fill.error    { background: var(--red-text);   box-shadow: none; transition: none; }
 
     /* ── Data cards ─────────────────────────────────────────────────────────── */
-    .cards { display: flex; flex-direction: column; gap: 5px; }
+    .cards { display: flex; flex-direction: column; gap: 4px; }
 
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 2px;
-      padding: 7px 10px;
+      padding: 5px 10px;
     }
     .card-header {
       display: flex; align-items: center;
@@ -251,7 +251,7 @@
       display: none; flex-direction: column; gap: 2px;
       background: var(--bg-card); border: 1px solid var(--border);
       border-left: 2px solid var(--accent-line);
-      border-radius: 2px; padding: 7px 10px;
+      border-radius: 2px; padding: 5px 10px;
     }
     .result.visible { display: flex; }
     .result-ok  { font-size: 10px; color: var(--green-text); font-weight: 700; letter-spacing: 0.04em; }
@@ -262,7 +262,7 @@
     footer {
       border-top: 1px solid var(--border);
       background: #141617;
-      padding: 4px 12px;
+      padding: 3px 12px;
       font-size: 9px; color: var(--text-dim);
       text-align: center; letter-spacing: 0.08em; text-transform: uppercase;
       display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
@@ -393,7 +393,7 @@
 
   </div>
 
-  <footer>OData API mode &middot; v<span id="extVersion">?</span> &middot; PHX FieldCap
+  <footer>OData API mode &middot; v<span id="extVersion">?</span> &middot; PHX OpenCap
     &ensp;<button class="btn-probe" id="btnProbe" title="Inspect raw ToolAssembly field names returned by the API">&#128269; Schema Probe</button>
     &ensp;<button class="btn-probe" id="btnDebugState" title="Show live/cached capture counts">&#9881; Debug State</button>
   </footer>
