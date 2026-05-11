@@ -14,21 +14,24 @@
   const btnChooseFolder = document.getElementById("btnChooseFolder");
   const btnClearFolder  = document.getElementById("btnClearFolder");
 
-  const chkJob   = document.getElementById("chkJob");
-  const chkCrew  = document.getElementById("chkCrew");
-  const chkBha   = document.getElementById("chkBha");
-  const chkSlide = document.getElementById("chkSlide");
+  const chkJob       = document.getElementById("chkJob");
+  const chkCrew      = document.getElementById("chkCrew");
+  const chkBha       = document.getElementById("chkBha");
+  const chkSlide     = document.getElementById("chkSlide");
+  const chkInventory = document.getElementById("chkInventory");
   const btnFetch = document.getElementById("btnFetch");
   const btnClear = document.getElementById("btnClear");
 
-  const badgeJob   = document.getElementById("badgeJob");
-  const badgeCrew  = document.getElementById("badgeCrew");
-  const badgeBha   = document.getElementById("badgeBha");
-  const badgeSlide = document.getElementById("badgeSlide");
-  const metaJob    = document.getElementById("metaJob");
-  const metaCrew   = document.getElementById("metaCrew");
-  const metaBha    = document.getElementById("metaBha");
-  const metaSlide  = document.getElementById("metaSlide");
+  const badgeJob       = document.getElementById("badgeJob");
+  const badgeCrew      = document.getElementById("badgeCrew");
+  const badgeBha       = document.getElementById("badgeBha");
+  const badgeSlide     = document.getElementById("badgeSlide");
+  const badgeInventory = document.getElementById("badgeInventory");
+  const metaJob        = document.getElementById("metaJob");
+  const metaCrew       = document.getElementById("metaCrew");
+  const metaBha        = document.getElementById("metaBha");
+  const metaSlide      = document.getElementById("metaSlide");
+  const metaInventory  = document.getElementById("metaInventory");
 
   const progressWrap  = document.getElementById("progressWrap");
   const progressLabel = document.getElementById("progressLabel");
@@ -188,10 +191,11 @@
   const KEY_CSV_CREW      = "fieldcap_csv_crew";
   const KEY_CSV_BHA       = "fieldcap_csv_bha";
   const KEY_CSV_SLIDE_DAY = "fieldcap_csv_slide_by_day";
+  const KEY_CSV_INVENTORY = "fieldcap_csv_inventory";
 
   // ── Restore cached CSV state ──────────────────────────────────────────────
   const storedAll = await chrome.storage.local.get([
-    KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY,
+    KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY,
   ]);
 
   const meta = storedAll[KEY_META];
@@ -215,6 +219,10 @@
     if (storedAll[KEY_CSV_SLIDE_DAY]) {
       setBadge(badgeSlide, `${meta.slideByDayRows ?? "?"} rows`, "ok");
       metaSlide.textContent = `fieldcap-job-${meta.jobId}-slide-rotate-metres-by-day.csv`;
+    }
+    if (storedAll[KEY_CSV_INVENTORY]) {
+      setBadge(badgeInventory, `${meta.inventoryRows ?? "?"} rows`, "ok");
+      metaInventory.textContent = `fieldcap-job-${meta.jobId}-inventory.csv`;
     }
   }
 
@@ -272,23 +280,25 @@
 
   const saveAllCachedCsvs = async (jobId) => {
     const keyMap = {
-      job:      KEY_CSV_JOB,
-      crew:     KEY_CSV_CREW,
-      bha:      KEY_CSV_BHA,
-      slideDay: KEY_CSV_SLIDE_DAY,
+      job:       KEY_CSV_JOB,
+      crew:      KEY_CSV_CREW,
+      bha:       KEY_CSV_BHA,
+      slideDay:  KEY_CSV_SLIDE_DAY,
+      inventory: KEY_CSV_INVENTORY,
     };
     const nameMap = {
-      job:      `fieldcap-job-${jobId}-job-details.csv`,
-      crew:     `fieldcap-job-${jobId}-crew.csv`,
-      bha:      `fieldcap-job-${jobId}-bha-equipment.csv`,
-      slideDay: `fieldcap-job-${jobId}-slide-rotate-metres-by-day.csv`,
+      job:       `fieldcap-job-${jobId}-job-details.csv`,
+      crew:      `fieldcap-job-${jobId}-crew.csv`,
+      bha:       `fieldcap-job-${jobId}-bha-equipment.csv`,
+      slideDay:  `fieldcap-job-${jobId}-slide-rotate-metres-by-day.csv`,
+      inventory: `fieldcap-job-${jobId}-inventory.csv`,
     };
 
     const stored = await chrome.storage.local.get(Object.values(keyMap));
     const saved  = [];
     const failed = [];
 
-    for (const which of ["job", "crew", "bha", "slideDay"]) {
+    for (const which of ["job", "crew", "bha", "slideDay", "inventory"]) {
       const csv = stored[keyMap[which]];
       if (!csv) continue;
       try {
@@ -325,9 +335,10 @@
       crew:       chkCrew.checked,
       bha:        chkBha.checked,
       slideDay:   chkSlide.checked,
+      inventory:  chkInventory.checked,
     };
 
-    if (!flags.jobDetails && !flags.crew && !flags.bha && !flags.slideDay) {
+    if (!flags.jobDetails && !flags.crew && !flags.bha && !flags.slideDay && !flags.inventory) {
       showErr("Select at least one data type to fetch.");
       return;
     }
@@ -345,10 +356,11 @@
     btnClear.disabled = true;
     hideResult();
 
-    if (flags.jobDetails) { setBadge(badgeJob,   "Fetching…", "busy"); metaJob.textContent   = ""; }
-    if (flags.crew)       { setBadge(badgeCrew,  "Fetching…", "busy"); metaCrew.textContent  = ""; }
-    if (flags.bha)        { setBadge(badgeBha,   "Fetching…", "busy"); metaBha.textContent   = ""; }
-    if (flags.slideDay)   { setBadge(badgeSlide, "Fetching…", "busy"); metaSlide.textContent = ""; }
+    if (flags.jobDetails) { setBadge(badgeJob,       "Fetching…", "busy"); metaJob.textContent       = ""; }
+    if (flags.crew)       { setBadge(badgeCrew,      "Fetching…", "busy"); metaCrew.textContent      = ""; }
+    if (flags.bha)        { setBadge(badgeBha,       "Fetching…", "busy"); metaBha.textContent       = ""; }
+    if (flags.slideDay)   { setBadge(badgeSlide,     "Fetching…", "busy"); metaSlide.textContent     = ""; }
+    if (flags.inventory)  { setBadge(badgeInventory, "Fetching…", "busy"); metaInventory.textContent = ""; }
 
     showProgress(2, "Connecting to FieldCap OData API…");
 
@@ -388,10 +400,11 @@
         errorProgress();
         setTimeout(hideProgress, 1500);
         showErr(msg.error ?? "Fetch failed. Make sure you are logged into FieldCap.");
-        if (flags.jobDetails) setBadge(badgeJob,   "Error", "err");
-        if (flags.crew)       setBadge(badgeCrew,  "Error", "err");
-        if (flags.bha)        setBadge(badgeBha,   "Error", "err");
-        if (flags.slideDay)   setBadge(badgeSlide, "Error", "err");
+        if (flags.jobDetails) setBadge(badgeJob,       "Error", "err");
+        if (flags.crew)       setBadge(badgeCrew,      "Error", "err");
+        if (flags.bha)        setBadge(badgeBha,       "Error", "err");
+        if (flags.slideDay)   setBadge(badgeSlide,     "Error", "err");
+        if (flags.inventory)  setBadge(badgeInventory, "Error", "err");
         btnFetch.disabled = false;
         btnClear.disabled = false;
         return;
@@ -418,6 +431,16 @@
         } else {
           setBadge(badgeSlide, "0 rows", "warn");
           metaSlide.textContent = "No ActivityLogs found for this job.";
+        }
+      }
+      const inventoryRows = Number(msg.inventoryRows ?? 0);
+      if (flags.inventory) {
+        if (inventoryRows > 0) {
+          setBadge(badgeInventory, `${inventoryRows} rows`, "ok");
+          metaInventory.textContent = `fieldcap-job-${jobId}-inventory.csv`;
+        } else {
+          setBadge(badgeInventory, "0 rows", "warn");
+          metaInventory.textContent = "No JobTools found for this job.";
         }
       }
 
@@ -460,14 +483,16 @@
   // ── Clear ─────────────────────────────────────────────────────────────────
   btnClear.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "CLEAR_CACHE" }, () => {
-      setBadge(badgeJob,   "\u2014", "");
-      setBadge(badgeCrew,  "\u2014", "");
-      setBadge(badgeBha,   "\u2014", "");
-      setBadge(badgeSlide, "\u2014", "");
-      metaJob.textContent   = "";
-      metaCrew.textContent  = "";
-      metaBha.textContent   = "";
-      metaSlide.textContent = "";
+      setBadge(badgeJob,       "\u2014", "");
+      setBadge(badgeCrew,      "\u2014", "");
+      setBadge(badgeBha,       "\u2014", "");
+      setBadge(badgeSlide,     "\u2014", "");
+      setBadge(badgeInventory, "\u2014", "");
+      metaJob.textContent       = "";
+      metaCrew.textContent      = "";
+      metaBha.textContent       = "";
+      metaSlide.textContent     = "";
+      metaInventory.textContent = "";
       hideResult();
       hideProgress();
     });
@@ -499,6 +524,139 @@
         resultText.style.fontSize   = "9px";
         resultText.textContent = lines.join("\n");
         resultMeta.textContent = "Copy these field names to identify correct hour columns";
+      });
+    });
+  }
+
+  // ── Inventory Probe ───────────────────────────────────────────────────────
+  const btnInventoryProbe = document.getElementById("btnInventoryProbe");
+  if (btnInventoryProbe) {
+    btnInventoryProbe.addEventListener("click", () => {
+      btnInventoryProbe.disabled = true;
+      showInfo("Probing inventory endpoints (ItemSerials → Items → JobTools)…");
+
+      chrome.runtime.sendMessage({ type: "PROBE_INVENTORY" }, (res) => {
+        btnInventoryProbe.disabled = false;
+        if (chrome.runtime.lastError) { showErr(chrome.runtime.lastError.message); return; }
+        if (!res?.ok) { showErr(res?.error ?? "Inventory probe failed"); return; }
+
+        const lines = [];
+        for (const r of res.results) {
+          if (!r.ok) {
+            lines.push(`[${r.label}] ✗ ${r.reason}`);
+            continue;
+          }
+          lines.push(`[${r.label}] ✓  ${r.keys.length} fields${r.count != null ? `  ·  ~${r.count} records` : ""}`);
+          if (r.serialNumbers?.length) {
+            lines.push(`  Sample serials: ${r.serialNumbers.join("  |  ")}`);
+          }
+          lines.push(`  All fields: ${r.keys.join("  |  ")}`);
+          if (r.hourKeys.length > 0) {
+            const hourDisplay = r.hourKeys.filter((k) => !/clientsynctime|timestamp/i.test(k));
+            lines.push(`  Hour / metric fields (${hourDisplay.length}): ${hourDisplay.join("  |  ")}`);
+            const nonZero = Object.entries(r.sampleValues).filter(([, v]) => typeof v === "number" && v > 0);
+            const allZero = Object.entries(r.sampleValues).filter(([, v]) => v === 0);
+            if (nonZero.length > 0) {
+              lines.push(`  ✓ Non-zero values found (max across sample rows):`);
+              for (const [k, v] of nonZero) lines.push(`    ${k}: ${v}`);
+            } else if (allZero.length > 0) {
+              lines.push(`  ⚠ All hour fields are 0 on every sampled row`);
+              lines.push(`    → hours may accumulate only after job completion, or`);
+              lines.push(`    → TotalHours1 may map to a specific "hours type" configured per company`);
+              lines.push(`    → try filtering by a known serial number to confirm`);
+            } else {
+              lines.push(`  (hour fields present but all null on sample rows)`);
+            }
+          } else {
+            lines.push(`  ⚠ No hour/metric fields detected — hours may be in a sub-entity`);
+          }
+          lines.push("");
+        }
+
+        resultArea.classList.add("visible");
+        resultText.className = "meta";
+        resultText.style.whiteSpace = "pre-wrap";
+        resultText.style.fontSize   = "9px";
+        resultText.textContent = lines.join("\n");
+        resultMeta.textContent = "Review fields above — share output to plan the full inventory export";
+      });
+    });
+  }
+
+  // ── Network Sniffer ───────────────────────────────────────────────────────
+  const btnSniff      = document.getElementById("btnSniff");
+  const btnSniffLog   = document.getElementById("btnSniffLog");
+  const btnSniffClear = document.getElementById("btnSniffClear");
+
+  const setSniffUI = (active) => {
+    if (!btnSniff) return;
+    btnSniff.textContent = active ? "⏹ Sniffing…" : "📶 Sniff";
+    btnSniff.classList.toggle("btn-sniff-active", active);
+    if (btnSniffLog)   btnSniffLog.style.display   = active ? "inline-block" : "inline-block";
+    if (btnSniffClear) btnSniffClear.style.display = active ? "inline-block" : "inline-block";
+  };
+
+  // Restore sniff state on popup open
+  chrome.runtime.sendMessage({ type: "SNIFF_STATUS" }, (res) => {
+    if (res?.ok) setSniffUI(res.active);
+  });
+
+  if (btnSniff) {
+    btnSniff.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "SNIFF_STATUS" }, (res) => {
+        const wasActive = res?.active ?? false;
+        const nextMsg   = wasActive ? "SNIFF_STOP" : "SNIFF_START";
+        chrome.runtime.sendMessage({ type: nextMsg }, (r2) => {
+          if (chrome.runtime.lastError) { showErr(chrome.runtime.lastError.message); return; }
+          setSniffUI(r2?.active ?? false);
+          if (r2?.active) {
+            showInfo("Sniffing active — browse FieldCap now. Open the Inventory tab, BHAs, etc. Then click Log.");
+          } else {
+            showInfo("Sniffing stopped. Click Log to review captured endpoints.");
+          }
+        });
+      });
+    });
+  }
+
+  if (btnSniffLog) {
+    btnSniffLog.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "SNIFF_GET_LOG" }, (res) => {
+        if (chrome.runtime.lastError) { showErr(chrome.runtime.lastError.message); return; }
+        const log = res?.log ?? [];
+        if (!log.length) { showInfo("Sniff log is empty — start sniffing then browse FieldCap."); return; }
+
+        // Group by entity (first path segment) so inventory-related calls stand out
+        const byEntity = {};
+        for (const entry of log) {
+          const entity = entry.path.split("?")[0].split("(")[0].trim() || "other";
+          (byEntity[entity] = byEntity[entity] ?? []).push(entry);
+        }
+
+        const lines = [`Captured ${log.length} unique OData calls:\n`];
+        for (const [entity, entries] of Object.entries(byEntity)) {
+          lines.push(`── ${entity} (${entries.length}) ──`);
+          for (const e of entries) {
+            const t = e.ts.substring(11, 19);
+            lines.push(`  [${t}] ${e.method}  ${e.path}`);
+          }
+          lines.push("");
+        }
+
+        resultArea.classList.add("visible");
+        resultText.className = "meta";
+        resultText.style.whiteSpace = "pre-wrap";
+        resultText.style.fontSize   = "8.5px";
+        resultText.textContent = lines.join("\n");
+        resultMeta.textContent = "Copy the entity name of interest → share here to build the export";
+      });
+    });
+  }
+
+  if (btnSniffClear) {
+    btnSniffClear.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "SNIFF_CLEAR" }, () => {
+        showInfo("Sniff log cleared.");
       });
     });
   }

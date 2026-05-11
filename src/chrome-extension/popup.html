@@ -273,6 +273,14 @@
       cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase;
     }
     .btn-probe:hover { border-color: var(--accent-line); color: var(--amber-text); }
+    .btn-sniff-active {
+      border-color: #e05252 !important; color: #e05252 !important;
+      animation: sniff-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes sniff-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.45; }
+    }
   </style>
 </head>
 <body>
@@ -329,6 +337,10 @@
         <input id="chkSlide" type="checkbox" checked />
         Slide / Rotate Metres by Day
       </label>
+      <label class="check-row">
+        <input id="chkInventory" type="checkbox" checked />
+        Equipment Inventory (all job tools + hours)
+      </label>
     </div>
 
     <!-- ── Action buttons ──────────────────────────────────────────────────── -->
@@ -383,6 +395,14 @@
         <div class="card-meta" id="metaSlide"></div>
       </div>
 
+      <div class="card" id="cardInventory">
+        <div class="card-header">
+          <span class="card-title">Equipment Inventory</span>
+          <span class="card-badge" id="badgeInventory">&#8212;</span>
+        </div>
+        <div class="card-meta" id="metaInventory"></div>
+      </div>
+
     </div>
 
     <!-- ── Status / error bar ──────────────────────────────────────────────── -->
@@ -395,6 +415,10 @@
 
   <footer>OData API mode &middot; v<span id="extVersion">?</span> &middot; PHX OpenCap
     &ensp;<button class="btn-probe" id="btnProbe" title="Inspect raw ToolAssembly field names returned by the API">&#128269; Schema Probe</button>
+    &ensp;<button class="btn-probe" id="btnInventoryProbe" title="Probe ItemSerials / Items endpoints for full inventory fields">&#128203; Inventory Probe</button>
+    &ensp;<button class="btn-probe" id="btnSniff" title="Toggle network sniffing — captures every OData URL FieldCap calls">&#128246; Sniff</button>
+    &ensp;<button class="btn-probe" id="btnSniffLog" title="Show captured network log">&#128221; Log</button>
+    &ensp;<button class="btn-probe" id="btnSniffClear" title="Clear sniff log">&#10005; Clear Log</button>
     &ensp;<button class="btn-probe" id="btnDebugState" title="Show live/cached capture counts">&#9881; Debug State</button>
   </footer>
   <script src="popup.js"></script>

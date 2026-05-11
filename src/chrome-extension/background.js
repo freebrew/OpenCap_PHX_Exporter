@@ -13,9 +13,52 @@ const KEY_META     = "fieldcap_meta";
 const KEY_CSV_JOB  = "fieldcap_csv_job";
 const KEY_CSV_CREW = "fieldcap_csv_crew";
 const KEY_CSV_BHA  = "fieldcap_csv_bha";
-const KEY_CSV_SLIDE_DAY = "fieldcap_csv_slide_by_day";
+const KEY_CSV_SLIDE_DAY  = "fieldcap_csv_slide_by_day";
+const KEY_CSV_INVENTORY  = "fieldcap_csv_inventory";
 const KEY_INTERCEPT = "fieldcap_intercepted_assemblies"; // keyed by ToolAssemblyId
 const KEY_BHA_GRID = "fieldcap_bha_grid_rows"; // { [jobId]: { [bhaNumber]: canonicalRow } }
+
+const KEY_SNIFF_LOG    = "fieldcap_sniff_log";
+const KEY_SNIFF_ACTIVE = "fieldcap_sniff_active";
+
+// ── Network Sniffer ───────────────────────────────────────────────────────
+// Captures every OData request FieldCap makes so we can discover unknown endpoints.
+let sniffActive = false;
+
+// Restore sniff state on service-worker restart
+chrome.storage.local.get(KEY_SNIFF_ACTIVE, (d) => { sniffActive = !!d[KEY_SNIFF_ACTIVE]; });
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (!sniffActive) return;
+    // Only capture odata calls (ignore static assets, auth pings, etc.)
+    if (!details.url.includes("/odata") && !details.url.includes("/api/")) return;
+
+    chrome.storage.local.get(KEY_SNIFF_LOG, (data) => {
+      const log = data[KEY_SNIFF_LOG] ?? [];
+      // Parse into a readable summary
+      let display = details.url;
+      try {
+        const u = new URL(details.url);
+        display = u.pathname.replace(/^\/odata\//, "") + (u.search || "");
+      } catch (_) {}
+
+      // Deduplicate exact URLs
+      if (log.some((e) => e.url === details.url)) return;
+
+      const entry = {
+        ts:     new Date().toISOString(),
+        method: details.method,
+        url:    details.url,
+        path:   display,
+        tabId:  details.tabId,
+      };
+      log.unshift(entry);
+      chrome.storage.local.set({ [KEY_SNIFF_LOG]: log.slice(0, 200) });
+    });
+  },
+  { urls: ["*://*.phxtech.com/*"] }
+);
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 const csvEscape = (v) => {
@@ -1340,6 +1383,119 @@ const fetchJobTools = async (jobId) => {
   return odataGet(`JobTools?$expand=${expand}&$filter=${filter}`);
 };
 
+// ── Full job inventory (Equipment On Site — all JobTools, not filtered by BHA) ─
+const fetchAllJobInventory = async (jobId) => {
+  // Mirror exactly what FieldCap's Inventory tab calls:
+  // $expand includes ItemSerial so we get TotalHours1-10 on each serial
+  const expand = [
+    "Item",
+    "ItemSerial",
+    "ItemSerial($expand=Item)",
+    "ItemSerial($expand=ParentSerial)",
+    "ItemSerial($expand=ParentSerial($expand=Item))",
+    "ParentJobTool",
+    "ParentJobTool($expand=ItemSerial)",
+    "ParentJobTool($expand=Item)",
+  ].join(",");
+  const filter = encodeURIComponent(
+    `(null eq DeletedBy) and (ClientJobId eq ${jobId}) and (null eq ParentJobToolId)`
+  );
+  return odataGetAll(`JobTools?$expand=${expand}&$filter=${filter}&$orderby=Item/ItemName`);
+};
+
+// TotalHours1-N  = lifetime cumulative minutes (by activity type)
+// TotalHsls1-N   = minutes since last service (by activity type) — the maintenance-relevant metric
+// Only include slots that have at least one non-zero value across the fleet.
+const HOUR_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const HSLS_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+const shippingStatus = (jt) => {
+  if (jt.TransferInDate  && !jt.TransferOutDate) return "On Location";
+  if (jt.TransferOutDate)                        return "Shipped";
+  if (jt.PlannedOutDate)                         return "Planned";
+  return "";
+};
+
+const buildInventoryCsv = (jobTools) => {
+  // ── 1. Deduplicate by ItemSerialId — multiple JobTool records can reference
+  //       the same physical serial (one per category sub-tab in FieldCap UI).
+  const seen   = new Set();
+  const unique = [];
+  for (const jt of jobTools ?? []) {
+    const serial = jt.ItemSerial ?? {};
+    const key    = serial.ItemSerialId ?? jt.ItemSerialId ?? null;
+    // Also skip rows with no identifying info at all (planning placeholders)
+    const hasId  = !!(item_code(jt) || serial.SerialNumber || serial.MnfNumber);
+    if (!hasId) continue;
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    unique.push(jt);
+  }
+
+  // ── 2. Determine which hour/hsls slots actually have data across this fleet
+  const activeHours = new Set();
+  const activeHsls  = new Set();
+  for (const jt of unique) {
+    const s = jt.ItemSerial ?? {};
+    for (const n of HOUR_SLOTS) { if ((s[`TotalHours${n}`] ?? 0) > 0) activeHours.add(n); }
+    for (const n of HSLS_SLOTS) { if ((s[`TotalHsls${n}`]  ?? 0) > 0) activeHsls.add(n);  }
+  }
+  // Rename columns for clarity: Lifetime_* and SinceService_*
+  const hourCols = HOUR_SLOTS.filter((n) => activeHours.has(n)).map((n) => `Lifetime_H${n}`);
+  const hslsCols = HSLS_SLOTS.filter((n) => activeHsls.has(n)).map((n) => `SinceService_H${n}`);
+
+  // FieldCap's UI "hours" = (Hsls1 + Hsls2 + Hsls3) / 60  (slide + rotate + circ only, no standby)
+  // We replicate that as a computed column so the CSV matches what operators see on screen.
+  const hsls123Slots = [1, 2, 3].filter((n) => activeHsls.has(n));
+
+  const cols = [
+    "ItemCode", "ItemName", "SerialNumber", "MnfNumber",
+    "Category", "SubCategory",
+    "ShippingStatus", "TransferInDate", "TransferOutDate", "PlannedOutDate",
+    "HrsSinceService",    // computed: matches FieldCap UI display (Hsls1+2+3 ÷ 60)
+    ...hslsCols,          // raw since-service slots in minutes
+    ...hourCols,          // lifetime totals in minutes
+    "IsActive",
+  ];
+
+  // ── 3. Build rows
+  const rows = [];
+  for (const jt of unique) {
+    const item   = jt.Item       ?? {};
+    const serial = jt.ItemSerial ?? {};
+    const row = {
+      ItemCode:       item.ItemCode   ?? "",
+      ItemName:       item.ItemName   ?? "",
+      SerialNumber:   serial.SerialNumber ?? jt.SerialNumber ?? "",
+      MnfNumber:      serial.MnfNumber    ?? jt.MnfNumber    ?? "",
+      Category:       (jt.Category    ?? "").replace(/\|/g, "").trim(),
+      SubCategory:    jt.SubCategory  ?? "",
+      ShippingStatus: shippingStatus(jt),
+      TransferInDate:  jt.TransferInDate  ? toDateStr(jt.TransferInDate)  : "",
+      TransferOutDate: jt.TransferOutDate ? toDateStr(jt.TransferOutDate) : "",
+      PlannedOutDate:  jt.PlannedOutDate  ? toDateStr(jt.PlannedOutDate)  : "",
+      IsActive:        serial.IsActive ?? "",
+    };
+    // Map renamed columns back to the actual API field names
+    for (let i = 0; i < hslsCols.length; i++) {
+      const slot = HSLS_SLOTS.filter((n) => activeHsls.has(n))[i];
+      row[hslsCols[i]] = serial[`TotalHsls${slot}`] ?? 0;
+    }
+    for (let i = 0; i < hourCols.length; i++) {
+      const slot = HOUR_SLOTS.filter((n) => activeHours.has(n))[i];
+      row[hourCols[i]] = serial[`TotalHours${slot}`] ?? 0;
+    }
+    // Computed column: (Hsls1 + Hsls2 + Hsls3) / 60 — matches FieldCap UI "hours" display
+    const rawMins = hsls123Slots.reduce((sum, n) => sum + (serial[`TotalHsls${n}`] ?? 0), 0);
+    row["HrsSinceService"] = rawMins > 0 ? Number((rawMins / 60).toFixed(2)) : 0;
+    rows.push(row);
+  }
+  return buildCsvString(cols, rows);
+};
+
+// Helper used inside buildInventoryCsv before `item` is in scope
+const item_code = (jt) => jt.Item?.ItemCode ?? jt.ItemCode ?? null;
+
 // ── BHA custom fields (tenant-defined labels such as "SLD METERS") ────────────
 const labelFromToolAssemblyCustomRow = (row) => {
   const cf = row.CustomField ?? row.CustomFieldDefinition ?? row.Field ?? {};
@@ -1770,6 +1926,13 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = [], o
     results.slideByDayRowCount = slideByDayRowCount;
   }
 
+  prog(94, "Inventory…");
+  if (flags.inventory) {
+    const invTools = await fetchAllJobInventory(jobId);
+    results.inventoryCsv      = buildInventoryCsv(invTools);
+    results.inventoryRowCount = (results.inventoryCsv.split("\r\n").length - 1);
+  }
+
   return results;
 };
 
@@ -1780,7 +1943,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (msg) => {
     if (msg.type !== "FETCH_ALL") return;
 
-    const { jobId, flags = { jobDetails: true, crew: true, bha: true } } = msg;
+    const { jobId, flags = { jobDetails: true, crew: true, bha: true, inventory: true } } = msg;
     const send = (obj) => { try { port.postMessage(obj); } catch (_) {} };
 
     if (!jobId) {
@@ -1822,6 +1985,7 @@ chrome.runtime.onConnect.addListener((port) => {
         bhaRows:          results.bhaRowCount           ?? 0,
         bhaCount:         results.bhaCount              ?? 0,
         slideByDayRows:   results.slideByDayRowCount    ?? 0,
+        inventoryRows:    results.inventoryRowCount     ?? 0,
         liveBhaRows:      liveData.bhaRows.length,
         liveActivityRows: liveData.activityRows.length,
         flags,
@@ -1834,6 +1998,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (results.crewCsv)       stored[KEY_CSV_CREW]       = results.crewCsv;
       if (results.bhaCsv)        stored[KEY_CSV_BHA]        = results.bhaCsv;
       if (results.slideByDayCsv) stored[KEY_CSV_SLIDE_DAY]  = results.slideByDayCsv;
+      if (results.inventoryCsv)  stored[KEY_CSV_INVENTORY]  = results.inventoryCsv;
       stored[KEY_META] = meta;
 
       chrome.storage.local.set(stored, () => {
@@ -1915,7 +2080,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ── Download a cached CSV ────────────────────────────────────────────────
   if (message.type === "DOWNLOAD_CSV") {
     const { which, jobId } = message;
-    const keyMap = { job: KEY_CSV_JOB, crew: KEY_CSV_CREW, bha: KEY_CSV_BHA, slideDay: KEY_CSV_SLIDE_DAY };
+    const keyMap = { job: KEY_CSV_JOB, crew: KEY_CSV_CREW, bha: KEY_CSV_BHA, slideDay: KEY_CSV_SLIDE_DAY, inventory: KEY_CSV_INVENTORY };
     const key = keyMap[which];
     if (!key) {
       sendResponse({ ok: false, error: `Unknown CSV type: ${which}` });
@@ -2038,7 +2203,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // ── Clear cached data ─────────────────────────────────────────────────────
   if (message.type === "CLEAR_CACHE") {
     chrome.storage.local.remove(
-      [KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_INTERCEPT, KEY_BHA_GRID],
+      [KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY, KEY_INTERCEPT, KEY_BHA_GRID],
       () => sendResponse({ ok: true })
     );
     return true;
@@ -2065,6 +2230,137 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         );
       })
       .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  // ── Network sniff controls ────────────────────────────────────────────────
+  if (message.type === "SNIFF_START") {
+    sniffActive = true;
+    chrome.storage.local.set({ [KEY_SNIFF_ACTIVE]: true });
+    sendResponse({ ok: true, active: true });
+    return false;
+  }
+
+  if (message.type === "SNIFF_STOP") {
+    sniffActive = false;
+    chrome.storage.local.set({ [KEY_SNIFF_ACTIVE]: false });
+    sendResponse({ ok: true, active: false });
+    return false;
+  }
+
+  if (message.type === "SNIFF_STATUS") {
+    sendResponse({ ok: true, active: sniffActive });
+    return false;
+  }
+
+  if (message.type === "SNIFF_GET_LOG") {
+    chrome.storage.local.get(KEY_SNIFF_LOG, (d) => {
+      sendResponse({ ok: true, log: d[KEY_SNIFF_LOG] ?? [] });
+    });
+    return true;
+  }
+
+  if (message.type === "SNIFF_CLEAR") {
+    chrome.storage.local.remove(KEY_SNIFF_LOG, () => sendResponse({ ok: true }));
+    return true;
+  }
+
+  // ── Inventory probe — explore ItemSerials + fallback paths for full inventory ──
+  if (message.type === "PROBE_INVENTORY") {
+    const attempts = [
+      // Primary: ItemSerials — find a row with actual hours so sample values are real
+      {
+        label: "ItemSerials",
+        path: `ItemSerials?$expand=Item&$top=1&$filter=(TotalHours1 gt 0)&$orderby=TotalHours1 desc`,
+        getKeys: (r) => {
+          const s = Array.isArray(r) ? (r[0] ?? r) : r;
+          const itemKeys = s.Item ? Object.keys(s.Item).map((k) => `Item.${k}`) : [];
+          return [...Object.keys(s).filter((k) => k !== "Item"), ...itemKeys].sort();
+        },
+        countPath: `ItemSerials?$count=true&$top=1`,
+      },
+      // Primary fallback: any row if TotalHours1 filter is unsupported
+      {
+        label: "ItemSerials (unfiltered)",
+        path: `ItemSerials?$expand=Item&$top=5&$orderby=TotalHours1 desc`,
+        getKeys: (r) => {
+          const rows = Array.isArray(r) ? r : [r];
+          const s = rows[0] ?? {};
+          const itemKeys = s.Item ? Object.keys(s.Item).map((k) => `Item.${k}`) : [];
+          return [...Object.keys(s).filter((k) => k !== "Item"), ...itemKeys].sort();
+        },
+        countPath: null,
+      },
+      // Fallback A: Items catalog
+      {
+        label: "Items",
+        path: `Items?$top=1`,
+        getKeys: (r) => Object.keys(Array.isArray(r) ? (r[0] ?? {}) : r).sort(),
+        countPath: `Items?$top=1&$count=true`,
+      },
+      // Fallback B: JobTools without job filter (broad)
+      {
+        label: "JobTools (unfiltered)",
+        path: `JobTools?$expand=Item,ItemSerial&$top=1&$filter=(null eq DeletedBy)`,
+        getKeys: (r) => {
+          const s = Array.isArray(r) ? (r[0] ?? {}) : r;
+          const sub = [];
+          if (s.Item)       Object.keys(s.Item).forEach((k)       => sub.push(`Item.${k}`));
+          if (s.ItemSerial) Object.keys(s.ItemSerial).forEach((k) => sub.push(`ItemSerial.${k}`));
+          return [...Object.keys(s).filter((k) => !["Item","ItemSerial"].includes(k)), ...sub].sort();
+        },
+        countPath: null,
+      },
+    ];
+
+    (async () => {
+      const results = [];
+      for (const attempt of attempts) {
+        try {
+          const raw  = await odataGet(attempt.path);
+          const rows = Array.isArray(raw) ? raw : (raw?.value ?? [raw]);
+          if (!rows.length || !rows[0]) {
+            results.push({ label: attempt.label, ok: false, reason: "empty response" });
+            continue;
+          }
+          const keys = attempt.getKeys(rows);
+          // Identify likely hour / metric fields
+          const hourKeys = keys.filter((k) =>
+            /hour|hrs|hours|drill|total|accum|elapsed|time|metres|meter|depth/i.test(k)
+          );
+          // Try count if available
+          let count = null;
+          if (attempt.countPath) {
+            try {
+              const cr = await odataGet(attempt.countPath);
+              count = cr?.["@odata.count"] ?? (Array.isArray(cr) ? cr.length : null);
+            } catch (_) {}
+          }
+          // For each hour-like key, collect max value across all returned rows
+          // so a tool with real hours surfaces even if row[0] is zero
+          const sampleValues = {};
+          const serialNumbers = [];
+          for (const row of rows) {
+            const sn = row.SerialNumber ?? row.MnfNumber ?? null;
+            if (sn) serialNumbers.push(sn);
+            for (const k of hourKeys.filter((k) => !/clientsynctime|timestamp/i.test(k)).slice(0, 12)) {
+              const parts = k.split(".");
+              const v = parts.length === 2 ? row[parts[0]]?.[parts[1]] : row[k];
+              if (typeof v === "number" && v > 0) {
+                if (!(k in sampleValues) || v > sampleValues[k]) sampleValues[k] = v;
+              } else if (v !== undefined && v !== null && !(k in sampleValues)) {
+                sampleValues[k] = v;
+              }
+            }
+          }
+          results.push({ label: attempt.label, ok: true, keys, hourKeys, sampleValues, count, serialNumbers });
+          break; // stop at first success
+        } catch (err) {
+          results.push({ label: attempt.label, ok: false, reason: err.message });
+        }
+      }
+      sendResponse({ ok: true, results });
+    })().catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 

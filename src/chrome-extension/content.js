@@ -1,4 +1,4 @@
-// FieldCap BHA Equipment Exporter — Content Script v2.5.0
+// FieldCap BHA Equipment Exporter — Content Script v2.5.10
 // Watches the DOM as the user navigates FieldCap and captures:
 //   • BHA summary list   (from the BHAs tab)
 //   • Tools master list  (from the Tools tab)
@@ -37,6 +37,94 @@
   const normalize = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
   const compactKey = (v) => normalize(v).toLowerCase().replace(/[^a-z0-9]/g, "");
   const getCellText = (cell) => normalize(cell.innerText ?? cell.textContent);
+
+  // Daily Activities footer (dark strip): distance totals use R:/S:/T: with decimal
+  // metres; duration columns use H:MM — match only decimal patterns so we do not
+  // confuse R: 3:35 (time) with metres.
+  const parseActivityMetreFooter = (tableEl) => {
+    const text = tableEl.innerText ?? "";
+    const rm = text.match(/\bR:\s*([\d,]+\.\d{2})\b/);
+    const sm = text.match(/\bS:\s*([\d,]+\.\d{2})\b/);
+    const rot = rm ? Number(rm[1].replace(/,/g, "")) : null;
+    const slide = sm ? Number(sm[1].replace(/,/g, "")) : null;
+    return {
+      rot: Number.isFinite(rot) ? rot : null,
+      slide: Number.isFinite(slide) ? slide : null,
+    };
+  };
+
+  const findActivityMetreFooterOnPage = () => {
+    for (const table of document.querySelectorAll("table")) {
+      const ft = parseActivityMetreFooter(table);
+      if (ft.slide != null || ft.rot != null) return ft;
+    }
+    return null;
+  };
+
+  // Per-row BHA from the Activities grid (e.g. "4", "5" on the same day). Page
+  // context (__bha) must NOT override these — otherwise all rows inherit the
+  // last-clicked / route BHA and slide/rotate metres pile onto one assembly.
+  const rowExplicitBha = (row) => {
+    if (!row || typeof row !== "object") return "";
+    for (const [k, v] of Object.entries(row)) {
+      if (String(k).startsWith("__")) continue;
+      const nk = compactKey(k);
+      const looksBhaCol =
+        /^bha\d*$/.test(nk) ||
+        nk === "toolassemblynumber" ||
+        /^toolassembly\d*$/.test(nk) ||
+        nk === "bhano" ||
+        nk === "assemblyno" ||
+        nk === "assemblynumber";
+      if (!looksBhaCol) continue;
+      const m = normalize(String(v ?? "")).match(/^(\d+)/);
+      if (m) return m[1];
+    }
+    return "";
+  };
+
+  const distinctExplicitBhas = (rows) => {
+    const s = new Set();
+    for (const r of rows ?? []) {
+      const b = rowExplicitBha(r);
+      if (b) s.add(b);
+    }
+    return s;
+  };
+
+  const attachActivityBhaContext = (rawRows, ctx) =>
+    rawRows.map((r) => {
+      const explicit = rowExplicitBha(r);
+      if (explicit) {
+        const { __bha, ...rest } = r;
+        return rest;
+      }
+      if (ctx?.bha) return { ...r, __bha: ctx.bha };
+      return r;
+    });
+
+  // Footer R:/S: totals are for the whole visible daily table; only merge them
+  // when a single BHA is represented in the grid — otherwise they double-count
+  // across BHAs or attach the full-day total to ctx.bha only.
+  const buildActivityRowsWithOptionalFooter = (activityRowsRaw, ctx, footerFt) => {
+    const distinct = distinctExplicitBhas(activityRowsRaw);
+    const multiBhaDay = distinct.size >= 2;
+    const footerOk =
+      ctx &&
+      !multiBhaDay &&
+      footerFt &&
+      (footerFt.slide != null || footerFt.rot != null);
+    const footerRow = footerOk
+      ? [{
+          __bha: ctx.bha,
+          __activityFooter: true,
+          __footerSlideMetres: footerFt.slide != null ? String(footerFt.slide) : "",
+          __footerRotateMetres: footerFt.rot != null ? String(footerFt.rot) : "",
+        }]
+      : [];
+    const body = attachActivityBhaContext(activityRowsRaw, ctx);
+    return [...footerRow, ...body];
+  };
 
   // ── Click-memory: remember which BHA row was clicked last ─────────────────
   // FieldCap's "Update Tool Assembly" detail page doesn't show the BHA # in
@@ -170,6 +258,12 @@
         (hasHdr(/^duration$/) || hasHdr(/^course$/))
       ) {
         tableType = "activities";
+      } else if (
+        hasHdr(/course|metre|meter/i) &&
+        hasHdr(/activity|code/i) &&
+        hasHdr(/bha|toolassembly/i)
+      ) {
+        tableType = "activities";
       } else if (hasHdr(/^serial$/) || hasHdr(/^serialnumber$/)) {
         tableType = "components";
       }
@@ -230,8 +324,10 @@
     const tables    = scrapeAllTables();
     const bhaRows   = tables.filter((t) => t.tableType === "bha").flatMap((t) => t.rows);
     const toolRows  = tables.filter((t) => t.tableType === "tools").flatMap((t) => t.rows);
-    const activityRows = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
+    const activityRowsRaw = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
     const ctx       = detectBhaContext();
+    const footerFt  = findActivityMetreFooterOnPage();
+    const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
 
     const componentTables = tables.filter((t) => t.tableType === "components");
     const componentRows   = ctx
@@ -295,8 +391,10 @@
         const tables   = scrapeAllTables();
         const bhaRows  = tables.filter((t) => t.tableType === "bha").flatMap((t) => t.rows);
         const toolRows = tables.filter((t) => t.tableType === "tools").flatMap((t) => t.rows);
-        const activityRows = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
+        const activityRowsRaw = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
         const ctx      = detectBhaContext();
+        const footerFt = findActivityMetreFooterOnPage();
+        const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
         const componentRows = ctx
           ? tables.filter((t) => t.tableType === "components")
                   .flatMap((t) => t.rows.map((r) => ({ ...r, __bha: ctx.bha })))

@@ -825,6 +825,8 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
     Dim cSer As Long: cSer = FindCol(bhaWs, "Serial #")
     Dim cCod As Long: cCod = FindCol(bhaWs, "Item Code")
     Dim cDes As Long: cDes = FindCol(bhaWs, "Description")
+    Dim cMSld As Long: cMSld = FindCol(bhaWs, "BHA Mtrs Slid")
+    Dim cMRot As Long: cMRot = FindCol(bhaWs, "BHA Mtrs Rot")
 
     ' BHA-level values
     Dim section As String: section = SafeStr(bhaWs.Cells(fr, cSec))
@@ -850,8 +852,19 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
     End If
 
     Dim slideFrac As Double
+    Dim slideM As Double
+    Dim rotM As Double
     slideFrac = 0
-    If totHrs > 0 Then slideFrac = sldHrs / totHrs
+    slideM = 0
+    rotM = 0
+    If cMSld > 0 Then slideM = GetNum(bhaWs.Cells(fr, cMSld))
+    If cMRot > 0 Then rotM = GetNum(bhaWs.Cells(fr, cMRot))
+    ' Match FieldCap BHA slide share: metres slid / (slid + rotate metres). Fallback: slid hrs / total hrs.
+    If slideM + rotM > 0 Then
+        slideFrac = slideM / (slideM + rotM)
+    ElseIf totHrs > 0 Then
+        slideFrac = sldHrs / totHrs
+    End If
 
     DrawSummaryIslandFourColumns ws, bhaNum, metres, totHrs, sldHrs, rotHrs, crcHrs, slideFrac, crewCount, _
         section, status, motor, guid, metres, sldHrs, rotHrs, crcHrs, blwHrs, actOn, cmpOn
