@@ -280,6 +280,11 @@ Private Sub BuildSetupUI()
 
     AttachButtons ws
 
+    ' Draw the AC summary skeleton so the column headers are always present
+    ' on the Setup sheet even before any AC PDF has been imported.
+    Dim dEmpty(0) As Double
+    BuildAcTable 0, dEmpty, dEmpty, dEmpty
+
     On Error Resume Next
     If Not Application.ActiveWorkbook Is Nothing Then
         ws.Activate
@@ -339,9 +344,10 @@ End Sub
 ' ================================================================================
 
 Private Sub DrawHeader(ws As Worksheet)
-    ' Extend to col 23 (W) to cover the AC table in columns S-W
-    Const C_FULL As Long = 23
-    With ws.Range(ws.Cells(R_HDR, 1), ws.Cells(R_HDR, C_FULL))
+    ' Left panel (A-R): main workbook title
+    Const C_AC_START As Long = 19  ' col S — AC table left edge
+    Const C_AC_END   As Long = 23  ' col W — AC table right edge
+    With ws.Range(ws.Cells(R_HDR, 1), ws.Cells(R_HDR, C_AC_START - 1))
         .Merge
         .Value              = "  OPENCAP  |  WELL DATABASE & SETUP"
         .Interior.Color     = cTeal()
@@ -352,7 +358,20 @@ Private Sub DrawHeader(ws As Worksheet)
         .VerticalAlignment  = xlVAlignCenter
         .HorizontalAlignment = xlHAlignLeft
     End With
-    With ws.Range(ws.Cells(R_DIV, 1), ws.Cells(R_DIV, C_FULL))
+    ' Right panel (S-W): AC table title lives in the header row
+    With ws.Range(ws.Cells(R_HDR, C_AC_START), ws.Cells(R_HDR, C_AC_END))
+        .Merge
+        .Value              = "  ANTI-COLLISION SUMMARY  |  Separation Factor < 2.0"
+        .Interior.Color     = cTeal()
+        .Font.Color         = RGB(255, 255, 255)
+        .Font.Size          = 9
+        .Font.Bold          = True
+        .Font.Name          = "Consolas"
+        .VerticalAlignment  = xlVAlignCenter
+        .HorizontalAlignment = xlHAlignLeft
+    End With
+    ' Divider spans full width
+    With ws.Range(ws.Cells(R_DIV, 1), ws.Cells(R_DIV, C_AC_END))
         .Interior.Color = cLine()
     End With
 End Sub
@@ -1429,8 +1448,8 @@ Public Sub ImportAntiCollision()
         acWs.Cells(i + 3, 3).Value = aSF(i)
     Next i
 
-    ' Render formatted table in Sheet1
-    BuildAcTable nHits, aRefMD, aBetween, aSF, fPath
+    ' Render formatted table on Setup sheet
+    BuildAcTable nHits, aRefMD, aBetween, aSF
 
     UpdateImportPathDisplay SH_AC
     Application.StatusBar = "AC import complete: " & nHits & " critical separation(s) found (SF < 2.0)."
@@ -1701,9 +1720,10 @@ Private Function ExtractNums(s As String, nums() As Double) As Long
     ExtractNums = n
 End Function
 
-' ---- Build formatted AC results table in Sheet1 ----
+' ---- Build formatted AC results table on Setup sheet (S3) ----
+' srcPath is no longer displayed in the table; headers are permanent.
 Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
-        aBetween() As Double, aSF() As Double, srcPath As String)
+        aBetween() As Double, aSF() As Double)
 
     ' Render the AC summary table on the Setup sheet, anchored at S3.
     Dim ws As Worksheet
@@ -1728,24 +1748,8 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
 
     Dim r As Long: r = BASE_ROW
 
-    ' Section header — same style as CREW MANIFEST, OPENCAP EXPORT FILES, etc.
-    SectionBar ws, r, BASE_COL, BASE_COL + 4, _
-               "  ANTI-COLLISION SUMMARY  |  Separation Factor < 2.0", _
-               cTeal(), RGB(255, 255, 255)
-    r = r + 1
-
-    ' Source path sub-row
-    ws.Rows(r).RowHeight = 13
-    With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4))
-        .Merge
-        .Value = "  Source: " & srcPath
-        .Interior.Color = cBg(): .Font.Color = cDk()
-        .Font.Name = "Consolas": .Font.Size = 7
-        .VerticalAlignment = xlVAlignCenter
-    End With
-    r = r + 1
-
-    ' Column headers
+    ' Permanent column headers — always visible regardless of whether an AC file
+    ' has been imported.  Row height matches the rest of the Setup page headers.
     ws.Rows(r).RowHeight = 18
     Dim hdrs(4) As String
     hdrs(0) = "#": hdrs(1) = "Ref MD (m)": hdrs(2) = "Between Centres (m)"
@@ -1769,9 +1773,9 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
         ws.Rows(r).RowHeight = 20
         With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4))
             .Merge
-            .Value = "  No critical separations found  (all SF >= 2.0)"
-            .Interior.Color = cGrnRow(): .Font.Color = cGrnTxt()
-            .Font.Name = "Consolas": .Font.Size = 9
+            .Value = "  No data  —  use Import AC button to load"
+            .Interior.Color = cBg(): .Font.Color = cDk()
+            .Font.Name = "Consolas": .Font.Size = 8
             .VerticalAlignment = xlVAlignCenter
         End With
         r = r + 1
@@ -1822,8 +1826,8 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
         Next i
     End If
 
-    ' Outer border around header + data rows
-    With ws.Range(ws.Cells(BASE_ROW + 2, BASE_COL), ws.Cells(r - 1, BASE_COL + 4))
+    ' Outer border around column headers + data rows
+    With ws.Range(ws.Cells(BASE_ROW, BASE_COL), ws.Cells(r - 1, BASE_COL + 4))
         .Borders(xlEdgeLeft).LineStyle   = xlContinuous: .Borders(xlEdgeLeft).Color   = cMed()
         .Borders(xlEdgeRight).LineStyle  = xlContinuous: .Borders(xlEdgeRight).Color  = cMed()
         .Borders(xlEdgeBottom).LineStyle = xlContinuous: .Borders(xlEdgeBottom).Color = cMed()
@@ -1858,6 +1862,5 @@ Public Sub DemoAcTable()
     aR(0) = 2604.55: aB(0) = 18.56: aS(0) = 1.634
     aR(1) = 2610.00: aB(1) = 20.81: aS(1) = 1.842
     aR(2) = 2460.00: aB(2) = 18.76: aS(2) = 1.797
-    BuildAcTable nHits, aR, aB, aS, _
-        "D:\Demo Project\34784 I Well\Well Plans\RIDGELINE HZ CLEARWATER I07-12-083-22 P3 AC.pdf (DEMO)"
+    BuildAcTable nHits, aR, aB, aS
 End Sub
