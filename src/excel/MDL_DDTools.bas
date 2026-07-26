@@ -77,8 +77,8 @@ Public Sub InitDDTools()
     Application.EnableEvents = True
 
     MsgBox "DD Tools sheet created." & vbLf & _
-           "Place your three FieldCap CSV exports in the same folder as this workbook," & vbLf & _
-           "then click REFRESH on the sheet.", _
+           "Point the OpenCap Chrome exporter at this workbook folder" & vbLf & _
+           "(CSVs save under OpenCap\), then click REFRESH on the sheet.", _
            vbInformation, "DD Tools Ready"
 End Sub
 
@@ -88,7 +88,7 @@ Public Sub RefreshData()
 
     If wbPath = "" Then
         MsgBox "Save the workbook to a folder first." & vbLf & _
-               "The Refresh button scans the same folder as this file.", _
+               "The Refresh button scans the OpenCap subfolder next to this file.", _
                vbInformation, "DD Tools"
         Exit Sub
     End If
@@ -103,9 +103,13 @@ Public Sub RefreshData()
     If fCrew = "" Then missing = missing & Chr(10) & "  *crew*.csv"
     If fBHA = "" Then missing = missing & Chr(10) & "  *bha-equipment*.csv"
 
+    Dim scanHint As String
+    scanHint = wbPath & Application.PathSeparator & "OpenCap" & vbLf & _
+               "(also checks workbook root for older exports)"
+
     If missing <> "" Then
-        MsgBox "Missing CSV export(s) in:" & Chr(10) & wbPath & Chr(10) & missing & Chr(10) & Chr(10) & _
-               "Export them from the FieldCap Chrome plugin, then click Refresh again.", _
+        MsgBox "Missing CSV export(s) in:" & Chr(10) & scanHint & Chr(10) & missing & Chr(10) & Chr(10) & _
+               "Export them from the OpenCap Chrome plugin, then click Refresh again.", _
                vbExclamation, "DD Tools - Files Not Found"
         Exit Sub
     End If
@@ -289,12 +293,26 @@ Private Sub ImportCSVToSheet(filePath As String, ws As Worksheet)
 End Sub
 
 Private Function FindLatestCsvPathByToken(folderPath As String, token As String) As String
-    FindLatestCsvPathByToken = ""
+    ' Prefer <workbook>\OpenCap\, then fall back to workbook root for older layouts.
+    Dim ocFolder As String
+    ocFolder = folderPath & Application.PathSeparator & "OpenCap"
+    FindLatestCsvPathByToken = FindLatestCsvPathByTokenInFolder(ocFolder, token)
+    If FindLatestCsvPathByToken = "" Then
+        FindLatestCsvPathByToken = FindLatestCsvPathByTokenInFolder(folderPath, token)
+    End If
+End Function
+
+Private Function FindLatestCsvPathByTokenInFolder(folderPath As String, token As String) As String
+    FindLatestCsvPathByTokenInFolder = ""
+    If folderPath = "" Then Exit Function
+
     Dim newestStamp As Date
     newestStamp = 0
 
     Dim fname As String
+    On Error Resume Next
     fname = Dir(folderPath & Application.PathSeparator & "*.csv")
+    On Error GoTo 0
     Do While fname <> ""
         Dim lname As String
         lname = LCase(fname)
@@ -307,7 +325,7 @@ Private Function FindLatestCsvPathByToken(folderPath As String, token As String)
             If Err.Number = 0 Then
                 If stamp >= newestStamp Then
                     newestStamp = stamp
-                    FindLatestCsvPathByToken = full
+                    FindLatestCsvPathByTokenInFolder = full
                 End If
             End If
             Err.Clear

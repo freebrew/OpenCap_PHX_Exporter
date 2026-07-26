@@ -9,7 +9,7 @@ Option Explicit
 '  QUICK START:
 '   1. Alt+F11 > Insert > Module > Import this file
 '   2. Immediate window:  InitSetup
-'   3. Place CSV exports in the same folder as this workbook
+'   3. Point the Chrome exporter at this workbook folder (CSVs land in OpenCap\)
 '   4. Click  REFRESH CSVs  on the Setup sheet
 '
 '  SHEET ARCHITECTURE:
@@ -37,6 +37,9 @@ Private Const TOK_CREW      As String = "crew"
 Private Const TOK_BHA       As String = "bha-equipment"
 Private Const TOK_SLIDE     As String = "slide-rotate"
 Private Const TOK_INVENTORY As String = "inventory"
+
+' Chrome exporter writes CSVs under <workbook>\OpenCap\
+Private Const OPENCAP_SUBDIR As String = "OpenCap"
 
 ' -- Column layout (1-based) ---------------------------------------------------
 '  A(1)       = section accent strip (1.5 wide)
@@ -98,6 +101,9 @@ Public Sub InitSetup()
     If mBusy Then Exit Sub
     mBusy = True
 
+    Dim eN As Long
+    Dim eD As String
+
     Application.ScreenUpdating = False
     Application.EnableEvents   = False
     Application.Calculation    = xlCalculationManual
@@ -131,8 +137,8 @@ Public Sub InitSetup()
     Exit Sub
 
 ErrHandler:
-    Dim eN As Long: eN = Err.Number
-    Dim eD As String: eD = Err.Description
+    eN = Err.Number
+    eD = Err.Description
     Application.Calculation    = xlCalculationAutomatic
     Application.EnableEvents   = True
     Application.ScreenUpdating = True
@@ -146,6 +152,9 @@ End Sub
 Public Sub RefreshSetup()
     If mBusy Then Exit Sub
     mBusy = True
+
+    Dim errNum As Long
+    Dim errMsg As String
 
     Dim wbPath As String: wbPath = ThisWorkbook.Path
     If wbPath = "" Then mBusy = False: Exit Sub
@@ -183,21 +192,24 @@ Public Sub RefreshSetup()
     Exit Sub
 
 ErrHandler:
-    Dim eNum As Long:   eNum = Err.Number
-    Dim eMsg As String: eMsg = Err.Description
+    errNum = Err.Number
+    errMsg = Err.Description
     Application.Calculation    = xlCalculationAutomatic
     Application.EnableEvents   = True
     Application.ScreenUpdating = True
     Application.StatusBar      = False
     mBusy = False
     On Error Resume Next
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "REFRESH ERR " & eNum & ": " & eMsg
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "REFRESH ERR " & errNum & ": " & errMsg
     On Error GoTo 0
 End Sub
 
 Public Sub RebuildSetup()
     If mBusy Then Exit Sub
     mBusy = True
+
+    Dim eR As Long
+    Dim eM As String
 
     Application.ScreenUpdating = False
     Application.EnableEvents   = False
@@ -215,8 +227,8 @@ Public Sub RebuildSetup()
     Exit Sub
 
 ErrHandler:
-    Dim eR As Long: eR = Err.Number
-    Dim eM As String: eM = Err.Description
+    eR = Err.Number
+    eM = Err.Description
     Application.Calculation    = xlCalculationAutomatic
     Application.EnableEvents   = True
     Application.ScreenUpdating = True
@@ -345,8 +357,8 @@ End Sub
 
 Private Sub DrawHeader(ws As Worksheet)
     ' Left panel (A-R): main workbook title
-    Const C_AC_START As Long = 19  ' col S — AC table left edge
-    Const C_AC_END   As Long = 23  ' col W — AC table right edge
+    Const C_AC_START As Long = 19  ' col S -- AC table left edge
+    Const C_AC_END   As Long = 23  ' col W -- AC table right edge
     With ws.Range(ws.Cells(R_HDR, 1), ws.Cells(R_HDR, C_AC_START - 1))
         .Merge
         .Value              = "  OPENCAP  |  WELL DATABASE & SETUP"
@@ -460,7 +472,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     Pair ws, r, "MWD GUIDANCE",   GF(J, "MWDGuidanceType"), _
                  "PIPE ARM",      GF(J, "PipeArm")
     r = r + 1
-    Pair ws, r, "REMOTE SVC",     GF(J, "RemoteServices"), _
+    Pair ws, r, "RIG NAME",        GF(J, "Rig Name", "RigName"), _
                  "LOADER",        GF(J, "Loader")
     r = r + 1
 
@@ -1180,15 +1192,28 @@ Private Sub LoadCsv(filePath As String, shName As String)
 End Sub
 
 Private Function FindCsvByToken(folder As String, token As String) As String
-    FindCsvByToken = ""
+    ' Prefer <workbook>\OpenCap\, then fall back to workbook root for older layouts.
+    Dim ocFolder As String
+    ocFolder = folder & Application.PathSeparator & OPENCAP_SUBDIR
+    FindCsvByToken = FindCsvByTokenInFolder(ocFolder, token)
+    If FindCsvByToken = "" Then FindCsvByToken = FindCsvByTokenInFolder(folder, token)
+End Function
+
+Private Function FindCsvByTokenInFolder(folder As String, token As String) As String
+    FindCsvByTokenInFolder = ""
+    If folder = "" Then Exit Function
+
     Dim newest As Date: newest = 0
-    Dim fn As String: fn = Dir(folder & Application.PathSeparator & "*.csv")
+    Dim fn As String
+    On Error Resume Next
+    fn = Dir(folder & Application.PathSeparator & "*.csv")
+    On Error GoTo 0
     Do While fn <> ""
         If InStr(LCase(fn), LCase(token)) > 0 Then
             Dim fp As String: fp = folder & Application.PathSeparator & fn
             On Error Resume Next
             Dim st As Date: st = FileDateTime(fp)
-            If Err.Number = 0 And st >= newest Then newest = st: FindCsvByToken = fp
+            If Err.Number = 0 And st >= newest Then newest = st: FindCsvByTokenInFolder = fp
             Err.Clear: On Error GoTo 0
         End If
         fn = Dir()
@@ -1630,8 +1655,8 @@ End Function
 '
 ' Pattern A: comma-formatted large MDs  e.g. "2,604.55"  (requires at least one ,\d{3} group)
 ' Pattern B: concatenated BC/BE/SF triplet e.g. "18.567.201.634"
-'            → (\d{1,2})\.(\d{2}) (\d{1,2})\.(\d{2}) (\d)\.(\d{3})
-'            → BC=18.56  BE=7.20  SF=1.634
+'            => (\d{1,2})\.(\d{2}) (\d{1,2})\.(\d{2}) (\d)\.(\d{3})
+'            => BC=18.56  BE=7.20  SF=1.634
 '
 ' The ", SF" guard additionally rejects per-well detail rows that embed
 ' "Level N" in the middle of their data (those rows have no ", SF").
@@ -1643,13 +1668,13 @@ Private Function ParseAcSummary(pdfText As String, _
     Dim nHits As Long: nHits = 0
     Dim i As Long
 
-    ' Pattern A: comma-formatted large measured-depth values (require ≥1 comma group)
+    ' Pattern A: comma-formatted large measured-depth values (require >=1 comma group)
     Dim reMD As Object: Set reMD = CreateObject("VBScript.RegExp")
     reMD.Global = True
     reMD.Pattern = "\d{1,3}(?:,\d{3})+\.\d{2}"
 
     ' Pattern B: the concatenated BetweenCentres / BetweenEllipses / SF triplet.
-    ' "18.567.201.634" → G(0)=18 G(1)=56 G(2)=7 G(3)=20 G(4)=1 G(5)=634
+    ' "18.567.201.634" => G(0)=18 G(1)=56 G(2)=7 G(3)=20 G(4)=1 G(5)=634
     ' Works because the "Level" keyword interrupts the sequence in per-well table rows.
     Dim reTriplet As Object: Set reTriplet = CreateObject("VBScript.RegExp")
     reTriplet.Global = False
@@ -1748,7 +1773,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
 
     Dim r As Long: r = BASE_ROW
 
-    ' Permanent column headers — always visible regardless of whether an AC file
+    ' Permanent column headers -- always visible regardless of whether an AC file
     ' has been imported.  Row height matches the rest of the Setup page headers.
     ws.Rows(r).RowHeight = 18
     Dim hdrs(4) As String
@@ -1773,7 +1798,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
         ws.Rows(r).RowHeight = 20
         With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + 4))
             .Merge
-            .Value = "  No data  —  use Import AC button to load"
+            .Value = "  No data  --  use Import AC button to load"
             .Interior.Color = cBg(): .Font.Color = cDk()
             .Font.Name = "Consolas": .Font.Size = 8
             .VerticalAlignment = xlVAlignCenter
@@ -1788,7 +1813,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, _
             ' Alternating background matches the rest of the Setup page
             Dim rowBg As Long: rowBg = IIf(i Mod 2 = 0, cWh(), cBg())
 
-            ' Risk label and its accent colour (text only — background stays page-themed)
+            ' Risk label and its accent colour (text only -- background stays page-themed)
             Dim risk As String
             Dim riskFg As Long
             Select Case True
@@ -1853,7 +1878,7 @@ End Sub
 '  Call this once after RebuildSetup to show what the AC table looks like.
 ' ================================================================================
 Public Sub DemoAcTable()
-    ' Three critical separations (SF < 2.0) from a P3 AC check — demo data only
+    ' Three critical separations (SF < 2.0) from a P3 AC check -- demo data only
     '   Offset Well H -- Level 4 proximity at 2604.55 m MD
     '   Offset Well J -- Level 5 proximity at 2610.00 m MD  (closest approach)
     '   Offset Well J -- Level 5 proximity at 2460.00 m MD

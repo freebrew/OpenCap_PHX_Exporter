@@ -80,7 +80,7 @@ try {
     Write-Host "  1. Open  $OutPath  in Excel"
     Write-Host "  2. Alt+F11 to confirm modules imported"
     Write-Host "  3. In the Immediate window (Ctrl+G) run:  InitSetup"
-    Write-Host "  4. Copy CSV exports into the same folder as the workbook"
+    Write-Host "  4. Point the OpenCap Chrome exporter at the workbook folder (CSVs → OpenCap\)"
     Write-Host "  5. Click  REFRESH CSVs  on the Setup sheet"
     Write-Host "============================================================"
 

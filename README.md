@@ -3,6 +3,8 @@
 **Chrome Extension + Excel VBA Dashboard**
 *Bridging wellsite data capture, office reporting, and equipment lifecycle tracking.*
 
+**Current Chrome extension revision:** `v3.1.5`
+
 ---
 
 ## Overview
@@ -13,7 +15,7 @@ The system consists of two main components:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Chrome Extension | `src/chrome-extension/` | Extracts job, crew, BHA equipment, and daily slide/rotate metre data from FieldCap via OData API |
+| Chrome Extension | `src/chrome-extension/` | Extracts job, crew, BHA equipment, inventory, and daily slide/rotate metre data from FieldCap via OData API |
 | Excel VBA Module | `src/excel/MDL_DDTools.bas` | Imports exported CSVs and renders an interactive DD Tools dashboard with BHA selectors, hour/meter tracking, and fatigue warnings |
 
 ---
@@ -40,20 +42,23 @@ The system consists of two main components:
 │  ┌──────────────────────────────────────────┐ │                  │
 │  │           popup.js + popup.html          │ │                  │
 │  │  • Job ID input                          │◄┘                  │
-│  │  • 4-checkbox export selector            │                    │
+│  │  • 5-checkbox export selector            │                    │
+│  │  • Bottom Line Verification suppressor   │                    │
 │  │  • Fetch & Build CSVs                    │                    │
-│  │  • File System Access API download       │                    │
+│  │  • File System Access API → OpenCap/     │                    │
 │  │  • Per-export status cards               │                    │
 │  └──────────────────────┬───────────────────┘                    │
 └─────────────────────────┼────────────────────────────────────────┘
-                          │  4 CSV files
+                          │  5 CSV files under OpenCap/
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Local File System                              │
-│  fieldcap-job-{id}-job-details.csv                               │
-│  fieldcap-job-{id}-crew.csv                                      │
-│  fieldcap-job-{id}-bha-equipment.csv                             │
-│  fieldcap-job-{id}-slide-rotate-metres-by-day.csv                │
+│              Local File System (workbook folder)                  │
+│  OpenCap/                                                         │
+│    fieldcap-job-{id}-job-details.csv                             │
+│    fieldcap-job-{id}-crew.csv                                    │
+│    fieldcap-job-{id}-bha-equipment.csv                           │
+│    fieldcap-job-{id}-inventory.csv                               │
+│    fieldcap-job-{id}-slide-rotate-metres-by-day.csv              │
 └─────────────────────────┬────────────────────────────────────────┘
                           │  VBA Refresh import
                           ▼
@@ -73,10 +78,11 @@ The system consists of two main components:
 
 ### What It Does
 
-1. **Fetches** job details, crew schedules, BHA equipment data, and daily slide/rotate metre totals directly from FieldCap's OData API using your active browser session — no separate login needed.
+1. **Fetches** job details, crew schedules, BHA equipment data, full job inventory, and daily slide/rotate metre totals directly from FieldCap's OData API using your active browser session — no separate login needed.
 2. **Intercepts** FieldCap's own internal API calls (XHR/Fetch) to capture hour statistics and metric fields not exposed on the public OData endpoints.
 3. **Scrapes** the visible DOM (BHA grid) to capture real-time component values.
-4. **Generates** 4 clean, properly-typed CSV files ready for Excel or any downstream system.
+4. **Suppresses** the FieldCap "Bottom Line Verification" popup when enabled, auto-dismissing it with the same reminder action available in the site UI.
+5. **Generates** 5 clean, properly-typed CSV files ready for Excel or any downstream system.
 
 ### CSV Outputs
 
@@ -85,7 +91,17 @@ The system consists of two main components:
 | `fieldcap-job-{id}-job-details.csv` | Core job metadata + all custom field key-value pairs |
 | `fieldcap-job-{id}-crew.csv` | One row per crew member with role, contact, dates |
 | `fieldcap-job-{id}-bha-equipment.csv` | One row per BHA component with serial, hours, meters, fatigue data |
+| `fieldcap-job-{id}-inventory.csv` | One row per job tool / inventory item with serial, item, status, dispatch/return, and hour fields where available |
 | `fieldcap-job-{id}-slide-rotate-metres-by-day.csv` | Daily slide and rotate metres per BHA, sourced directly from ActivityLogs |
+
+### FieldCap UI Helper
+
+Version `3.1.5` includes a popup toggle under **FieldCap UI**:
+
+- **Hide Bottom Line Verification popup** — enabled by default.
+- Detects only dialogs containing the "Bottom Line Verification" and bottom-hole measurement text.
+- Clicks the site's own **Remind me in 10 minutes** control when present, then hides the dialog/backdrop as a fallback.
+- The setting is stored locally in `chrome.storage.local` and can be turned off from the extension popup.
 
 ### Slide / Rotate Metres by Day
 
@@ -124,10 +140,12 @@ Job Hours, HSLS, Strapped, Shipping Status, Dispatched On, Returned On
 
 ### Usage Tips
 
-- All 4 export types are selected by default. Uncheck any you don't need before fetching.
-- The popup shows 4 independent status cards — each updates as its data finishes fetching.
+- All 5 export types are selected by default. Uncheck any you don't need before fetching.
+- Choose your Excel workbook folder once — CSVs are written to an `OpenCap` subfolder so the root stays clean.
+- The popup shows independent status cards — each updates as its data finishes fetching.
 - Slide/Rotate Metres by Day requires no special tab to be open; it is fetched entirely via OData.
 - `live bhaRows` and `live activityRows` counts in the status bar reflect DOM-captured data for the BHA equipment CSV.
+- The Bottom Line Verification suppressor is enabled by default and can be disabled under **FieldCap UI**.
 
 ---
 
@@ -149,11 +167,11 @@ Imports the exported CSVs and renders a fully interactive directional drilling d
 1. Open your Excel workbook.
 2. `Alt+F11` → File → Import File → select `src/excel/MDL_DDTools.bas`.
 3. Run macro: `RebuildDashboard` (creates the DD Tools sheet structure).
-4. Click **Refresh** button to import CSVs from the workbook's directory.
+4. Click **Refresh** button to import CSVs from the workbook's `OpenCap` folder.
 
 ### How Refresh Works
 
-- Scans the workbook's directory for CSVs matching `bha-equipment`, `crew`, `job-details`.
+- Scans `<workbook>\OpenCap\` first (then workbook root) for CSVs matching `bha-equipment`, `crew`, `job-details`.
 - Always picks the **newest file** by timestamp when multiple versions exist.
 - Shows a confirmation dialog with filenames and timestamps before importing.
 - Imports to hidden data sheets (`_FC_BHA`, `_FC_CREW`, `_FC_JOB`).
@@ -173,11 +191,11 @@ PHX_FieldCap/
 │
 └── src/
     ├── chrome-extension/
-    │   ├── manifest.json             (Manifest V3, v3.1.1)
+    │   ├── manifest.json             (Manifest V3, v3.1.5)
     │   ├── background.js            (OData fetch, CSV generation, ActivityLog parsing)
-    │   ├── content.js               (DOM scraping, table detection, auto-scrape)
+    │   ├── content.js               (DOM scraping, table detection, auto-scrape, popup suppression)
     │   ├── injected-spy.js          (page-context XHR/Fetch interception)
-    │   ├── popup.html               (extension UI — PHX dark/teal theme, 4-export layout)
+    │   ├── popup.html               (extension UI — PHX dark/teal theme, 5-export layout + UI helper)
     │   ├── popup.js                 (popup logic, File System Access API downloads)
     │   └── icons/
     │       ├── icon16.png
@@ -202,6 +220,29 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### v3.1.5 — OpenCap CSV Subfolder
+- **CSV output folder** — choosing the Excel workbook root now creates/uses an `OpenCap` subfolder; all scraped FieldCap CSVs write there instead of cluttering the root.
+- **Excel Refresh aligned** — Setup and DD Tools scan `<workbook>\OpenCap\` first, with a fallback to the workbook root for older exports.
+- **UI clarity** — folder picker shows `Root / OpenCap` and success messages report the full save path.
+
+### v3.1.4 — Compact Popup Layout
+- **Compact popup UI** — widened the extension popup and reorganized controls/status cards into grids to remove the vertical scrollbar in normal use.
+- **Tighter spacing** — reduced header, folder, checkbox, button, card, and footer padding while keeping the same controls visible.
+
+### v3.1.3 — Popup Suppression Safety Fix
+- **Fixed**: Bottom Line Verification suppression could hide a large FieldCap page container, causing a blank screen when the extension was enabled.
+- **Tightened dialog targeting** — suppression now chooses the smallest safe dialog-like element and rejects page-sized containers.
+- **Version bump policy captured** — Chrome extension runtime fixes must update `manifest.json`, README revision text, and the upload ZIP version.
+
+### v3.1.2 — FieldCap UI Helper + Store Upload Package
+- **New toggle: Hide Bottom Line Verification popup** — auto-dismisses the FieldCap bottom-hole measurement reminder while browsing, with a user-controlled popup setting.
+- **Chrome Web Store-ready package** — extension manifest revision bumped to `3.1.2` for update submission.
+- **Docs refreshed** — project page now reflects the 5-export layout, inventory CSV, and local-only request metadata behavior.
+
+### v3.1.1 — Inventory Export + Diagnostics
+- **New export: Equipment Inventory** — 5th CSV output for all job tools / inventory records with serial, item, status, dispatch/return, and hour fields where available.
+- **Added schema, inventory, sniff, and debug probes** to help discover tenant-specific FieldCap OData fields.
 
 ### v3.0.0 — Major Release
 - **New export: Slide / Rotate Metres by Day** — 4th CSV output sourced directly from the FieldCap `ActivityLogs` OData endpoint, exactly matching the FieldCap Slide Sheet tab.
@@ -239,7 +280,9 @@ PHX_FieldCap/
 
 - The extension operates using your existing FieldCap browser session — no credentials are stored or transmitted externally.
 - All data remains local (browser storage + local CSV files).
-- No telemetry, analytics, or external API calls beyond FieldCap's own OData endpoint.
+- The `webRequest` permission is used only on `phxtech.com` to observe FieldCap OData/API request metadata for the optional probe/sniff diagnostics: URL, method, timestamp, and tab ID.
+- No request bodies are read, blocked, redirected, or modified.
+- No telemetry, analytics, or external API calls beyond FieldCap's own OData/API endpoints.
 
 ---
 

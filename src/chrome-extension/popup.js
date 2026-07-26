@@ -1,7 +1,10 @@
-// OpenCap Data Exporter — Popup v3.1.1
+// OpenCap Data Exporter — Popup v3.1.5
 
 (async () => {
   "use strict";
+
+  // CSVs are written under <selected-root>/OpenCap/ so the workbook root stays clean.
+  const OPENCAP_SUBDIR = "OpenCap";
 
   // ── Version ──────────────────────────────────────────────────────────────
   const vEl = document.getElementById("extVersion");
@@ -19,6 +22,7 @@
   const chkBha       = document.getElementById("chkBha");
   const chkSlide     = document.getElementById("chkSlide");
   const chkInventory = document.getElementById("chkInventory");
+  const chkSuppressBottomLine = document.getElementById("chkSuppressBottomLine");
   const btnFetch = document.getElementById("btnFetch");
   const btnClear = document.getElementById("btnClear");
 
@@ -96,11 +100,18 @@
   } catch (_) {}
 
   // ── Folder picker state ───────────────────────────────────────────────────
+  // dirHandle is the user-selected workbook root. CSVs always go in OpenCap/.
   let dirHandle = null;
+
+  const csvSaveLabel = () =>
+    dirHandle ? `${dirHandle.name}/${OPENCAP_SUBDIR}` : OPENCAP_SUBDIR;
+
+  const getOpenCapDir = async (rootHandle) =>
+    rootHandle.getDirectoryHandle(OPENCAP_SUBDIR, { create: true });
 
   const updateFolderUI = () => {
     if (dirHandle) {
-      folderNameEl.textContent = dirHandle.name;
+      folderNameEl.textContent = `${dirHandle.name} / ${OPENCAP_SUBDIR}`;
       folderNameEl.classList.remove("default");
       btnClearFolder.hidden = false;
     } else {
@@ -192,11 +203,32 @@
   const KEY_CSV_BHA       = "fieldcap_csv_bha";
   const KEY_CSV_SLIDE_DAY = "fieldcap_csv_slide_by_day";
   const KEY_CSV_INVENTORY = "fieldcap_csv_inventory";
+  const KEY_SUPPRESS_BOTTOM_LINE_MODAL = "fieldcap_suppress_bottom_line_modal";
 
   // ── Restore cached CSV state ──────────────────────────────────────────────
   const storedAll = await chrome.storage.local.get([
     KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY,
+    KEY_SUPPRESS_BOTTOM_LINE_MODAL,
   ]);
+
+  if (chkSuppressBottomLine) {
+    chkSuppressBottomLine.checked = storedAll[KEY_SUPPRESS_BOTTOM_LINE_MODAL] !== false;
+    chkSuppressBottomLine.addEventListener("change", async () => {
+      const enabled = chkSuppressBottomLine.checked;
+      await chrome.storage.local.set({ [KEY_SUPPRESS_BOTTOM_LINE_MODAL]: enabled });
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          chrome.tabs.sendMessage(tab.id, { type: "SET_BOTTOM_LINE_SUPPRESSION", enabled }, () => {
+            void chrome.runtime.lastError;
+          });
+        }
+      } catch (_) {}
+      showInfo(enabled
+        ? "Bottom Line Verification popup suppression is on."
+        : "Bottom Line Verification popup suppression is off.");
+    });
+  }
 
   const meta = storedAll[KEY_META];
   if (meta) {
@@ -248,12 +280,15 @@
     if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "readwrite" });
     if (perm !== "granted") throw new Error("Write permission was denied.");
 
+    const openCapDir = await getOpenCapDir(dirHandle);
+    const displayPath = `${csvSaveLabel()}/${filename}`;
+
     const writeOnce = async () => {
-      const fh       = await dirHandle.getFileHandle(filename, { create: true });
+      const fh       = await openCapDir.getFileHandle(filename, { create: true });
       const writable = await fh.createWritable();
       await writable.write(csv);
       await writable.close();
-      return `${dirHandle.name}/${filename}`;
+      return displayPath;
     };
 
     let lastMsg = "";
@@ -266,7 +301,7 @@
         if (/denied|used by another process|being used|lock|busy/i.test(msg))
           throw new Error(`${filename} is open/locked. Close it in Excel and retry.`);
         if (/aborted due to security policy/i.test(msg) && attempt < 3) {
-          if (attempt === 2) { try { await dirHandle.removeEntry(filename); } catch (_) {} }
+          if (attempt === 2) { try { await openCapDir.removeEntry(filename); } catch (_) {} }
           await sleep(350 * attempt);
           continue;
         }
@@ -274,8 +309,9 @@
       }
     }
 
-    await downloadViaChromeDownloads(csv, filename);
-    return `${filename} → Chrome Downloads (folder write blocked by OS policy)`;
+    const fallbackName = `${OPENCAP_SUBDIR}/${filename}`;
+    await downloadViaChromeDownloads(csv, fallbackName);
+    return `${fallbackName} → Chrome Downloads (folder write blocked by OS policy)`;
   };
 
   const saveAllCachedCsvs = async (jobId) => {
@@ -323,6 +359,8 @@
     let perm = await dirHandle.queryPermission({ mode: "readwrite" });
     if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "readwrite" });
     if (perm !== "granted") throw new Error("Write permission was denied for the folder.");
+    // Create OpenCap/ early so permission / policy failures surface before fetch.
+    await getOpenCapDir(dirHandle);
   };
 
   // ── Fetch & Save (single action) ──────────────────────────────────────────
@@ -458,12 +496,12 @@
           errorProgress();
           setTimeout(hideProgress, 2000);
         } else {
-          completeProgress(`Saved ${saved.length} file(s) → ${dirHandle.name}`);
+          completeProgress(`Saved ${saved.length} file(s) → ${csvSaveLabel()}`);
           setTimeout(hideProgress, 2500);
           const liveBha = Number(msg.liveBhaRows ?? 0);
           const liveAct = Number(msg.liveActivityRows ?? 0);
           showOk(
-            `${saved.length} files → ${dirHandle.name}`,
+            `${saved.length} files → ${csvSaveLabel()}`,
             `${new Date().toLocaleString()} · live bhaRows=${liveBha} · activityRows=${liveAct}`
           );
         }

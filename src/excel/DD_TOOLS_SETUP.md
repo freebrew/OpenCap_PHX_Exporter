@@ -22,7 +22,7 @@
 ## Workflow
 
 ### How it finds the files
-The **REFRESH** button scans the same folder as the workbook using `Dir()`.
+The **REFRESH** button scans `<workbook folder>\OpenCap\` first (where the Chrome exporter writes CSVs), then falls back to the workbook root for older layouts.
 It matches CSV filenames by `InStr` (case-insensitive):
 
 | Contains in filename | → Used as |
@@ -32,11 +32,11 @@ It matches CSV filenames by `InStr` (case-insensitive):
 | `crew`               | Crew CSV |
 
 The Chrome plugin names files exactly like `fieldcap-job-20786-bha-equipment.csv` — these match perfectly.
-Just make sure the workbook (`.xlsm`) lives in the **same folder** as the downloaded CSVs.
+Point the exporter at the workbook folder; CSVs land in the `OpenCap` subfolder automatically.
 
 ### Typical session
-1. Export CSVs from the FieldCap Chrome plugin → they land in your configured download folder
-2. Move or save the workbook into that same folder
+1. Save the workbook (`.xlsm`) in its job folder
+2. In the OpenCap Chrome exporter, choose that same folder → CSVs save to `OpenCap\`
 3. Click **REFRESH** — it finds all three files automatically, shows you their names, and asks to confirm
 4. Dashboard rebuilds with one click
 

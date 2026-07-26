@@ -37,6 +37,17 @@
   const normalize = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
   const compactKey = (v) => normalize(v).toLowerCase().replace(/[^a-z0-9]/g, "");
   const getCellText = (cell) => normalize(cell.innerText ?? cell.textContent);
+  const KEY_SUPPRESS_BOTTOM_LINE_MODAL = "fieldcap_suppress_bottom_line_modal";
+  const BOTTOM_LINE_DIALOG_SELECTORS = [
+    "[role='dialog']",
+    "[aria-modal='true']",
+    ".modal-dialog",
+    ".modal-content",
+    ".ui-dialog",
+    ".k-window",
+    ".k-dialog",
+    ".cdk-overlay-pane",
+  ].join(",");
 
   // Daily Activities footer (dark strip): distance totals use R:/S:/T: with decimal
   // metres; duration columns use H:MM — match only decimal patterns so we do not
@@ -59,6 +70,144 @@
       if (ft.slide != null || ft.rot != null) return ft;
     }
     return null;
+  };
+
+  // FieldCap occasionally blocks workflow with a bottom-hole verification modal.
+  // Suppression is intentionally text-gated so unrelated dialogs remain visible.
+  let suppressBottomLineModal = true;
+  const suppressedBottomLineEls = new WeakSet();
+
+  const isBottomLineVerificationText = (text) =>
+    /bottom line verification/i.test(text) &&
+    /bottom hole measurements/i.test(text) &&
+    /\bSD\b/i.test(text) &&
+    /\bTVD\b/i.test(text);
+
+  const elementArea = (el) => {
+    const rect = el.getBoundingClientRect();
+    return Math.max(rect.width, 0) * Math.max(rect.height, 0);
+  };
+
+  const isSafeDialogElement = (el) => {
+    if (!el || el === document.body || el === document.documentElement) return false;
+
+    const text = normalize(el.innerText ?? el.textContent);
+    if (!isBottomLineVerificationText(text)) return false;
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+
+    const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+    const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+    const pageSized = rect.width >= viewportWidth * 0.96 && rect.height >= viewportHeight * 0.85;
+    return !pageSized;
+  };
+
+  const pickSmallestSafeDialog = (candidates) =>
+    [...candidates]
+      .filter(isSafeDialogElement)
+      .sort((a, b) => elementArea(a) - elementArea(b))[0] ?? null;
+
+  const isLikelyBackdrop = (el) => {
+    const rect = el.getBoundingClientRect();
+    const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+    const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+    const text = normalize(el.innerText ?? el.textContent);
+    return text.length < 40 && rect.width >= viewportWidth * 0.6 && rect.height >= viewportHeight * 0.6;
+  };
+
+  const findBottomLineVerificationModal = () => {
+    const directMatch = pickSmallestSafeDialog(document.querySelectorAll(BOTTOM_LINE_DIALOG_SELECTORS));
+    if (directMatch) return directMatch;
+
+    for (const heading of document.querySelectorAll("h1, h2, h3, h4, h5, strong, b")) {
+      const headingText = normalize(heading.innerText ?? heading.textContent);
+      if (!/^Bottom Line Verification$/i.test(headingText)) continue;
+
+      const candidates = [];
+      let el = heading.parentElement;
+      for (let depth = 0; el && depth < 6; depth++) {
+        candidates.push(el);
+        el = el.parentElement;
+      }
+      const ancestorMatch = pickSmallestSafeDialog(candidates);
+      if (ancestorMatch) return ancestorMatch;
+    }
+
+    return null;
+  };
+
+  const hideBottomLineModalElement = (modal) => {
+    modal.setAttribute("data-open-cap-suppressed", "bottom-line-verification");
+    modal.setAttribute("aria-hidden", "true");
+    modal.style.setProperty("display", "none", "important");
+    modal.style.setProperty("visibility", "hidden", "important");
+
+    for (const backdrop of document.querySelectorAll(".modal-backdrop, .cdk-overlay-backdrop, .k-overlay, .MuiBackdrop-root")) {
+      if (!isLikelyBackdrop(backdrop)) continue;
+      backdrop.style.setProperty("display", "none", "important");
+      backdrop.style.setProperty("visibility", "hidden", "important");
+    }
+    document.body.classList.remove("modal-open");
+    document.body.style.removeProperty("overflow");
+  };
+
+  const dismissBottomLineVerificationModal = () => {
+    if (!suppressBottomLineModal) return;
+
+    const modal = findBottomLineVerificationModal();
+    if (!modal || suppressedBottomLineEls.has(modal)) return;
+    suppressedBottomLineEls.add(modal);
+
+    const controls = [...modal.querySelectorAll("button, a, input[type='button'], input[type='submit']")];
+    const remindControl = controls.find((el) =>
+      /remind me in 10 minutes/i.test(normalize(el.innerText ?? el.value ?? el.textContent))
+    );
+
+    if (remindControl) {
+      remindControl.click();
+      setTimeout(() => {
+        if (modal.isConnected) hideBottomLineModalElement(modal);
+      }, 250);
+      return;
+    }
+
+    hideBottomLineModalElement(modal);
+  };
+
+  try {
+    chrome.storage.local.get(KEY_SUPPRESS_BOTTOM_LINE_MODAL, (data) => {
+      suppressBottomLineModal = data[KEY_SUPPRESS_BOTTOM_LINE_MODAL] !== false;
+      dismissBottomLineVerificationModal();
+    });
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes[KEY_SUPPRESS_BOTTOM_LINE_MODAL]) return;
+      suppressBottomLineModal = changes[KEY_SUPPRESS_BOTTOM_LINE_MODAL].newValue !== false;
+      dismissBottomLineVerificationModal();
+    });
+  } catch (_) {}
+
+  const detectRigNameFromPage = () => {
+    // Most tenants render "Rig Name: PD-538" as visible text in Well & Rig.
+    for (const el of document.querySelectorAll("div, span, p, td, th, li, h1, h2, h3, h4, label")) {
+      const text = normalize(el.innerText ?? el.textContent);
+      if (!text) continue;
+      const inline = text.match(/^Rig\s*Name\s*:\s*(.+)$/i);
+      if (inline && inline[1]) return normalize(inline[1]);
+    }
+
+    // Fallback when label/value are split across sibling elements.
+    for (const el of document.querySelectorAll("div, span, p, td, th, label")) {
+      const label = normalize(el.innerText ?? el.textContent);
+      if (!/^Rig\s*Name\s*:?$/i.test(label)) continue;
+      const sib = el.nextElementSibling;
+      if (!sib) continue;
+      const value = normalize(sib.innerText ?? sib.textContent);
+      if (value) return value;
+    }
+
+    return "";
   };
 
   // Per-row BHA from the Activities grid (e.g. "4", "5" on the same day). Page
@@ -328,6 +477,7 @@
     const ctx       = detectBhaContext();
     const footerFt  = findActivityMetreFooterOnPage();
     const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
+    const rigName = detectRigNameFromPage();
 
     const componentTables = tables.filter((t) => t.tableType === "components");
     const componentRows   = ctx
@@ -344,6 +494,7 @@
       bhaRows,
       toolRows,
       activityRows,
+      rigName,
       componentRows,
       bhaContext:    ctx?.bha   ?? null,
       contextSource: ctx?.source ?? null,
@@ -353,6 +504,7 @@
 
   const observer = new MutationObserver(() => {
     if (!isAlive()) { killScript(); return; }
+    dismissBottomLineVerificationModal();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(tryAutoScrape, DEBOUNCE_MS);
   });
@@ -360,6 +512,7 @@
   observer.observe(document.body, { childList: true, subtree: true });
 
   // Initial scrape on page load
+  setTimeout(dismissBottomLineVerificationModal, 500);
   setTimeout(tryAutoScrape, 1500);
 
   // Also re-scan when URL changes (SPA route changes)
@@ -387,6 +540,13 @@
         return false;
       }
 
+      if (message.type === "SET_BOTTOM_LINE_SUPPRESSION") {
+        suppressBottomLineModal = message.enabled !== false;
+        dismissBottomLineVerificationModal();
+        sendResponse({ ok: true, enabled: suppressBottomLineModal });
+        return false;
+      }
+
       if (message.type === "SCRAPE_NOW") {
         const tables   = scrapeAllTables();
         const bhaRows  = tables.filter((t) => t.tableType === "bha").flatMap((t) => t.rows);
@@ -395,6 +555,7 @@
         const ctx      = detectBhaContext();
         const footerFt = findActivityMetreFooterOnPage();
         const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
+        const rigName = detectRigNameFromPage();
         const componentRows = ctx
           ? tables.filter((t) => t.tableType === "components")
                   .flatMap((t) => t.rows.map((r) => ({ ...r, __bha: ctx.bha })))
@@ -403,14 +564,14 @@
         if (bhaRows.length > 0 || toolRows.length > 0 || activityRows.length > 0 || componentRows.length > 0) {
           safeSend({
             type: "AUTO_SCRAPE",
-            bhaRows, toolRows, activityRows, componentRows,
+            bhaRows, toolRows, activityRows, rigName, componentRows,
             bhaContext:    ctx?.bha   ?? null,
             contextSource: ctx?.source ?? null,
             url: location.href,
           });
         }
         sendResponse({
-          ok: true, bhaRows, toolRows, activityRows, componentRows,
+          ok: true, bhaRows, toolRows, activityRows, rigName, componentRows,
           bhaContext: ctx?.bha ?? null, contextSource: ctx?.source ?? null,
         });
         return false;

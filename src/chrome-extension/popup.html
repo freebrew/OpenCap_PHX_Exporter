@@ -37,7 +37,9 @@
       font-size: 12px;
       color: var(--text);
       background: var(--bg);
-      width: 380px;
+      width: 560px;
+      max-height: 600px;
+      overflow: hidden;
       letter-spacing: 0.01em;
     }
 
@@ -45,12 +47,12 @@
     .header {
       background: #141617;
       border-bottom: 2px solid var(--accent);
-      padding: 7px 12px 6px;
+      padding: 5px 10px 4px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
-    .logo { width: 24px; height: 24px; object-fit: contain; }
+    .logo { width: 22px; height: 22px; object-fit: contain; }
     .header-text h1 {
       font-size: 11px; font-weight: 700; color: var(--text);
       text-transform: uppercase; letter-spacing: 0.12em;
@@ -68,13 +70,13 @@
     }
 
     /* ── Body ───────────────────────────────────────────────────────────────── */
-    .body { padding: 7px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
+    .body { padding: 6px 10px 7px; display: flex; flex-direction: column; gap: 5px; }
 
     /* ── Section label ──────────────────────────────────────────────────────── */
     .section-label {
       font-size: 9px; font-weight: 700; color: var(--accent-h);
       text-transform: uppercase; letter-spacing: 0.14em;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
     /* ── Field row ──────────────────────────────────────────────────────────── */
@@ -85,7 +87,7 @@
     input[type="number"],
     input[type="text"] {
       flex: 1; border: 1px solid var(--border-mid);
-      border-radius: 2px; padding: 5px 8px; font-size: 12px;
+      border-radius: 2px; padding: 4px 8px; font-size: 12px;
       font-family: inherit; outline: none;
       background: var(--bg-input); color: var(--text);
     }
@@ -97,10 +99,10 @@
       border: 1px solid var(--border);
       border-left: 3px solid var(--xl-green);
       border-radius: 2px;
-      padding: 7px 10px;
+      padding: 5px 8px;
     }
     .folder-panel-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 3px;
     }
     .xl-badge {
       font-size: 9px; font-weight: 900; letter-spacing: 0.08em;
@@ -123,7 +125,7 @@
     }
     .folder-name.default { color: var(--text-dim); font-style: italic; font-weight: 400; }
     .btn-choose {
-      padding: 6px 12px; border: 1px solid var(--xl-green); border-radius: 2px;
+      padding: 5px 12px; border: 1px solid var(--xl-green); border-radius: 2px;
       font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit;
       background: rgba(30,107,53,0.18); color: var(--xl-green-t);
       text-transform: uppercase; letter-spacing: 0.08em;
@@ -131,7 +133,7 @@
     }
     .btn-choose:hover { background: var(--xl-green); color: var(--text); }
     .btn-clear-folder {
-      padding: 5px 8px; border: 1px solid var(--border-mid); border-radius: 2px;
+      padding: 4px 8px; border: 1px solid var(--border-mid); border-radius: 2px;
       font-size: 10px; cursor: pointer; font-family: inherit;
       background: transparent; color: var(--text-sec);
       transition: border-color .15s, color .15s; flex-shrink: 0;
@@ -139,20 +141,43 @@
     .btn-clear-folder:hover { border-color: var(--red-text); color: var(--red-text); }
 
     /* ── Checkboxes ─────────────────────────────────────────────────────────── */
+    .checks-grid {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 6px;
+      align-items: stretch;
+    }
     .checks {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-left: 2px solid var(--accent-line);
       border-radius: 2px;
-      padding: 6px 10px;
+      padding: 5px 8px;
       display: flex; flex-direction: column; gap: 4px;
     }
-    .check-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
-    .check-row input[type="checkbox"] { accent-color: var(--accent-h); width: 13px; height: 13px; }
+    .checks-include {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 10px;
+      row-gap: 3px;
+      align-content: start;
+    }
+    .checks-include .section-label {
+      grid-column: 1 / -1;
+    }
+    .check-row { display: flex; align-items: center; gap: 7px; font-size: 11px; min-width: 0; }
+    .check-row input[type="checkbox"] { accent-color: var(--accent-h); width: 12px; height: 12px; flex-shrink: 0; }
+    .setting-hint {
+      font-size: 9px;
+      color: var(--text-dim);
+      line-height: 1.25;
+      letter-spacing: 0.04em;
+      padding-left: 19px;
+    }
 
     /* ── Action buttons ─────────────────────────────────────────────────────── */
     .btn {
-      flex: 1; padding: 7px 10px; border: none; border-radius: 2px;
+      flex: 1; padding: 6px 10px; border: none; border-radius: 2px;
       font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
       text-transform: uppercase; letter-spacing: 0.1em;
       transition: background .15s, opacity .15s;
@@ -177,7 +202,7 @@
       border: 1px solid var(--border);
       border-left: 2px solid var(--accent-line);
       border-radius: 2px;
-      padding: 8px 10px;
+      padding: 6px 8px;
     }
     .progress-wrap.visible { display: flex; }
     .progress-header {
@@ -210,13 +235,18 @@
     .progress-fill.error    { background: var(--red-text);   box-shadow: none; transition: none; }
 
     /* ── Data cards ─────────────────────────────────────────────────────────── */
-    .cards { display: flex; flex-direction: column; gap: 4px; }
+    .cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+    }
 
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 2px;
-      padding: 5px 10px;
+      padding: 4px 8px;
+      min-width: 0;
     }
     .card-header {
       display: flex; align-items: center;
@@ -239,7 +269,15 @@
 
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-    .card-meta { font-size: 9px; color: var(--text-sec); margin-top: 3px; letter-spacing: 0.04em; }
+    .card-meta {
+      font-size: 9px;
+      color: var(--text-sec);
+      margin-top: 2px;
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
     /* ── Divider ────────────────────────────────────────────────────────────── */
     .hud-divider {
@@ -262,14 +300,14 @@
     footer {
       border-top: 1px solid var(--border);
       background: #141617;
-      padding: 3px 12px;
+      padding: 2px 10px;
       font-size: 9px; color: var(--text-dim);
       text-align: center; letter-spacing: 0.08em; text-transform: uppercase;
-      display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
+      display: flex; align-items: center; justify-content: center; gap: 5px; flex-wrap: wrap;
     }
     .btn-probe {
       background: transparent; border: 1px solid var(--border-mid);
-      color: var(--text-dim); font-size: 9px; padding: 2px 6px; border-radius: 3px;
+      color: var(--text-dim); font-size: 8px; padding: 1px 5px; border-radius: 3px;
       cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase;
     }
     .btn-probe:hover { border-color: var(--accent-line); color: var(--amber-text); }
@@ -308,7 +346,7 @@
     <div class="folder-panel">
       <div class="folder-panel-header">
         <span class="xl-badge">XL</span>
-        <span class="folder-hint">Point to your Excel workbook folder</span>
+        <span class="folder-hint">Workbook folder — CSVs save to OpenCap/</span>
       </div>
       <div class="folder-row">
         <span class="folder-icon">&#128193;</span>
@@ -318,29 +356,41 @@
       </div>
     </div>
 
-    <!-- ── What to fetch ───────────────────────────────────────────────────── -->
-    <div class="checks">
-      <div class="section-label">Include</div>
-      <label class="check-row">
-        <input id="chkJob"  type="checkbox" checked />
-        Job Details &amp; Well Info
-      </label>
-      <label class="check-row">
-        <input id="chkCrew" type="checkbox" checked />
-        Crew / Personnel
-      </label>
-      <label class="check-row">
-        <input id="chkBha"  type="checkbox" checked />
-        BHA Equipment
-      </label>
-      <label class="check-row">
-        <input id="chkSlide" type="checkbox" checked />
-        Slide / Rotate Metres by Day
-      </label>
-      <label class="check-row">
-        <input id="chkInventory" type="checkbox" checked />
-        Equipment Inventory (all job tools + hours)
-      </label>
+    <div class="checks-grid">
+      <!-- ── FieldCap page helpers ─────────────────────────────────────────── -->
+      <div class="checks">
+        <div class="section-label">FieldCap UI</div>
+        <label class="check-row">
+          <input id="chkSuppressBottomLine" type="checkbox" checked />
+          Hide Bottom Line Verification popup
+        </label>
+        <div class="setting-hint">Auto-dismisses the bottom-hole measurement reminder while browsing FieldCap.</div>
+      </div>
+
+      <!-- ── What to fetch ─────────────────────────────────────────────────── -->
+      <div class="checks checks-include">
+        <div class="section-label">Include</div>
+        <label class="check-row">
+          <input id="chkJob"  type="checkbox" checked />
+          Job Details &amp; Well Info
+        </label>
+        <label class="check-row">
+          <input id="chkCrew" type="checkbox" checked />
+          Crew / Personnel
+        </label>
+        <label class="check-row">
+          <input id="chkBha"  type="checkbox" checked />
+          BHA Equipment
+        </label>
+        <label class="check-row">
+          <input id="chkSlide" type="checkbox" checked />
+          Slide / Rotate Metres by Day
+        </label>
+        <label class="check-row">
+          <input id="chkInventory" type="checkbox" checked />
+          Equipment Inventory (all job tools + hours)
+        </label>
+      </div>
     </div>
 
     <!-- ── Action buttons ──────────────────────────────────────────────────── -->

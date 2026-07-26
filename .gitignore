@@ -30,3 +30,8 @@ logs/
 # Temp
 *.tmp
 ~$*
+
+# Generated / local-only
+graphify-out/
+EA9D8C10
+start_litellm_BYOK.ps1

@@ -1,0 +1,15 @@
+---
+description: Keep Chrome extension releases visibly versioned
+globs: src/chrome-extension/**
+alwaysApply: false
+---
+
+# Chrome Extension Versioning
+
+When changing Chrome extension runtime behavior, permissions, popup UI, content scripts, or background scripts:
+
+- Bump `src/chrome-extension/manifest.json` before building or packaging.
+- Update the current revision and changelog in `README.md`.
+- Name the Chrome Web Store ZIP with the same version, e.g. `dist/OpenCap_DataExporter_v3.1.3.zip`.
+- Rebuild the upload ZIP after the version bump so the packaged manifest matches the file name.
+

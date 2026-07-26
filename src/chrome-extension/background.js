@@ -17,6 +17,7 @@ const KEY_CSV_SLIDE_DAY  = "fieldcap_csv_slide_by_day";
 const KEY_CSV_INVENTORY  = "fieldcap_csv_inventory";
 const KEY_INTERCEPT = "fieldcap_intercepted_assemblies"; // keyed by ToolAssemblyId
 const KEY_BHA_GRID = "fieldcap_bha_grid_rows"; // { [jobId]: { [bhaNumber]: canonicalRow } }
+const KEY_JOB_RIG  = "fieldcap_job_rig_name"; // { [jobId]: "PD-538" }
 
 const KEY_SNIFF_LOG    = "fieldcap_sniff_log";
 const KEY_SNIFF_ACTIVE = "fieldcap_sniff_active";
@@ -488,8 +489,45 @@ const toCanonicalBhaGridRow = (row) => {
 };
 
 const jobIdFromUrl = (url) => {
-  const m = String(url ?? "").match(/\/Jobs\/(\d+)\b/i);
-  return m?.[1] ?? "";
+  const raw = String(url ?? "");
+  const fromRoute = raw.match(/\/Jobs\/(\d+)\b/i)?.[1];
+  if (fromRoute) return fromRoute;
+  try {
+    const u = new URL(raw);
+    const q = decodeURIComponent(u.search || "");
+    return q.match(/ClientJobId\s+eq\s+(\d+)/i)?.[1] ?? "";
+  } catch (_) {
+    return raw.match(/ClientJobId\s+eq\s+(\d+)/i)?.[1] ?? "";
+  }
+};
+
+const extractRigNameFromIntercept = (data) => {
+  const looksLikeRigName = (key, value, parentKey = "") => {
+    if (typeof value !== "string") return "";
+    const s = value.trim();
+    if (!s) return "";
+    const k = String(key ?? "").toLowerCase();
+    const p = String(parentKey ?? "").toLowerCase();
+    if (k === "rigname") return s;
+    if ((k === "rignumber" || k === "rigno" || k === "rig") && /[a-z]/i.test(s)) return s;
+    if ((k === "name" || k === "code") && /rig/.test(p) && /[a-z]/i.test(s)) return s;
+    return "";
+  };
+
+  const objects = collectObjectsDeep(data);
+  for (const obj of objects) {
+    if (!obj || typeof obj !== "object") continue;
+    for (const [k, v] of Object.entries(obj)) {
+      const hit = looksLikeRigName(k, v);
+      if (hit) return hit;
+      if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+      for (const [k2, v2] of Object.entries(v)) {
+        const nested = looksLikeRigName(k2, v2, k);
+        if (nested) return nested;
+      }
+    }
+  }
+  return "";
 };
 
 const toBhaGridMap = (rows) => {
@@ -699,23 +737,25 @@ const scrapeFromTab = async (tabId) => new Promise((resolve) => {
       return resolve({
         bhaRows: Array.isArray(res?.bhaRows) ? res.bhaRows : [],
         activityRows: Array.isArray(res?.activityRows) ? res.activityRows : [],
+        rigName: String(res?.rigName ?? "").trim(),
       });
     }
 
     // If the content script is not attached yet, inject and retry once.
     if (!/receiving end does not exist|could not establish connection/i.test(firstErr)) {
-      return resolve({ bhaRows: [], activityRows: [] });
+      return resolve({ bhaRows: [], activityRows: [], rigName: "" });
     }
-    if (!chrome.scripting?.executeScript) return resolve({ bhaRows: [], activityRows: [] });
+    if (!chrome.scripting?.executeScript) return resolve({ bhaRows: [], activityRows: [], rigName: "" });
 
     chrome.scripting.executeScript(
       { target: { tabId }, files: ["content.js"] },
       () => {
         chrome.tabs.sendMessage(tabId, { type: "SCRAPE_NOW" }, (res2) => {
-          if (chrome.runtime.lastError) return resolve({ bhaRows: [], activityRows: [] });
+          if (chrome.runtime.lastError) return resolve({ bhaRows: [], activityRows: [], rigName: "" });
           resolve({
             bhaRows: Array.isArray(res2?.bhaRows) ? res2.bhaRows : [],
             activityRows: Array.isArray(res2?.activityRows) ? res2.activityRows : [],
+            rigName: String(res2?.rigName ?? "").trim(),
           });
         });
       }
@@ -725,9 +765,9 @@ const scrapeFromTab = async (tabId) => new Promise((resolve) => {
 
 const scrapeNowFromFieldCapTabs = async (jobId) => {
   const tabs = await chrome.tabs.query({ url: ["*://*.phxtech.com/*"] });
-  if (!tabs?.length) return { bhaRows: [], activityRows: [] };
+  if (!tabs?.length) return { bhaRows: [], activityRows: [], rigName: "" };
   const fieldcapTabs = tabs.filter((t) => /fieldcap/i.test(String(t.url ?? "")));
-  if (!fieldcapTabs.length) return { bhaRows: [], activityRows: [] };
+  if (!fieldcapTabs.length) return { bhaRows: [], activityRows: [], rigName: "" };
 
   const results = await Promise.all(
     fieldcapTabs
@@ -745,9 +785,11 @@ const scrapeNowFromFieldCapTabs = async (jobId) => {
   const source = forJob.length ? forJob : results;
   const best = source.sort((a, b) => b.bhaRows.length - a.bhaRows.length)[0];
   const activityRows = source.flatMap((r) => r.activityRows ?? []);
+  const rigName = (forJob.length ? forJob : results).map((r) => String(r.rigName ?? "").trim()).find(Boolean) ?? "";
   return {
     bhaRows: best?.bhaRows ?? [],
     activityRows,
+    rigName,
   };
 };
 
@@ -1278,10 +1320,22 @@ const fetchJobDetails = async (jobId) => {
   const filter = encodeURIComponent(
     `(ClientJobId eq ${jobId}) and (null eq DeletedBy)`
   );
-  const rows = await odataGet(
-    `ClientJobs?$expand=Client,JobStatus&$filter=${filter}&$top=1`
-  );
-  return rows[0] ?? null;
+  // Mirror FieldCap's own expand (Area/Site/District/Division contain rig data).
+  // Also try Site($expand=Rig) in case the rig is nested under the site.
+  const expandAttempts = [
+    "Client,JobStatus,Area,Site($expand=Rig),District,Division",
+    "Client,JobStatus,Area,Site,District,Division",
+    "Client,JobStatus",
+  ];
+  for (const expand of expandAttempts) {
+    try {
+      const rows = await odataGet(
+        `ClientJobs?$expand=${encodeURIComponent(expand)}&$filter=${filter}&$top=1`
+      );
+      if (rows[0]) return rows[0];
+    } catch (_) {}
+  }
+  return null;
 };
 
 // ── Job Details — custom key-value pairs ──────────────────────────────────────
@@ -1575,8 +1629,23 @@ const fetchToolAssemblyCustomValuesForJob = async (assemblies) => {
 //   • Core named fields from ClientJobs (always present, labeled clearly)
 //   • Custom key-value pairs from ClientJobCustomValues (tenant-configured labels)
 // Column order: core fields first, then custom fields in the order they arrive.
-const normalizeJobDetails = (j, customValues) => {
+const normalizeJobDetails = (j, customValues, rigNameHint = "") => {
   if (!j) return {};
+
+  // Rig Name: FieldCap's own app uses $expand=Area,Site,District,Division —
+  // there is no separate Rigs entity queried. Probe every sub-object and direct
+  // field using || so empty strings are also skipped.
+  const pickStr = (obj) => (obj && typeof obj === "object")
+    ? (obj.RigName || obj.RigNumber || obj.Name || obj.SiteName || obj.AreaName || obj.Code || "")
+    : "";
+  const rigName = rigNameHint
+               || pickStr(j.Site?.Rig)    // Site → nested Rig entity
+               || pickStr(j.Site)          // Site itself may carry the rig name
+               || pickStr(j.Area?.Rig)    // Area → nested Rig entity
+               || pickStr(j.Area)          // Area itself
+               || pickStr(j.District)      // District (less likely but try)
+               || pickStr(j.Division)      // Division (less likely but try)
+               || j.RigName || j.RigNumber || "";
 
   const row = {
     "Job ID":             j.ClientJobId ?? "",
@@ -1597,6 +1666,7 @@ const normalizeJobDetails = (j, customValues) => {
     "End Date":           j.EndDate      ? toDateStr(j.EndDate)           : "",
     "Planned Start Date": j.PlannedStartDate ? toDateStr(j.PlannedStartDate) : "",
     "Planned End Date":   j.PlannedEndDate   ? toDateStr(j.PlannedEndDate)   : "",
+    "Rig Name":           rigName,
   };
 
   // Merge custom fields — KeyName becomes the column header, Value is the cell
@@ -1611,8 +1681,8 @@ const normalizeJobDetails = (j, customValues) => {
 };
 
 // ── Build Job Details CSV ─────────────────────────────────────────────────────
-const buildJobDetailsCsv = (jobDetails, customValues) => {
-  const row = normalizeJobDetails(jobDetails, customValues);
+const buildJobDetailsCsv = (jobDetails, customValues, rigNameHint = "") => {
+  const row = normalizeJobDetails(jobDetails, customValues, rigNameHint);
   const columns = Object.keys(row);
   return buildCsvString(columns, [row]);
 };
@@ -1849,17 +1919,19 @@ const buildBhaCsv = (
 };
 
 // ── Main fetch orchestrator ───────────────────────────────────────────────────
-const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = [], onProgress = null) => {
+const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = [], liveRigName = "", onProgress = null) => {
   const prog = (pct, label) => { try { onProgress?.(pct, label); } catch (_) {} };
   const results = {};
 
   prog(10, "Job details…");
   if (flags.jobDetails) {
-    const [raw, customValues] = await Promise.all([
+    const [raw, customValues, storedRig] = await Promise.all([
       fetchJobDetails(jobId),
       fetchJobCustomValues(jobId),
+      new Promise((res) => chrome.storage.local.get([KEY_JOB_RIG], res)),
     ]);
-    results.jobDetailsCsv = buildJobDetailsCsv(raw, customValues);
+    const rigHint = String(liveRigName || (storedRig[KEY_JOB_RIG] ?? {})[String(jobId)] || "");
+    results.jobDetailsCsv = buildJobDetailsCsv(raw, customValues, rigHint);
   }
 
   prog(28, "Crew / Personnel…");
@@ -1953,7 +2025,9 @@ chrome.runtime.onConnect.addListener((port) => {
 
     try {
       send({ type: "PROGRESS", pct: 3, label: "Scraping live data…" });
-      let liveData = flags.bha ? await scrapeNowFromFieldCapTabs(jobId) : { bhaRows: [], activityRows: [] };
+      let liveData = (flags.bha || flags.jobDetails)
+        ? await scrapeNowFromFieldCapTabs(jobId)
+        : { bhaRows: [], activityRows: [], rigName: "" };
       if (flags.bha && liveData.bhaRows.length === 0) {
         await sleep(1200);
         liveData = await scrapeNowFromFieldCapTabs(jobId);
@@ -1974,7 +2048,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
       const results = await fetchAll(
         jobId, flags,
-        liveData.bhaRows, liveData.activityRows,
+        liveData.bhaRows, liveData.activityRows, liveData.rigName,
         (pct, label) => send({ type: "PROGRESS", pct, label })
       );
 
@@ -2027,7 +2101,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     (async () => {
-      let liveData = flags.bha ? await scrapeNowFromFieldCapTabs(jobId) : { bhaRows: [], activityRows: [] };
+      let liveData = (flags.bha || flags.jobDetails)
+        ? await scrapeNowFromFieldCapTabs(jobId)
+        : { bhaRows: [], activityRows: [], rigName: "" };
       if (flags.bha && liveData.bhaRows.length === 0) {
         // FieldCap is an SPA; tables can render shortly after initial request.
         await sleep(1200);
@@ -2047,7 +2123,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       }
 
-      const results = await fetchAll(jobId, flags, liveData.bhaRows, liveData.activityRows);
+      const results = await fetchAll(jobId, flags, liveData.bhaRows, liveData.activityRows, liveData.rigName);
         const meta = {
           jobId,
           builtAt:      new Date().toISOString(),
@@ -2127,12 +2203,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (objects.length === 0) { sendResponse({ ok: true }); return false; }
     const jobId = jobIdFromUrl(url);
 
-    chrome.storage.local.get([KEY_INTERCEPT, KEY_BHA_GRID], (stored) => {
+    chrome.storage.local.get([KEY_INTERCEPT, KEY_BHA_GRID, KEY_JOB_RIG], (stored) => {
       const cacheById = stored[KEY_INTERCEPT] ?? {};
       const gridByJob = stored[KEY_BHA_GRID] ?? {};
+      const rigByJob  = stored[KEY_JOB_RIG] ?? {};
       const jobMap = jobId ? (gridByJob[jobId] ?? {}) : {};
       let changedId = false;
       let changedGrid = false;
+      let changedRig = false;
       let captured = 0;
 
       for (const obj of objects) {
@@ -2150,30 +2228,42 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (changedGrid && jobId) gridByJob[jobId] = jobMap;
+      if (jobId && /\/odata\/ClientJobs\?/i.test(url)) {
+        const rig = extractRigNameFromIntercept(data);
+        if (rig) {
+          rigByJob[jobId] = rig;
+          changedRig = true;
+        }
+      }
 
       const setObj = {};
       if (changedId) setObj[KEY_INTERCEPT] = cacheById;
       if (changedGrid) setObj[KEY_BHA_GRID] = gridByJob;
+      if (changedRig) setObj[KEY_JOB_RIG] = rigByJob;
 
       if (Object.keys(setObj).length > 0) chrome.storage.local.set(setObj);
-      sendResponse({ ok: true, captured, byId: changedId, byGrid: changedGrid });
+      sendResponse({ ok: true, captured, byId: changedId, byGrid: changedGrid, rig: changedRig ? rigByJob[jobId] : "" });
     });
     return true;
   }
 
   // ── Cache BHA grid rows from content AUTO_SCRAPE ──────────────────────────
   if (message.type === "AUTO_SCRAPE") {
-    const { bhaRows = [], activityRows = [], url = "" } = message;
+    const { bhaRows = [], activityRows = [], rigName = "", url = "" } = message;
     const jobId = jobIdFromUrl(url);
-    if (!jobId || ((!Array.isArray(bhaRows) || bhaRows.length === 0) && (!Array.isArray(activityRows) || activityRows.length === 0))) {
+    const hasGridData = (Array.isArray(bhaRows) && bhaRows.length > 0) || (Array.isArray(activityRows) && activityRows.length > 0);
+    const hasRig = String(rigName ?? "").trim() !== "";
+    if (!jobId || (!hasGridData && !hasRig)) {
       sendResponse({ ok: true });
       return false;
     }
 
-    chrome.storage.local.get([KEY_BHA_GRID], (stored) => {
+    chrome.storage.local.get([KEY_BHA_GRID, KEY_JOB_RIG], (stored) => {
       const byJob = stored[KEY_BHA_GRID] ?? {};
+      const rigByJob = stored[KEY_JOB_RIG] ?? {};
       const jobMap = byJob[jobId] ?? {};
       let changed = false;
+      let changedRig = false;
 
       for (const rawRow of bhaRows) {
         const c = toCanonicalBhaGridRow(rawRow);
@@ -2190,11 +2280,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       if (changed) {
         byJob[jobId] = jobMap;
-        chrome.storage.local.set({ [KEY_BHA_GRID]: byJob }, () =>
+        const setObj = { [KEY_BHA_GRID]: byJob };
+        if (hasRig) {
+          rigByJob[jobId] = String(rigName).trim();
+          setObj[KEY_JOB_RIG] = rigByJob;
+          changedRig = true;
+        }
+        chrome.storage.local.set(setObj, () =>
           sendResponse({ ok: true, cachedBhaRows: Object.keys(jobMap).length })
         );
       } else {
-        sendResponse({ ok: true, cachedBhaRows: Object.keys(jobMap).length });
+        if (hasRig) {
+          rigByJob[jobId] = String(rigName).trim();
+          chrome.storage.local.set({ [KEY_JOB_RIG]: rigByJob }, () =>
+            sendResponse({ ok: true, cachedBhaRows: Object.keys(jobMap).length, rig: rigByJob[jobId] })
+          );
+          changedRig = true;
+        }
+        if (!changedRig) sendResponse({ ok: true, cachedBhaRows: Object.keys(jobMap).length });
       }
     });
     return true;
@@ -2203,7 +2306,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // ── Clear cached data ─────────────────────────────────────────────────────
   if (message.type === "CLEAR_CACHE") {
     chrome.storage.local.remove(
-      [KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY, KEY_INTERCEPT, KEY_BHA_GRID],
+      [KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY, KEY_INTERCEPT, KEY_BHA_GRID, KEY_JOB_RIG],
       () => sendResponse({ ok: true })
     );
     return true;

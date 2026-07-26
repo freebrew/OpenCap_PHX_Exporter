@@ -1,5 +1,10 @@
 {
+  "scripts": {
+    "render:store-assets": "powershell -ExecutionPolicy Bypass -File remotion/render-assets.ps1"
+  },
   "dependencies": {
-    "graphify": "^1.0.0"
+    "@remotion/cli": "^4.0.468",
+    "graphify": "^1.0.0",
+    "remotion": "^4.0.468"
   }
 }
