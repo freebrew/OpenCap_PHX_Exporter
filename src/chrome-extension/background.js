@@ -15,6 +15,8 @@ const KEY_CSV_CREW = "fieldcap_csv_crew";
 const KEY_CSV_BHA  = "fieldcap_csv_bha";
 const KEY_CSV_SLIDE_DAY  = "fieldcap_csv_slide_by_day";
 const KEY_CSV_INVENTORY  = "fieldcap_csv_inventory";
+const KEY_CSV_TICKET_COSTS = "fieldcap_csv_ticket_costs";
+const KEY_TICKET_ENTITY = "fieldcap_ticket_entity";
 const KEY_INTERCEPT = "fieldcap_intercepted_assemblies"; // keyed by ToolAssemblyId
 const KEY_BHA_GRID = "fieldcap_bha_grid_rows"; // { [jobId]: { [bhaNumber]: canonicalRow } }
 const KEY_JOB_RIG  = "fieldcap_job_rig_name"; // { [jobId]: "PD-538" }
@@ -56,6 +58,12 @@ chrome.webRequest.onBeforeRequest.addListener(
       };
       log.unshift(entry);
       chrome.storage.local.set({ [KEY_SNIFF_LOG]: log.slice(0, 200) });
+
+      // Remember Ticket* entity set names when FieldCap hits them during sniff.
+      const entityHit = String(display).match(/^([A-Za-z][A-Za-z0-9_]*)\b/);
+      if (entityHit && /ticket/i.test(entityHit[1])) {
+        chrome.storage.local.set({ [KEY_TICKET_ENTITY]: entityHit[1] });
+      }
     });
   },
   { urls: ["*://*.phxtech.com/*"] }
@@ -731,30 +739,33 @@ const toCanonicalAssemblyPatch = (obj) => {
 };
 
 const scrapeFromTab = async (tabId) => new Promise((resolve) => {
+  const empty = { bhaRows: [], activityRows: [], ticketRows: [], rigName: "" };
   chrome.tabs.sendMessage(tabId, { type: "SCRAPE_NOW" }, (res) => {
     const firstErr = chrome.runtime.lastError?.message ?? "";
     if (!firstErr) {
       return resolve({
         bhaRows: Array.isArray(res?.bhaRows) ? res.bhaRows : [],
         activityRows: Array.isArray(res?.activityRows) ? res.activityRows : [],
+        ticketRows: Array.isArray(res?.ticketRows) ? res.ticketRows : [],
         rigName: String(res?.rigName ?? "").trim(),
       });
     }
 
     // If the content script is not attached yet, inject and retry once.
     if (!/receiving end does not exist|could not establish connection/i.test(firstErr)) {
-      return resolve({ bhaRows: [], activityRows: [], rigName: "" });
+      return resolve(empty);
     }
-    if (!chrome.scripting?.executeScript) return resolve({ bhaRows: [], activityRows: [], rigName: "" });
+    if (!chrome.scripting?.executeScript) return resolve(empty);
 
     chrome.scripting.executeScript(
       { target: { tabId }, files: ["content.js"] },
       () => {
         chrome.tabs.sendMessage(tabId, { type: "SCRAPE_NOW" }, (res2) => {
-          if (chrome.runtime.lastError) return resolve({ bhaRows: [], activityRows: [], rigName: "" });
+          if (chrome.runtime.lastError) return resolve(empty);
           resolve({
             bhaRows: Array.isArray(res2?.bhaRows) ? res2.bhaRows : [],
             activityRows: Array.isArray(res2?.activityRows) ? res2.activityRows : [],
+            ticketRows: Array.isArray(res2?.ticketRows) ? res2.ticketRows : [],
             rigName: String(res2?.rigName ?? "").trim(),
           });
         });
@@ -764,10 +775,11 @@ const scrapeFromTab = async (tabId) => new Promise((resolve) => {
 });
 
 const scrapeNowFromFieldCapTabs = async (jobId) => {
+  const empty = { bhaRows: [], activityRows: [], ticketRows: [], rigName: "" };
   const tabs = await chrome.tabs.query({ url: ["*://*.phxtech.com/*"] });
-  if (!tabs?.length) return { bhaRows: [], activityRows: [], rigName: "" };
+  if (!tabs?.length) return empty;
   const fieldcapTabs = tabs.filter((t) => /fieldcap/i.test(String(t.url ?? "")));
-  if (!fieldcapTabs.length) return { bhaRows: [], activityRows: [], rigName: "" };
+  if (!fieldcapTabs.length) return empty;
 
   const results = await Promise.all(
     fieldcapTabs
@@ -785,10 +797,12 @@ const scrapeNowFromFieldCapTabs = async (jobId) => {
   const source = forJob.length ? forJob : results;
   const best = source.sort((a, b) => b.bhaRows.length - a.bhaRows.length)[0];
   const activityRows = source.flatMap((r) => r.activityRows ?? []);
+  const ticketRows = source.flatMap((r) => r.ticketRows ?? []);
   const rigName = (forJob.length ? forJob : results).map((r) => String(r.rigName ?? "").trim()).find(Boolean) ?? "";
   return {
     bhaRows: best?.bhaRows ?? [],
     activityRows,
+    ticketRows,
     rigName,
   };
 };
@@ -1550,6 +1564,136 @@ const buildInventoryCsv = (jobTools) => {
 // Helper used inside buildInventoryCsv before `item` is in scope
 const item_code = (jt) => jt.Item?.ItemCode ?? jt.ItemCode ?? null;
 
+// ── Ticket daily costs (Tickets tab → one row per calendar day) ───────────────
+const TICKET_ENTITY_FALLBACKS = [
+  "Tickets",
+  "JobTickets",
+  "ClientJobTickets",
+  "TicketHeaders",
+  "FieldTickets",
+  "DailyTickets",
+  "BillingTickets",
+  "JobTicketHeaders",
+];
+
+const TICKET_DATE_ALIASES = [
+  "TicketDate", "Ticket Date", "Date", "ReportDate", "JobDate",
+  "TicketDay", "Day", "TicketDayDate", "WorkDate",
+];
+
+const TICKET_TOTAL_ALIASES = [
+  "TicketTotal", "Ticket Total", "Total", "TotalAmount", "Amount",
+  "TicketAmount", "GrandTotal", "NetTotal", "TotalCost", "Cost",
+];
+
+const TICKET_DAY_COLUMNS = ["Job ID", "Date", "Daily Cost", "Ticket Count"];
+
+const parseMoney = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v).replace(/[$,\s]/g, "").replace(/[()]/g, "");
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
+const parseTicketDate = (v) => {
+  const fromHelpers = toLocalDateStr(v) || toDateStr(v);
+  if (fromHelpers) return fromHelpers;
+  const s = String(v ?? "").trim();
+  const m = s.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$/);
+  if (m) {
+    const d = new Date(`${m[2]} ${m[1]}, ${m[3]} 12:00:00 UTC`);
+    if (!isNaN(d.getTime()) && d.getUTCFullYear() >= 2000 && d.getUTCFullYear() <= 2100) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  return "";
+};
+
+const discoverTicketEntityNames = async () => {
+  try {
+    const res = await fetch(BASE, {
+      credentials: "include",
+      headers: { Accept: "application/json;odata.metadata=minimal" },
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const sets = Array.isArray(json?.value) ? json.value : [];
+    return sets
+      .map((s) => s?.name)
+      .filter((n) => typeof n === "string" && /ticket/i.test(n));
+  } catch (_) {
+    return [];
+  }
+};
+
+const fetchJobTickets = async (jobId) => {
+  const filters = [
+    encodeURIComponent(`(ClientJobId eq ${jobId}) and (null eq DeletedBy)`),
+    encodeURIComponent(`(ClientJobId eq ${jobId})`),
+    encodeURIComponent(`(JobId eq ${jobId})`),
+  ];
+
+  const stored = await new Promise((resolve) =>
+    chrome.storage.local.get([KEY_TICKET_ENTITY], resolve)
+  );
+  const cachedEntity = stored[KEY_TICKET_ENTITY];
+  const discovered = await discoverTicketEntityNames();
+  const candidates = [];
+  const pushUnique = (name) => {
+    if (!name || candidates.includes(name)) return;
+    candidates.push(name);
+  };
+  pushUnique(cachedEntity);
+  for (const n of discovered) pushUnique(n);
+  for (const n of TICKET_ENTITY_FALLBACKS) pushUnique(n);
+
+  let emptyButValid = null;
+  for (const entity of candidates) {
+    for (const filter of filters) {
+      try {
+        const rows = await odataGetAll(`${entity}?$filter=${filter}`);
+        if (!Array.isArray(rows)) continue;
+        chrome.storage.local.set({ [KEY_TICKET_ENTITY]: entity });
+        if (rows.length > 0) return rows;
+        emptyButValid = rows;
+      } catch (_) {
+        // try next filter / entity
+      }
+    }
+  }
+  return emptyButValid ?? [];
+};
+
+const normalizeTicketRow = (t) => {
+  if (!t || typeof t !== "object") return { date: "", total: 0 };
+  const date = parseTicketDate(getByAliases(t, TICKET_DATE_ALIASES));
+  const total = parseMoney(getByAliases(t, TICKET_TOTAL_ALIASES));
+  return { date, total: total ?? 0 };
+};
+
+const buildTicketCostsByDayCsv = (jobId, tickets) => {
+  const byDay = new Map();
+  for (const t of tickets ?? []) {
+    const n = normalizeTicketRow(t);
+    if (!n.date) continue;
+    const cur = byDay.get(n.date) ?? { sum: 0, count: 0 };
+    cur.sum += Number(n.total) || 0;
+    cur.count += 1;
+    byDay.set(n.date, cur);
+  }
+  const rows = [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, { sum, count }]) => ({
+      "Job ID": jobId,
+      Date: date,
+      "Daily Cost": Number(sum.toFixed(2)),
+      "Ticket Count": count,
+    }));
+  return buildCsvString(TICKET_DAY_COLUMNS, rows);
+};
+
 // ── BHA custom fields (tenant-defined labels such as "SLD METERS") ────────────
 const labelFromToolAssemblyCustomRow = (row) => {
   const cf = row.CustomField ?? row.CustomFieldDefinition ?? row.Field ?? {};
@@ -1666,16 +1810,28 @@ const normalizeJobDetails = (j, customValues, rigNameHint = "") => {
     "End Date":           j.EndDate      ? toDateStr(j.EndDate)           : "",
     "Planned Start Date": j.PlannedStartDate ? toDateStr(j.PlannedStartDate) : "",
     "Planned End Date":   j.PlannedEndDate   ? toDateStr(j.PlannedEndDate)   : "",
-    "Rig Name":           rigName,
   };
 
-  // Merge custom fields — KeyName becomes the column header, Value is the cell
+  // Merge custom fields — KeyName becomes the column header, Value is the cell.
+  // Do not clobber a populated core field with an empty custom value (FieldCap
+  // often ships an empty "Rig Name" custom key while Site/UI still has the rig).
   for (const cv of customValues ?? []) {
     const label = (cv.KeyName ?? "").trim();
     if (!label) continue;
-    // Skip blanks but keep explicit empty strings
-    row[label] = cv.Value ?? "";
+    const val = cv.Value ?? "";
+    if (val === "" && row[label] != null && String(row[label]).trim() !== "") continue;
+    row[label] = val;
   }
+
+  // Resolve Rig Name last so scrape/OData hint wins over empty custom keys.
+  let customRig = "";
+  for (const cv of customValues ?? []) {
+    const label = String(cv.KeyName ?? "").trim();
+    if (!/^rig\s*name$/i.test(label)) continue;
+    const val = String(cv.Value ?? "").trim();
+    if (val) { customRig = val; break; }
+  }
+  row["Rig Name"] = customRig || rigName || String(row["Rig Name"] ?? "").trim();
 
   return row;
 };
@@ -1919,7 +2075,15 @@ const buildBhaCsv = (
 };
 
 // ── Main fetch orchestrator ───────────────────────────────────────────────────
-const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = [], liveRigName = "", onProgress = null) => {
+const fetchAll = async (
+  jobId,
+  flags,
+  liveBhaRows = [],
+  liveActivityRows = [],
+  liveRigName = "",
+  onProgress = null,
+  liveTicketRows = []
+) => {
   const prog = (pct, label) => { try { onProgress?.(pct, label); } catch (_) {} };
   const results = {};
 
@@ -2005,6 +2169,25 @@ const fetchAll = async (jobId, flags, liveBhaRows = [], liveActivityRows = [], l
     results.inventoryRowCount = (results.inventoryCsv.split("\r\n").length - 1);
   }
 
+  prog(97, "Ticket costs by day…");
+  if (flags.ticketCosts) {
+    let tickets = [];
+    try {
+      tickets = await fetchJobTickets(jobId);
+    } catch (_) {
+      tickets = [];
+    }
+    let csv = buildTicketCostsByDayCsv(jobId, tickets);
+    let rowCount = Math.max(0, csv.split("\r\n").filter((ln) => ln.length > 0).length - 1);
+    // DOM fallback when OData empty or field aliases did not map any day totals.
+    if (rowCount === 0 && Array.isArray(liveTicketRows) && liveTicketRows.length > 0) {
+      csv = buildTicketCostsByDayCsv(jobId, liveTicketRows);
+      rowCount = Math.max(0, csv.split("\r\n").filter((ln) => ln.length > 0).length - 1);
+    }
+    results.ticketCostsCsv = csv;
+    results.ticketCostsRowCount = rowCount;
+  }
+
   return results;
 };
 
@@ -2025,10 +2208,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
     try {
       send({ type: "PROGRESS", pct: 3, label: "Scraping live data…" });
-      let liveData = (flags.bha || flags.jobDetails)
+      let liveData = (flags.bha || flags.jobDetails || flags.ticketCosts)
         ? await scrapeNowFromFieldCapTabs(jobId)
-        : { bhaRows: [], activityRows: [], rigName: "" };
-      if (flags.bha && liveData.bhaRows.length === 0) {
+        : { bhaRows: [], activityRows: [], ticketRows: [], rigName: "" };
+      if ((flags.bha && liveData.bhaRows.length === 0)
+          || (flags.ticketCosts && (liveData.ticketRows?.length ?? 0) === 0)) {
         await sleep(1200);
         liveData = await scrapeNowFromFieldCapTabs(jobId);
       }
@@ -2049,7 +2233,8 @@ chrome.runtime.onConnect.addListener((port) => {
       const results = await fetchAll(
         jobId, flags,
         liveData.bhaRows, liveData.activityRows, liveData.rigName,
-        (pct, label) => send({ type: "PROGRESS", pct, label })
+        (pct, label) => send({ type: "PROGRESS", pct, label }),
+        liveData.ticketRows ?? []
       );
 
       const meta = {
@@ -2060,19 +2245,22 @@ chrome.runtime.onConnect.addListener((port) => {
         bhaCount:         results.bhaCount              ?? 0,
         slideByDayRows:   results.slideByDayRowCount    ?? 0,
         inventoryRows:    results.inventoryRowCount     ?? 0,
+        ticketCostsRows:  results.ticketCostsRowCount   ?? 0,
         liveBhaRows:      liveData.bhaRows.length,
         liveActivityRows: liveData.activityRows.length,
+        liveTicketRows:   liveData.ticketRows?.length   ?? 0,
         flags,
       };
 
-      send({ type: "PROGRESS", pct: 96, label: "Storing to cache…" });
+      send({ type: "PROGRESS", pct: 98, label: "Storing to cache…" });
 
       const stored = {};
-      if (results.jobDetailsCsv) stored[KEY_CSV_JOB]       = results.jobDetailsCsv;
-      if (results.crewCsv)       stored[KEY_CSV_CREW]       = results.crewCsv;
-      if (results.bhaCsv)        stored[KEY_CSV_BHA]        = results.bhaCsv;
-      if (results.slideByDayCsv) stored[KEY_CSV_SLIDE_DAY]  = results.slideByDayCsv;
-      if (results.inventoryCsv)  stored[KEY_CSV_INVENTORY]  = results.inventoryCsv;
+      if (results.jobDetailsCsv)  stored[KEY_CSV_JOB]          = results.jobDetailsCsv;
+      if (results.crewCsv)        stored[KEY_CSV_CREW]         = results.crewCsv;
+      if (results.bhaCsv)         stored[KEY_CSV_BHA]          = results.bhaCsv;
+      if (results.slideByDayCsv)  stored[KEY_CSV_SLIDE_DAY]    = results.slideByDayCsv;
+      if (results.inventoryCsv)   stored[KEY_CSV_INVENTORY]    = results.inventoryCsv;
+      if (results.ticketCostsCsv) stored[KEY_CSV_TICKET_COSTS] = results.ticketCostsCsv;
       stored[KEY_META] = meta;
 
       chrome.storage.local.set(stored, () => {
@@ -2101,10 +2289,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     (async () => {
-      let liveData = (flags.bha || flags.jobDetails)
+      let liveData = (flags.bha || flags.jobDetails || flags.ticketCosts)
         ? await scrapeNowFromFieldCapTabs(jobId)
-        : { bhaRows: [], activityRows: [], rigName: "" };
-      if (flags.bha && liveData.bhaRows.length === 0) {
+        : { bhaRows: [], activityRows: [], ticketRows: [], rigName: "" };
+      if ((flags.bha && liveData.bhaRows.length === 0)
+          || (flags.ticketCosts && (liveData.ticketRows?.length ?? 0) === 0)) {
         // FieldCap is an SPA; tables can render shortly after initial request.
         await sleep(1200);
         liveData = await scrapeNowFromFieldCapTabs(jobId);
@@ -2123,7 +2312,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       }
 
-      const results = await fetchAll(jobId, flags, liveData.bhaRows, liveData.activityRows, liveData.rigName);
+      const results = await fetchAll(
+        jobId, flags,
+        liveData.bhaRows, liveData.activityRows, liveData.rigName,
+        null,
+        liveData.ticketRows ?? []
+      );
         const meta = {
           jobId,
           builtAt:      new Date().toISOString(),
@@ -2131,16 +2325,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           bhaRows:      results.bhaRowCount  ?? 0,
           bhaCount:     results.bhaCount     ?? 0,
           slideByDayRows: results.slideByDayRowCount ?? 0,
+          inventoryRows: results.inventoryRowCount ?? 0,
+          ticketCostsRows: results.ticketCostsRowCount ?? 0,
           liveBhaRows:  liveData.bhaRows.length,
           liveActivityRows: liveData.activityRows.length,
+          liveTicketRows: liveData.ticketRows?.length ?? 0,
           flags,
         };
 
         const stored = {};
-        if (results.jobDetailsCsv) stored[KEY_CSV_JOB]  = results.jobDetailsCsv;
-        if (results.crewCsv)       stored[KEY_CSV_CREW] = results.crewCsv;
-        if (results.bhaCsv)        stored[KEY_CSV_BHA]  = results.bhaCsv;
-        if (results.slideByDayCsv) stored[KEY_CSV_SLIDE_DAY] = results.slideByDayCsv;
+        if (results.jobDetailsCsv)  stored[KEY_CSV_JOB]          = results.jobDetailsCsv;
+        if (results.crewCsv)        stored[KEY_CSV_CREW]         = results.crewCsv;
+        if (results.bhaCsv)         stored[KEY_CSV_BHA]          = results.bhaCsv;
+        if (results.slideByDayCsv)  stored[KEY_CSV_SLIDE_DAY]    = results.slideByDayCsv;
+        if (results.inventoryCsv)   stored[KEY_CSV_INVENTORY]    = results.inventoryCsv;
+        if (results.ticketCostsCsv) stored[KEY_CSV_TICKET_COSTS] = results.ticketCostsCsv;
         stored[KEY_META] = meta;
 
         chrome.storage.local.set(stored, () => {
@@ -2156,7 +2355,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ── Download a cached CSV ────────────────────────────────────────────────
   if (message.type === "DOWNLOAD_CSV") {
     const { which, jobId } = message;
-    const keyMap = { job: KEY_CSV_JOB, crew: KEY_CSV_CREW, bha: KEY_CSV_BHA, slideDay: KEY_CSV_SLIDE_DAY, inventory: KEY_CSV_INVENTORY };
+    const keyMap = {
+      job: KEY_CSV_JOB,
+      crew: KEY_CSV_CREW,
+      bha: KEY_CSV_BHA,
+      slideDay: KEY_CSV_SLIDE_DAY,
+      inventory: KEY_CSV_INVENTORY,
+      ticketCosts: KEY_CSV_TICKET_COSTS,
+    };
     const key = keyMap[which];
     if (!key) {
       sendResponse({ ok: false, error: `Unknown CSV type: ${which}` });
@@ -2178,6 +2384,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         crew: `fieldcap-job-${jid}-crew.csv`,
         bha:  `fieldcap-job-${jid}-bha-equipment.csv`,
         slideDay: `fieldcap-job-${jid}-slide-rotate-metres-by-day.csv`,
+        inventory: `fieldcap-job-${jid}-inventory.csv`,
+        ticketCosts: `fieldcap-job-${jid}-ticket-costs-by-day.csv`,
       }[which];
 
       const blob   = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -2306,7 +2514,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // ── Clear cached data ─────────────────────────────────────────────────────
   if (message.type === "CLEAR_CACHE") {
     chrome.storage.local.remove(
-      [KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY, KEY_INTERCEPT, KEY_BHA_GRID, KEY_JOB_RIG],
+      [
+        KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY,
+        KEY_CSV_INVENTORY, KEY_CSV_TICKET_COSTS, KEY_INTERCEPT, KEY_BHA_GRID, KEY_JOB_RIG,
+      ],
       () => sendResponse({ ok: true })
     );
     return true;

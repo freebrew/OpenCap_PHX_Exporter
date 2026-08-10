@@ -14,20 +14,24 @@ Option Explicit
 '
 '  SHEET ARCHITECTURE:
 '   "Setup"         = visible Well Database + File Status dashboard
+'   "Costs"         = visible daily / total costs (upserted from ticket CSV)
 '   "_OC_Job"       = hidden  Job Details CSV
 '   "_OC_Crew"      = hidden  Crew / Personnel CSV
 '   "_OC_BHA"       = hidden  BHA Equipment CSV
 '   "_OC_Slide"     = hidden  Slide-Rotate by Day CSV
 '   "_OC_Inventory" = hidden  Equipment Inventory CSV
+'   "_OC_TicketCosts" = hidden Ticket Costs by Day CSV
 ' ================================================================================
 
 ' -- Sheet names ---------------------------------------------------------------
 Private Const SH_SETUP     As String = "Setup"
+Private Const SH_COSTS     As String = "Costs"
 Private Const SH_JOB       As String = "_OC_Job"
 Private Const SH_CREW      As String = "_OC_Crew"
 Private Const SH_BHA       As String = "_OC_BHA"
 Private Const SH_SLIDE     As String = "_OC_Slide"
 Private Const SH_INVENTORY As String = "_OC_Inventory"
+Private Const SH_TICKET_COSTS As String = "_OC_TicketCosts"
 Private Const SH_SURVEY    As String = "_OC_Survey"
 Private Const SH_AC        As String = "_OC_AC"
 
@@ -37,9 +41,19 @@ Private Const TOK_CREW      As String = "crew"
 Private Const TOK_BHA       As String = "bha-equipment"
 Private Const TOK_SLIDE     As String = "slide-rotate"
 Private Const TOK_INVENTORY As String = "inventory"
+Private Const TOK_TICKET_COSTS As String = "ticket-costs"
 
 ' Chrome exporter writes CSVs under <workbook>\OpenCap\
 Private Const OPENCAP_SUBDIR As String = "OpenCap"
+
+' Costs tab layout (matches field paperwork Costs sheet)
+Private Const COST_COL_DAY   As Long = 2   ' B  "Day 1", "Day 2", ...
+Private Const COST_COL_DATE  As Long = 3   ' C  calendar date
+Private Const COST_COL_DAILY As Long = 5   ' E  Daily Costs
+Private Const COST_COL_TOTAL As Long = 7   ' G  Total Costs (running)
+Private Const COST_HDR_ROW   As Long = 2
+Private Const COST_DATA_START As Long = 3
+Private Const COST_DAY_SLOTS As Long = 41
 
 ' -- Column layout (1-based) ---------------------------------------------------
 '  A(1)       = section accent strip (1.5 wide)
@@ -120,11 +134,14 @@ Public Sub InitSetup()
         Dim fBHA As String:   fBHA   = FindCsvByToken(wbPath, TOK_BHA)
         Dim fSlide As String: fSlide = FindCsvByToken(wbPath, TOK_SLIDE)
         Dim fInv As String:   fInv   = FindCsvByToken(wbPath, TOK_INVENTORY)
+        Dim fTickets As String: fTickets = FindCsvByToken(wbPath, TOK_TICKET_COSTS)
         If fJob   <> "" Then LoadCsv fJob,   SH_JOB
         If fCrew  <> "" Then LoadCsv fCrew,  SH_CREW
         If fBHA   <> "" Then LoadCsv fBHA,   SH_BHA
         If fSlide <> "" Then LoadCsv fSlide, SH_SLIDE
         If fInv   <> "" Then LoadCsv fInv,   SH_INVENTORY
+        If fTickets <> "" Then LoadCsv fTickets, SH_TICKET_COSTS
+        UpsertCostsFromTicketCsv
     End If
 
     BuildSetupUI
@@ -173,12 +190,17 @@ Public Sub RefreshSetup()
     Dim fBHA As String:   fBHA   = FindCsvByToken(wbPath, TOK_BHA)
     Dim fSlide As String: fSlide = FindCsvByToken(wbPath, TOK_SLIDE)
     Dim fInv As String:   fInv   = FindCsvByToken(wbPath, TOK_INVENTORY)
+    Dim fTickets As String: fTickets = FindCsvByToken(wbPath, TOK_TICKET_COSTS)
 
     If fJob   <> "" Then LoadCsv fJob,   SH_JOB
     If fCrew  <> "" Then LoadCsv fCrew,  SH_CREW
     If fBHA   <> "" Then LoadCsv fBHA,   SH_BHA
     If fSlide <> "" Then LoadCsv fSlide, SH_SLIDE
     If fInv   <> "" Then LoadCsv fInv,   SH_INVENTORY
+    If fTickets <> "" Then LoadCsv fTickets, SH_TICKET_COSTS
+
+    Application.StatusBar = "OpenCap: upserting Costs from ticket CSV..."
+    UpsertCostsFromTicketCsv
 
     Application.StatusBar = "OpenCap: building Setup sheet..."
     EnsureSheet SH_SETUP, True
@@ -243,11 +265,11 @@ End Sub
 ' ================================================================================
 
 Private Sub SetupDataSheets()
-    Dim n(6) As String
+    Dim n(7) As String
     n(0) = SH_JOB: n(1) = SH_CREW: n(2) = SH_BHA: n(3) = SH_SLIDE: n(4) = SH_INVENTORY
-    n(5) = SH_SURVEY: n(6) = SH_AC
+    n(5) = SH_TICKET_COSTS: n(6) = SH_SURVEY: n(7) = SH_AC
     Dim i As Integer
-    For i = 0 To 6
+    For i = 0 To 7
         If Not SheetExists(n(i)) Then
             ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets( _
                 ThisWorkbook.Sheets.Count)).Name = n(i)
@@ -760,15 +782,16 @@ Private Sub DrawFilesPanel(ws As Worksheet, startRow As Long)
 
     Dim panelTop As Long: panelTop = r
 
-    Dim tokens(4) As String, labels(4) As String, sheets(4) As String
-    tokens(0) = TOK_JOB:       labels(0) = "Job Details":           sheets(0) = SH_JOB
-    tokens(1) = TOK_CREW:      labels(1) = "Crew / Personnel":      sheets(1) = SH_CREW
-    tokens(2) = TOK_BHA:       labels(2) = "BHA Equipment":         sheets(2) = SH_BHA
-    tokens(3) = TOK_SLIDE:     labels(3) = "Slide / Rotate by Day": sheets(3) = SH_SLIDE
-    tokens(4) = TOK_INVENTORY: labels(4) = "Equipment Inventory":   sheets(4) = SH_INVENTORY
+    Dim tokens(5) As String, labels(5) As String, sheets(5) As String
+    tokens(0) = TOK_JOB:          labels(0) = "Job Details":           sheets(0) = SH_JOB
+    tokens(1) = TOK_CREW:         labels(1) = "Crew / Personnel":      sheets(1) = SH_CREW
+    tokens(2) = TOK_BHA:          labels(2) = "BHA Equipment":         sheets(2) = SH_BHA
+    tokens(3) = TOK_SLIDE:        labels(3) = "Slide / Rotate by Day": sheets(3) = SH_SLIDE
+    tokens(4) = TOK_INVENTORY:    labels(4) = "Equipment Inventory":   sheets(4) = SH_INVENTORY
+    tokens(5) = TOK_TICKET_COSTS: labels(5) = "Ticket Costs by Day":   sheets(5) = SH_TICKET_COSTS
 
     Dim fi As Long
-    For fi = 0 To 4
+    For fi = 0 To 5
         ws.Rows(r).RowHeight = 18
 
         Dim fPath As String: fPath = ""
@@ -1218,6 +1241,244 @@ Private Function FindCsvByTokenInFolder(folder As String, token As String) As St
         End If
         fn = Dir()
     Loop
+End Function
+
+' ================================================================================
+'  COSTS TAB — upsert ticket-costs-by-day.csv into Costs!E (Daily) / G (Total)
+' ================================================================================
+
+Private Sub UpsertCostsFromTicketCsv()
+    If Not SheetExists(SH_TICKET_COSTS) Then Exit Sub
+
+    Dim src As Worksheet: Set src = Worksheets(SH_TICKET_COSTS)
+    Dim lastSrc As Long: lastSrc = src.Cells(src.Rows.Count, 1).End(xlUp).Row
+    If lastSrc < 2 Then Exit Sub
+
+    Dim cDate As Long: cDate = ColByName(src, "Date")
+    Dim cDaily As Long: cDaily = ColByName(src, "Daily Cost", "DailyCost", "Daily Costs")
+    If cDate = 0 Or cDaily = 0 Then Exit Sub
+
+    EnsureCostsSheet
+    Dim dest As Worksheet: Set dest = Worksheets(SH_COSTS)
+
+    Dim colDay As Long, colDate As Long, colDaily As Long, colTotal As Long
+    ResolveCostsColumns dest, colDay, colDate, colDaily, colTotal
+
+    Dim dateToRow As Object
+    Set dateToRow = CreateObject("Scripting.Dictionary")
+    dateToRow.CompareMode = vbTextCompare
+
+    Dim r As Long
+    For r = COST_DATA_START To COST_DATA_START + COST_DAY_SLOTS + 20
+        Dim dKey As String: dKey = NormalizeCostDateKey(dest.Cells(r, colDate).Value)
+        If dKey <> "" Then
+            If Not dateToRow.Exists(dKey) Then dateToRow.Add dKey, r
+        End If
+    Next r
+
+    Dim i As Long
+    For i = 2 To lastSrc
+        Dim iso As String: iso = NormalizeCostDateKey(src.Cells(i, cDate).Value)
+        If iso = "" Then GoTo NextTicketRow
+
+        Dim amt As Double: amt = ParseMoneyCell(src.Cells(i, cDaily).Value)
+        Dim targetRow As Long
+
+        If dateToRow.Exists(iso) Then
+            targetRow = CLng(dateToRow(iso))
+        Else
+            targetRow = FindOrAppendCostRow(dest, colDay, colDate, iso, dateToRow)
+        End If
+        If targetRow <= 0 Then GoTo NextTicketRow
+
+        On Error Resume Next
+        dest.Cells(targetRow, colDate).Value = CDate(iso)
+        If Err.Number <> 0 Then
+            Err.Clear
+            dest.Cells(targetRow, colDate).Value = iso
+        End If
+        On Error GoTo 0
+        dest.Cells(targetRow, colDate).NumberFormat = "mmmm d, yyyy"
+        dest.Cells(targetRow, colDaily).Value = amt
+        dest.Cells(targetRow, colDaily).NumberFormat = "$#,##0.00"
+NextTicketRow:
+    Next i
+
+    RecomputeCostTotals dest, colDay, colDate, colDaily, colTotal
+End Sub
+
+Private Sub EnsureCostsSheet()
+    If SheetExists(SH_COSTS) Then Exit Sub
+
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+    ws.Name = SH_COSTS
+
+    Dim title As String: title = "COSTS"
+    If SheetExists(SH_JOB) Then
+        Dim jCol As Long: jCol = ColByName(Worksheets(SH_JOB), "Job Name")
+        If jCol > 0 Then
+            Dim jn As String: jn = Trim(SafeStr(Worksheets(SH_JOB).Cells(2, jCol)))
+            If jn <> "" Then title = jn
+        End If
+    End If
+
+    With ws.Range(ws.Cells(1, COST_COL_DAY), ws.Cells(1, COST_COL_TOTAL))
+        .Merge
+        .Value = title
+        .Font.Bold = True
+        .Font.Size = 12
+        .Font.Name = "Consolas"
+    End With
+
+    ws.Cells(COST_HDR_ROW, COST_COL_DAY).Value = "Day"
+    ws.Cells(COST_HDR_ROW, COST_COL_DATE).Value = "Date"
+    ws.Cells(COST_HDR_ROW, COST_COL_DAILY).Value = "Daily Costs"
+    ws.Cells(COST_HDR_ROW, COST_COL_TOTAL).Value = "Total Costs"
+    ws.Range(ws.Cells(COST_HDR_ROW, COST_COL_DAY), ws.Cells(COST_HDR_ROW, COST_COL_TOTAL)).Font.Bold = True
+
+    Dim d As Long
+    For d = 1 To COST_DAY_SLOTS
+        ws.Cells(COST_DATA_START + d - 1, COST_COL_DAY).Value = "Day " & d
+    Next d
+
+    ws.Columns(COST_COL_DAY).ColumnWidth = 10
+    ws.Columns(COST_COL_DATE).ColumnWidth = 18
+    ws.Columns(COST_COL_DAILY).ColumnWidth = 14
+    ws.Columns(COST_COL_TOTAL).ColumnWidth = 14
+End Sub
+
+Private Sub ResolveCostsColumns(ws As Worksheet, ByRef colDay As Long, ByRef colDate As Long, _
+                                ByRef colDaily As Long, ByRef colTotal As Long)
+    colDay = COST_COL_DAY
+    colDate = COST_COL_DATE
+    colDaily = COST_COL_DAILY
+    colTotal = COST_COL_TOTAL
+
+    Dim c As Long
+    Dim foundDaily As Boolean: foundDaily = False
+    Dim foundTotal As Boolean: foundTotal = False
+    Dim dateCols As Long: dateCols = 0
+
+    For c = 1 To 12
+        Dim h As String: h = LCase(Trim(SafeStr(ws.Cells(COST_HDR_ROW, c))))
+        If h = "" Then GoTo NextHdr
+        If h = "daily costs" Or h = "daily cost" Then
+            colDaily = c: foundDaily = True
+        ElseIf h = "total costs" Or h = "total cost" Then
+            colTotal = c: foundTotal = True
+        ElseIf h = "day" Or Left$(h, 4) = "day " Then
+            colDay = c
+        ElseIf h = "date" Then
+            dateCols = dateCols + 1
+            If dateCols = 1 Then
+                ' First "Date" header in this layout is often the Day column label.
+                If Not (Trim(SafeStr(ws.Cells(COST_DATA_START, c))) Like "Day *") Then
+                    colDate = c
+                Else
+                    colDay = c
+                End If
+            Else
+                colDate = c
+            End If
+        End If
+NextHdr:
+    Next c
+
+    ' Prefer detecting calendar date column by sample values when headers are ambiguous.
+    If NormalizeCostDateKey(ws.Cells(COST_DATA_START, colDate).Value) = "" Then
+        For c = 1 To 12
+            If NormalizeCostDateKey(ws.Cells(COST_DATA_START, c).Value) <> "" Then
+                colDate = c
+                Exit For
+            End If
+        Next c
+    End If
+
+    If Not foundDaily Then colDaily = COST_COL_DAILY
+    If Not foundTotal Then colTotal = COST_COL_TOTAL
+End Sub
+
+Private Function FindOrAppendCostRow(dest As Worksheet, colDay As Long, colDate As Long, _
+                                     iso As String, dateToRow As Object) As Long
+    FindOrAppendCostRow = 0
+    Dim r As Long
+    For r = COST_DATA_START To COST_DATA_START + COST_DAY_SLOTS + 50
+        Dim dayLbl As String: dayLbl = Trim(SafeStr(dest.Cells(r, colDay)))
+        Dim existing As String: existing = NormalizeCostDateKey(dest.Cells(r, colDate).Value)
+
+        If existing = "" And (dayLbl <> "" Or r <= COST_DATA_START + COST_DAY_SLOTS - 1) Then
+            If dayLbl = "" Then
+                dest.Cells(r, colDay).Value = "Day " & (r - COST_DATA_START + 1)
+            End If
+            FindOrAppendCostRow = r
+            If Not dateToRow.Exists(iso) Then dateToRow.Add iso, r
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Sub RecomputeCostTotals(dest As Worksheet, colDay As Long, colDate As Long, _
+                                colDaily As Long, colTotal As Long)
+    Dim running As Double: running = 0
+    Dim r As Long
+    For r = COST_DATA_START To COST_DATA_START + COST_DAY_SLOTS + 50
+        Dim dayLbl As String: dayLbl = Trim(SafeStr(dest.Cells(r, colDay)))
+        Dim dKey As String: dKey = NormalizeCostDateKey(dest.Cells(r, colDate).Value)
+        If dayLbl = "" And dKey = "" Then Exit For
+
+        If dKey = "" Then
+            dest.Cells(r, colTotal).ClearContents
+        Else
+            running = running + ParseMoneyCell(dest.Cells(r, colDaily).Value)
+            dest.Cells(r, colTotal).Value = running
+            dest.Cells(r, colTotal).NumberFormat = "$#,##0.00"
+        End If
+    Next r
+End Sub
+
+Private Function NormalizeCostDateKey(v As Variant) As String
+    NormalizeCostDateKey = ""
+    If IsError(v) Then Exit Function
+    If IsEmpty(v) Then Exit Function
+    If VarType(v) = vbString And Trim$(CStr(v)) = "" Then Exit Function
+
+    On Error Resume Next
+    If IsDate(v) Then
+        NormalizeCostDateKey = Format$(CDate(v), "yyyy-mm-dd")
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    Dim s As String: s = Trim$(CStr(v))
+    If s = "" Then
+        On Error GoTo 0
+        Exit Function
+    End If
+    If s Like "####-##-##" Then
+        NormalizeCostDateKey = s
+        On Error GoTo 0
+        Exit Function
+    End If
+    If IsDate(s) Then
+        NormalizeCostDateKey = Format$(CDate(s), "yyyy-mm-dd")
+    End If
+    On Error GoTo 0
+End Function
+
+Private Function ParseMoneyCell(v As Variant) As Double
+    ParseMoneyCell = 0
+    If IsError(v) Or IsEmpty(v) Then Exit Function
+    If IsNumeric(v) Then
+        ParseMoneyCell = CDbl(v)
+        Exit Function
+    End If
+    Dim s As String
+    s = Trim$(CStr(v))
+    s = Replace(s, "$", "")
+    s = Replace(s, ",", "")
+    s = Replace(s, " ", "")
+    If IsNumeric(s) Then ParseMoneyCell = CDbl(s)
 End Function
 
 Private Function CsvParseLine(ByVal line As String) As String()

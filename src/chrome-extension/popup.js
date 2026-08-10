@@ -1,4 +1,4 @@
-// OpenCap Data Exporter — Popup v3.1.5
+// OpenCap Data Exporter — Popup v3.1.8
 
 (async () => {
   "use strict";
@@ -22,6 +22,7 @@
   const chkBha       = document.getElementById("chkBha");
   const chkSlide     = document.getElementById("chkSlide");
   const chkInventory = document.getElementById("chkInventory");
+  const chkTicketCosts = document.getElementById("chkTicketCosts");
   const chkSuppressBottomLine = document.getElementById("chkSuppressBottomLine");
   const btnFetch = document.getElementById("btnFetch");
   const btnClear = document.getElementById("btnClear");
@@ -31,11 +32,13 @@
   const badgeBha       = document.getElementById("badgeBha");
   const badgeSlide     = document.getElementById("badgeSlide");
   const badgeInventory = document.getElementById("badgeInventory");
+  const badgeTicketCosts = document.getElementById("badgeTicketCosts");
   const metaJob        = document.getElementById("metaJob");
   const metaCrew       = document.getElementById("metaCrew");
   const metaBha        = document.getElementById("metaBha");
   const metaSlide      = document.getElementById("metaSlide");
   const metaInventory  = document.getElementById("metaInventory");
+  const metaTicketCosts = document.getElementById("metaTicketCosts");
 
   const progressWrap  = document.getElementById("progressWrap");
   const progressLabel = document.getElementById("progressLabel");
@@ -203,12 +206,13 @@
   const KEY_CSV_BHA       = "fieldcap_csv_bha";
   const KEY_CSV_SLIDE_DAY = "fieldcap_csv_slide_by_day";
   const KEY_CSV_INVENTORY = "fieldcap_csv_inventory";
+  const KEY_CSV_TICKET_COSTS = "fieldcap_csv_ticket_costs";
   const KEY_SUPPRESS_BOTTOM_LINE_MODAL = "fieldcap_suppress_bottom_line_modal";
 
   // ── Restore cached CSV state ──────────────────────────────────────────────
   const storedAll = await chrome.storage.local.get([
     KEY_META, KEY_CSV_JOB, KEY_CSV_CREW, KEY_CSV_BHA, KEY_CSV_SLIDE_DAY, KEY_CSV_INVENTORY,
-    KEY_SUPPRESS_BOTTOM_LINE_MODAL,
+    KEY_CSV_TICKET_COSTS, KEY_SUPPRESS_BOTTOM_LINE_MODAL,
   ]);
 
   if (chkSuppressBottomLine) {
@@ -255,6 +259,10 @@
     if (storedAll[KEY_CSV_INVENTORY]) {
       setBadge(badgeInventory, `${meta.inventoryRows ?? "?"} rows`, "ok");
       metaInventory.textContent = `fieldcap-job-${meta.jobId}-inventory.csv`;
+    }
+    if (storedAll[KEY_CSV_TICKET_COSTS]) {
+      setBadge(badgeTicketCosts, `${meta.ticketCostsRows ?? "?"} days`, "ok");
+      metaTicketCosts.textContent = `fieldcap-job-${meta.jobId}-ticket-costs-by-day.csv`;
     }
   }
 
@@ -316,25 +324,27 @@
 
   const saveAllCachedCsvs = async (jobId) => {
     const keyMap = {
-      job:       KEY_CSV_JOB,
-      crew:      KEY_CSV_CREW,
-      bha:       KEY_CSV_BHA,
-      slideDay:  KEY_CSV_SLIDE_DAY,
-      inventory: KEY_CSV_INVENTORY,
+      job:         KEY_CSV_JOB,
+      crew:        KEY_CSV_CREW,
+      bha:         KEY_CSV_BHA,
+      slideDay:    KEY_CSV_SLIDE_DAY,
+      inventory:   KEY_CSV_INVENTORY,
+      ticketCosts: KEY_CSV_TICKET_COSTS,
     };
     const nameMap = {
-      job:       `fieldcap-job-${jobId}-job-details.csv`,
-      crew:      `fieldcap-job-${jobId}-crew.csv`,
-      bha:       `fieldcap-job-${jobId}-bha-equipment.csv`,
-      slideDay:  `fieldcap-job-${jobId}-slide-rotate-metres-by-day.csv`,
-      inventory: `fieldcap-job-${jobId}-inventory.csv`,
+      job:         `fieldcap-job-${jobId}-job-details.csv`,
+      crew:        `fieldcap-job-${jobId}-crew.csv`,
+      bha:         `fieldcap-job-${jobId}-bha-equipment.csv`,
+      slideDay:    `fieldcap-job-${jobId}-slide-rotate-metres-by-day.csv`,
+      inventory:   `fieldcap-job-${jobId}-inventory.csv`,
+      ticketCosts: `fieldcap-job-${jobId}-ticket-costs-by-day.csv`,
     };
 
     const stored = await chrome.storage.local.get(Object.values(keyMap));
     const saved  = [];
     const failed = [];
 
-    for (const which of ["job", "crew", "bha", "slideDay", "inventory"]) {
+    for (const which of ["job", "crew", "bha", "slideDay", "inventory", "ticketCosts"]) {
       const csv = stored[keyMap[which]];
       if (!csv) continue;
       try {
@@ -369,14 +379,16 @@
     if (!jobId) { showErr("Enter a valid Job ID first."); return; }
 
     const flags = {
-      jobDetails: chkJob.checked,
-      crew:       chkCrew.checked,
-      bha:        chkBha.checked,
-      slideDay:   chkSlide.checked,
-      inventory:  chkInventory.checked,
+      jobDetails:  chkJob.checked,
+      crew:        chkCrew.checked,
+      bha:         chkBha.checked,
+      slideDay:    chkSlide.checked,
+      inventory:   chkInventory.checked,
+      ticketCosts: chkTicketCosts?.checked ?? false,
     };
 
-    if (!flags.jobDetails && !flags.crew && !flags.bha && !flags.slideDay && !flags.inventory) {
+    if (!flags.jobDetails && !flags.crew && !flags.bha && !flags.slideDay
+        && !flags.inventory && !flags.ticketCosts) {
       showErr("Select at least one data type to fetch.");
       return;
     }
@@ -394,11 +406,12 @@
     btnClear.disabled = true;
     hideResult();
 
-    if (flags.jobDetails) { setBadge(badgeJob,       "Fetching…", "busy"); metaJob.textContent       = ""; }
-    if (flags.crew)       { setBadge(badgeCrew,      "Fetching…", "busy"); metaCrew.textContent      = ""; }
-    if (flags.bha)        { setBadge(badgeBha,       "Fetching…", "busy"); metaBha.textContent       = ""; }
-    if (flags.slideDay)   { setBadge(badgeSlide,     "Fetching…", "busy"); metaSlide.textContent     = ""; }
-    if (flags.inventory)  { setBadge(badgeInventory, "Fetching…", "busy"); metaInventory.textContent = ""; }
+    if (flags.jobDetails)  { setBadge(badgeJob,         "Fetching…", "busy"); metaJob.textContent         = ""; }
+    if (flags.crew)        { setBadge(badgeCrew,        "Fetching…", "busy"); metaCrew.textContent        = ""; }
+    if (flags.bha)         { setBadge(badgeBha,         "Fetching…", "busy"); metaBha.textContent         = ""; }
+    if (flags.slideDay)    { setBadge(badgeSlide,       "Fetching…", "busy"); metaSlide.textContent       = ""; }
+    if (flags.inventory)   { setBadge(badgeInventory,   "Fetching…", "busy"); metaInventory.textContent   = ""; }
+    if (flags.ticketCosts) { setBadge(badgeTicketCosts, "Fetching…", "busy"); metaTicketCosts.textContent = ""; }
 
     showProgress(2, "Connecting to FieldCap OData API…");
 
@@ -438,11 +451,12 @@
         errorProgress();
         setTimeout(hideProgress, 1500);
         showErr(msg.error ?? "Fetch failed. Make sure you are logged into FieldCap.");
-        if (flags.jobDetails) setBadge(badgeJob,       "Error", "err");
-        if (flags.crew)       setBadge(badgeCrew,      "Error", "err");
-        if (flags.bha)        setBadge(badgeBha,       "Error", "err");
-        if (flags.slideDay)   setBadge(badgeSlide,     "Error", "err");
-        if (flags.inventory)  setBadge(badgeInventory, "Error", "err");
+        if (flags.jobDetails)  setBadge(badgeJob,         "Error", "err");
+        if (flags.crew)        setBadge(badgeCrew,        "Error", "err");
+        if (flags.bha)         setBadge(badgeBha,         "Error", "err");
+        if (flags.slideDay)    setBadge(badgeSlide,       "Error", "err");
+        if (flags.inventory)   setBadge(badgeInventory,   "Error", "err");
+        if (flags.ticketCosts) setBadge(badgeTicketCosts, "Error", "err");
         btnFetch.disabled = false;
         btnClear.disabled = false;
         return;
@@ -479,6 +493,16 @@
         } else {
           setBadge(badgeInventory, "0 rows", "warn");
           metaInventory.textContent = "No JobTools found for this job.";
+        }
+      }
+      const ticketCostsRows = Number(msg.ticketCostsRows ?? 0);
+      if (flags.ticketCosts) {
+        if (ticketCostsRows > 0) {
+          setBadge(badgeTicketCosts, `${ticketCostsRows} days`, "ok");
+          metaTicketCosts.textContent = `fieldcap-job-${jobId}-ticket-costs-by-day.csv`;
+        } else {
+          setBadge(badgeTicketCosts, "0 days", "warn");
+          metaTicketCosts.textContent = "No tickets found — open Tickets → Ticket List and retry.";
         }
       }
 
@@ -521,16 +545,18 @@
   // ── Clear ─────────────────────────────────────────────────────────────────
   btnClear.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "CLEAR_CACHE" }, () => {
-      setBadge(badgeJob,       "\u2014", "");
-      setBadge(badgeCrew,      "\u2014", "");
-      setBadge(badgeBha,       "\u2014", "");
-      setBadge(badgeSlide,     "\u2014", "");
-      setBadge(badgeInventory, "\u2014", "");
-      metaJob.textContent       = "";
-      metaCrew.textContent      = "";
-      metaBha.textContent       = "";
-      metaSlide.textContent     = "";
-      metaInventory.textContent = "";
+      setBadge(badgeJob,         "\u2014", "");
+      setBadge(badgeCrew,        "\u2014", "");
+      setBadge(badgeBha,         "\u2014", "");
+      setBadge(badgeSlide,       "\u2014", "");
+      setBadge(badgeInventory,   "\u2014", "");
+      setBadge(badgeTicketCosts, "\u2014", "");
+      metaJob.textContent         = "";
+      metaCrew.textContent        = "";
+      metaBha.textContent         = "";
+      metaSlide.textContent       = "";
+      metaInventory.textContent   = "";
+      metaTicketCosts.textContent = "";
       hideResult();
       hideProgress();
     });

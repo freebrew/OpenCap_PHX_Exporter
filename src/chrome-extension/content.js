@@ -188,24 +188,55 @@
     });
   } catch (_) {}
 
+  const looksLikeRigNameValue = (v) => {
+    const s = normalize(v);
+    if (!s || s.length > 80) return false;
+    if (/^rig\s*name$/i.test(s)) return false;
+    // Reject following-field labels accidentally scooped as the value.
+    if (/^(rig\s*type|data\s*rec|pipe\s*arm|top\s*drive|loader|ground\s*msl|rkb)\b/i.test(s)) {
+      return false;
+    }
+    return /[a-z0-9]/i.test(s);
+  };
+
   const detectRigNameFromPage = () => {
-    // Most tenants render "Rig Name: PD-538" as visible text in Well & Rig.
-    for (const el of document.querySelectorAll("div, span, p, td, th, li, h1, h2, h3, h4, label")) {
+    // 1) Inline "Rig Name: Akita-520" on one element.
+    for (const el of document.querySelectorAll("div, span, p, td, th, li, h1, h2, h3, h4, label, dt, dd")) {
       const text = normalize(el.innerText ?? el.textContent);
-      if (!text) continue;
-      const inline = text.match(/^Rig\s*Name\s*:\s*(.+)$/i);
-      if (inline && inline[1]) return normalize(inline[1]);
+      if (!text || text.length > 120) continue;
+      const inline = text.match(/^Rig\s*Name\s*:?\s+(.+)$/i);
+      if (inline && looksLikeRigNameValue(inline[1])) return normalize(inline[1]);
     }
 
-    // Fallback when label/value are split across sibling elements.
-    for (const el of document.querySelectorAll("div, span, p, td, th, label")) {
+    // 2) Label/value split across siblings (FieldCap Well Parameters / Rig panel).
+    for (const el of document.querySelectorAll("div, span, p, td, th, label, dt")) {
       const label = normalize(el.innerText ?? el.textContent);
       if (!/^Rig\s*Name\s*:?$/i.test(label)) continue;
-      const sib = el.nextElementSibling;
-      if (!sib) continue;
-      const value = normalize(sib.innerText ?? sib.textContent);
-      if (value) return value;
+
+      let sib = el.nextElementSibling;
+      while (sib) {
+        const value = normalize(sib.innerText ?? sib.textContent);
+        if (looksLikeRigNameValue(value)) return value;
+        sib = sib.nextElementSibling;
+      }
+
+      const parent = el.parentElement;
+      if (parent) {
+        const kids = Array.from(parent.children);
+        const idx = kids.indexOf(el);
+        for (let i = idx + 1; i < kids.length; i++) {
+          const value = normalize(kids[i].innerText ?? kids[i].textContent);
+          if (looksLikeRigNameValue(value)) return value;
+        }
+      }
     }
+
+    // 3) Whole-panel text fallback: "Rig Name" … value … next known Rig label.
+    const body = normalize(document.body?.innerText ?? "");
+    const m = body.match(
+      /\bRig\s*Name\s*:?\s+(.+?)(?=\s{2,}|\s+Rig\s*Type\b|\s+Data\s*Rec\.?\b|\s+Iron\s*Rgh|\s+Pipe\s*Arm\b|$)/i
+    );
+    if (m && looksLikeRigNameValue(m[1])) return normalize(m[1]);
 
     return "";
   };
@@ -400,6 +431,11 @@
 
       if (hasHdr(/^bha\d*$/) || hasHdr(/^toolassembly\d*$/) || hasHdr(/^toolassemblynumber$/)) {
         tableType = "bha";
+      } else if (
+        (hasHdr(/^ticketdate$/) || hasHdr(/^ticketday$/)) &&
+        (hasHdr(/^tickettotal$/) || hasHdr(/^total$/) || hasHdr(/^amount$/))
+      ) {
+        tableType = "tickets";
       } else if (hasHdr(/^jobhours$/) || hasHdr(/^hsls$/)) {
         tableType = "tools";
       } else if (
@@ -474,6 +510,7 @@
     const bhaRows   = tables.filter((t) => t.tableType === "bha").flatMap((t) => t.rows);
     const toolRows  = tables.filter((t) => t.tableType === "tools").flatMap((t) => t.rows);
     const activityRowsRaw = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
+    const ticketRows = tables.filter((t) => t.tableType === "tickets").flatMap((t) => t.rows);
     const ctx       = detectBhaContext();
     const footerFt  = findActivityMetreFooterOnPage();
     const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
@@ -484,8 +521,9 @@
       ? componentTables.flatMap((t) => t.rows.map((r) => ({ ...r, __bha: ctx.bha })))
       : [];
 
-    if (bhaRows.length === 0 && toolRows.length === 0 && activityRows.length === 0 && componentRows.length === 0
-        && !ctx) {
+    // Well Parameters / Rig / Tickets pages may have no BHA tables — still cache.
+    if (bhaRows.length === 0 && toolRows.length === 0 && activityRows.length === 0
+        && componentRows.length === 0 && ticketRows.length === 0 && !ctx && !rigName) {
       return;
     }
 
@@ -494,6 +532,7 @@
       bhaRows,
       toolRows,
       activityRows,
+      ticketRows,
       rigName,
       componentRows,
       bhaContext:    ctx?.bha   ?? null,
@@ -552,6 +591,7 @@
         const bhaRows  = tables.filter((t) => t.tableType === "bha").flatMap((t) => t.rows);
         const toolRows = tables.filter((t) => t.tableType === "tools").flatMap((t) => t.rows);
         const activityRowsRaw = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
+        const ticketRows = tables.filter((t) => t.tableType === "tickets").flatMap((t) => t.rows);
         const ctx      = detectBhaContext();
         const footerFt = findActivityMetreFooterOnPage();
         const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
@@ -561,17 +601,18 @@
                   .flatMap((t) => t.rows.map((r) => ({ ...r, __bha: ctx.bha })))
           : [];
 
-        if (bhaRows.length > 0 || toolRows.length > 0 || activityRows.length > 0 || componentRows.length > 0) {
+        if (bhaRows.length > 0 || toolRows.length > 0 || activityRows.length > 0
+            || componentRows.length > 0 || ticketRows.length > 0 || rigName) {
           safeSend({
             type: "AUTO_SCRAPE",
-            bhaRows, toolRows, activityRows, rigName, componentRows,
+            bhaRows, toolRows, activityRows, ticketRows, rigName, componentRows,
             bhaContext:    ctx?.bha   ?? null,
             contextSource: ctx?.source ?? null,
             url: location.href,
           });
         }
         sendResponse({
-          ok: true, bhaRows, toolRows, activityRows, rigName, componentRows,
+          ok: true, bhaRows, toolRows, activityRows, ticketRows, rigName, componentRows,
           bhaContext: ctx?.bha ?? null, contextSource: ctx?.source ?? null,
         });
         return false;

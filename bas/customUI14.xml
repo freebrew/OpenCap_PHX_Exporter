@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui" onLoad="Ribbon_OnLoad">
+  <ribbon>
+    <tabs>
+      <tab idMso="TabHome">
+        <group id="grpPipeTallyHome" label="Pipe Tally" insertAfterMso="GroupClipboard">
+          <button id="btnOpenPipeTallyHome" label="PipeTally Calculator" size="large" onAction="RibbonShowPipeTally"/>
+        </group>
+      </tab>
+      <tab id="tabPipeTally" label="PipeTally Calculator">
+        <group id="grpPipeTally" label="Pipe Tally">
+          <button id="btnOpenPipeTally" label="Open Calculator" size="large" onAction="RibbonShowPipeTally"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>

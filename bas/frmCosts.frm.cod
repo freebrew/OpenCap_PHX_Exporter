@@ -1,0 +1,198 @@
+Option Explicit
+
+Private m_busy As Boolean
+Private m_viewYear As Long
+Private m_viewMonth As Long
+Private m_selected As Long
+Private m_dayBtns(1 To 42) As clsCostDayBtn
+
+Private Sub UserForm_Initialize()
+    Dim i As Long
+    Dim ctl As MSForms.CommandButton
+
+    m_busy = True
+    Me.Caption = "Costs"
+
+    For i = 1 To 42
+        Set m_dayBtns(i) = New clsCostDayBtn
+        Set ctl = Me.Controls("btnDay" & Format$(i, "00"))
+        Set m_dayBtns(i).btn = ctl
+        Set m_dayBtns(i).ParentForm = Me
+        m_dayBtns(i).dateSerial = 0
+    Next i
+
+    cboBatch.Clear
+    cboBatch.AddItem ""
+    cboBatch.AddItem "Yes"
+    cboBatch.AddItem "No"
+    cboBatch.ListIndex = 0
+
+    m_viewYear = Year(Date)
+    m_viewMonth = Month(Date)
+    m_selected = CLng(Date)
+
+    RefreshView
+    m_busy = False
+End Sub
+
+Public Sub DayButtonClicked(ByVal dateSerial As Long)
+    If dateSerial <= 0 Then Exit Sub
+    m_selected = dateSerial
+    m_viewYear = Year(CDate(dateSerial))
+    m_viewMonth = Month(CDate(dateSerial))
+    LoadSelectedDay
+    RenderMonth
+End Sub
+
+Private Sub btnPrev_Click()
+    m_viewMonth = m_viewMonth - 1
+    If m_viewMonth < 1 Then
+        m_viewMonth = 12
+        m_viewYear = m_viewYear - 1
+    End If
+    RenderMonth
+End Sub
+
+Private Sub btnNext_Click()
+    m_viewMonth = m_viewMonth + 1
+    If m_viewMonth > 12 Then
+        m_viewMonth = 1
+        m_viewYear = m_viewYear + 1
+    End If
+    RenderMonth
+End Sub
+
+Private Sub btnSave_Click()
+    Dim daily As Double
+    Dim batchTxt As String
+
+    If m_selected <= 0 Then
+        MsgBox "Select a day first.", vbExclamation, "Costs"
+        Exit Sub
+    End If
+    If Len(Trim$(txtDaily.Text)) = 0 Then
+        MsgBox "Enter a Daily Cost.", vbExclamation, "Costs"
+        Exit Sub
+    End If
+    If Not IsNumeric(txtDaily.Text) Then
+        MsgBox "Daily Cost must be numeric.", vbExclamation, "Costs"
+        Exit Sub
+    End If
+
+    daily = CDbl(txtDaily.Text)
+    batchTxt = ""
+    On Error Resume Next
+    batchTxt = CStr(cboBatch.Value & "")
+    On Error GoTo 0
+
+    If CostsSetDay(m_selected, daily, batchTxt) Then
+        lblStatus.Caption = "Saved " & Format$(CDate(m_selected), "yyyy-mm-dd") & _
+                            ". Next REFRESH may overwrite from CSV."
+        RefreshView
+    Else
+        MsgBox "Could not save that day (Costs sheet full or unavailable).", _
+               vbExclamation, "Costs"
+    End If
+End Sub
+
+Private Sub btnRefresh_Click()
+    RefreshView
+    lblStatus.Caption = "Reloaded from Costs sheet."
+End Sub
+
+Private Sub btnClose_Click()
+    Unload Me
+End Sub
+
+Private Sub RefreshView()
+    m_busy = True
+    RenderMonth
+    LoadSelectedDay
+    m_busy = False
+End Sub
+
+Private Sub RenderMonth()
+    Dim first As Date
+    Dim startOffset As Long
+    Dim d As Date
+    Dim i As Long
+    Dim map As Object
+    Dim key As String
+    Dim hasData As Boolean
+
+    first = DateSerial(m_viewYear, m_viewMonth, 1)
+    startOffset = Weekday(first, vbSunday) - 1
+    lblMonth.Caption = Format$(first, "mmmm yyyy")
+
+    Set map = CostsDateMap()
+
+    For i = 1 To 42
+        d = DateAdd("d", i - 1 - startOffset, first)
+        m_dayBtns(i).dateSerial = CLng(d)
+        key = CStr(CLng(d))
+        hasData = map.Exists(key)
+
+        With m_dayBtns(i).btn
+            .Caption = CStr(Day(d))
+            .Enabled = True
+            If CLng(d) = m_selected Then
+                .BackColor = &H90EE90
+                .Font.Bold = True
+            ElseIf hasData Then
+                .BackColor = &HFFFFC0
+                .Font.Bold = False
+            ElseIf Month(d) = m_viewMonth Then
+                .BackColor = &HFFFFFF
+                .Font.Bold = False
+            Else
+                .BackColor = &HE8E8E8
+                .Font.Bold = False
+            End If
+            If Month(d) <> m_viewMonth Then
+                .ForeColor = &H808080
+            Else
+                .ForeColor = &H0
+            End If
+        End With
+    Next i
+End Sub
+
+Private Sub LoadSelectedDay()
+    Dim daily As Variant
+    Dim total As Variant
+    Dim batch As Variant
+    Dim found As Boolean
+    Dim batchStr As String
+    Dim j As Long
+
+    lblSelected.Caption = Format$(CDate(m_selected), "dddd, mmm d, yyyy")
+
+    CostsGetDay m_selected, daily, total, batch, found
+
+    If found And IsNumeric(daily) Then
+        txtDaily.Text = Format$(CDbl(daily), "0.00")
+    Else
+        txtDaily.Text = ""
+    End If
+
+    If found And IsNumeric(total) Then
+        lblTotal.Caption = Format$(CDbl(total), "$#,##0.00")
+    Else
+        lblTotal.Caption = "-"
+    End If
+
+    batchStr = Trim$(CStr(batch & ""))
+    cboBatch.ListIndex = 0
+    For j = 0 To cboBatch.ListCount - 1
+        If StrComp(CStr(cboBatch.List(j)), batchStr, vbTextCompare) = 0 Then
+            cboBatch.ListIndex = j
+            Exit For
+        End If
+    Next j
+    If cboBatch.ListIndex = 0 And Len(batchStr) > 0 Then
+        On Error Resume Next
+        cboBatch.AddItem batchStr
+        cboBatch.Value = batchStr
+        On Error GoTo 0
+    End If
+End Sub

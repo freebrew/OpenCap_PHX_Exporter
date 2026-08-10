@@ -35,3 +35,48 @@ logs/
 graphify-out/
 EA9D8C10
 start_litellm_BYOK.ps1
+
+# --- Merged from PHX_MR_Workbook_II (Slide Sheet workbook project) ---
+
+# Workbook backups: never commit (real-field copies contain PII)
+backups/
+*.bak_REAL_SENSITIVE_*
+
+# PII dumps
+docs/_setup_pii_dump.txt
+**/job_fields_dump.txt
+
+# Local / machine-specific
+Desktop.ini
+
+# Agent / IDE local tooling (not product)
+.superpowers/
+.github/skills/
+.cursor/
+
+# Corridor / render scratch (keep published PNGs tracked explicitly)
+docs/_corridor_test_*.txt
+docs/corridor_aa14_proof.png
+docs/wellbore_*_preview.html
+docs/email_preview.html
+docs/plan_profile.json
+docs/track_history.json
+docs/superpowers/
+docs/architecture/
+docs/daily_*.png
+docs/ac_table_bands.png
+
+# Older packaged extension zips (keep latest only in git)
+dist/OpenCap_DataExporter_v3.1.6.zip
+dist/OpenCap_DataExporter_v3.1.7.zip
+
+# Local VBA diagnostic / one-off scripts (keep modules + key ops tracked)
+bas/_*.ps1
+!bas/_sync_from_live_workbook.ps1
+!bas/_import_corridor.ps1
+!bas/_import_corridor_live.ps1
+!bas/_test_corridor.ps1
+!bas/_sanitize_setup_for_github.ps1
+!bas/_export_live_modules.ps1
+!bas/_check_compile_safe.ps1
+bas/live/

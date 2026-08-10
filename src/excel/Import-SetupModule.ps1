@@ -6,7 +6,10 @@ if ($PSVersionTable.PSEdition -eq "Core") {
 
 $ErrorActionPreference = "Stop"
 
-$setupPath = "C:\Users\User\Desktop\Vibe_Projects\PHX_FieldCap\src\excel\MDL_Setup.bas"
+$setupPath = Join-Path $PSScriptRoot "MDL_Setup.bas"
+if (-not (Test-Path $setupPath)) {
+    $setupPath = "Z:\PHX_FieldCap\src\excel\MDL_Setup.bas"
+}
 
 $xl = [Runtime.InteropServices.Marshal]::GetActiveObject("Excel.Application")
 $wb = $xl.Workbooks | Where-Object { $_.Name -like "OpenCap*" }

@@ -1,0 +1,1650 @@
+Attribute VB_Name = "MDL_CorridorImage"
+Option Explicit
+
+' ================================================================================
+'  MDL_CorridorImage
+'
+'  Renders the daily email graphic as one tall PNG. Canvas width is the former
+'  B2:F55 table width (238 + 240 + 308 + 107 + 130 = 1023). Band 1 is the dark
+'  wellbore corridor; Band 2 is the dark ops pack (day/BHA/motor/AC/motors).
+'
+'  The picture is a room the hole is flying through, in cabinet oblique:
+'
+'      world x -> measured depth              -> screen x, heavily compressed
+'      world y -> TVD plot (plotY = datum - TVD) -> screen y, heavily exaggerated
+'      world z -> left/right from the plan       -> oblique axis, receding
+'
+'  The hole hangs in the middle of the room and casts two shadows, and each shadow
+'  is a chart in its own right. The back / left walls carry up/down from the geo
+'  target as a FLAT +/- band (Slidesheet AB14) — not a sloping waypoint ribbon.
+'  The floor carries left/right against the lateral boundary from Slidesheet AA14
+'  (labels read the live cell; no hardcoded 10). Dark canvas throughout.
+'
+'  Two panels sit beside it: a true 1:1 vertical section of the whole well, and
+'  the last-survey / position / requirement figures as text. Those figures are the
+'  same ones the Data sheet prints in D7:F17; that block is read, never written, so
+'  its formulas and Module21's morning summary are untouched.
+'
+'  All plan maths comes from MDL_PlanGauge through its PG_* shims, so this picture
+'  and the on-screen proximity gauge can never disagree.
+'
+'  Geometry is a straight port of bas\_proto_tunnel_render.ps1. Coordinates below
+'  are in POINTS on the same 1023 x 445 grid the prototype used as pixels; drawing
+'  at points and exporting supersamples by 4/3, so the image stays crisp when the
+'  mail scales it back to 1023 px wide.
+'
+'  Entry points:
+'    RenderCorridorPng(path)              -> full report (corridor + ops), or ""
+'    RenderCorridorPng(path, "corridor")  -> light band only
+'    RenderCorridorPng(path, "ops")       -> dark ops band only
+'  EMAIL embeds corridor + ops as two stacked pictures so Outlook does not
+'  shrink one very tall image to fit the compose window.
+' ================================================================================
+
+Private Const CANVAS_W As Double = 1023
+Private Const CORRIDOR_H As Double = 445   ' light band height; full height is mCanvasH
+Private Const SHP_PREFIX As String = "OCC_"
+Private Const OPS_PAD As Double = 12
+Private Const OPS_GAP As Double = 8
+Private Const OPS_COL_GAP As Double = 10
+' Ops / metrics type is drawn larger so after Outlook fits the picture to the
+' reading pane the glyphs stay near body-text size.
+Private Const TYPE_SCALE_OPS As Double = 1.35
+Private Const TYPE_SCALE_META As Double = 1.2
+
+Private Const WINDOW_LEN As Double = 1220#      ' mMD of hole shown in the room
+Private Const RUN_AHEAD As Double = 20#         ' mMD drawn past the next waypoint
+
+' panel 1, the room
+Private Const V_X As Double = 12
+Private Const V_Y As Double = 30
+Private Const V_W As Double = 506
+Private Const V_H As Double = 376
+Private Const KZX As Double = 3#                ' oblique axis, pt per m of lateral
+Private Const KZY As Double = 2.2
+Private Const SXD As Double = 0.297             ' pt per m of measured depth
+Private Const DEV_SPAN_PT As Double = 220#      ' pt given to the whole up/down range
+
+' panel 2, the 1:1 vertical section, and the reporting-day block under it
+Private Const P_X As Double = 530
+Private Const P_Y As Double = 30
+Private Const P_W As Double = 232
+Private Const P_H As Double = 250
+Private Const Q_Y As Double = 290
+Private Const Q_H As Double = 116
+
+' panel 3, the metrics
+Private Const M_X As Double = 774
+Private Const M_W As Double = 237
+Private Const M_H As Double = 376
+
+Private Const SS_WP_ROW_FIRST As Long = 14
+Private Const SS_WP_ROW_LAST As Long = 33
+Private Const SS_WP_COL_MD As Long = 29         ' AC
+Private Const SS_WP_COL_TVD As Long = 30        ' AD
+Private Const SS_WP_COL_INC As Long = 31        ' AE  Inc to next
+Private Const SS_LAT_TOL_ADDR As String = "AA14"
+Private Const SS_BIT_COL As Long = 4            ' D, bit depth on the survey row
+
+Private Const PIE As Double = 3.14159265358979
+
+' ---- scene state, set by BuildScene and read by the projection ----------------
+Private mMD0 As Double, mMD1 As Double
+Private mDevHi As Double, mDevLo As Double
+Private mLatTol As Double, mLatBox As Double, mGeoHalf As Double
+Private mX0 As Double, mY0 As Double, mSV As Double
+
+' ---- gathered survey stations inside the window -------------------------------
+Private mSMD() As Double, mSDev() As Double, mSLat() As Double, mSTvd() As Double
+Private mSCount As Long
+' Vertical plot on the walls: plotY = geo TVD - as-drilled TVD (mSDev),
+' positive = high / shallower than geo. Flat corridor sits at +/- mGeoHalf.
+Private mTvdDatum As Double
+
+' ---- last survey and forward projection ---------------------------------------
+Private mSvyMD As Double, mSvyInc As Double, mSvyAzi As Double, mSvyTvd As Double
+Private mSvyDev As Double, mSvyLat As Double, mSvyPlanAzi As Double
+Private mBitMD As Double
+Private mWpMD As Double, mWpTvd As Double
+Private mToGo As Double, mReqInc As Double, mHoldDevEnd As Double, mHoldLatEnd As Double
+
+' ---- waypoints -----------------------------------------------------------------
+Private mWMD() As Double, mWTvd() As Double, mWInc() As Double
+Private mWCount As Long
+
+' ---- shape bookkeeping ----------------------------------------------------------
+Private mNames() As String
+Private mNameN As Long
+Private mSeq As Long
+Private mWs As Worksheet
+Private mCanvasH As Double
+Private mOpsOrigin As Double   ' top of dark ops band (0 for ops-only export)
+Private mTypeScale As Double   ' applied inside Tx
+
+' ---- diagnostics ---------------------------------------------------------------
+' The renderer runs unattended inside the mail build, and under automation an
+' untrapped error opens the VBE and hangs the caller forever. Every entry point
+' therefore traps, records where it got to, and returns empty.
+Private mStage As String
+Private mLastError As String
+
+' When the renderer is driven from outside Excel, an untrapped error parks the VBE
+' in break mode and the caller just sees a hang with nothing to read. The trace
+' file is written as work proceeds, so the last line in it names the step that
+' stalled even when nothing can be got back through COM.
+Private Const TRACE_ON As Boolean = True
+
+Private Sub Trace(ByVal s As String)
+    If Not TRACE_ON Then Exit Sub
+    Dim f As Integer
+    On Error Resume Next
+    f = FreeFile
+    Open Environ$("TEMP") & "\corridor_trace.txt" For Append As #f
+    Print #f, Format$(Now, "hh:nn:ss") & "  " & s
+    Close #f
+    On Error GoTo 0
+End Sub
+
+Public Sub CorridorTraceReset()
+    On Error Resume Next
+    Kill Environ$("TEMP") & "\corridor_trace.txt"
+    On Error GoTo 0
+End Sub
+
+
+' ================================================================================
+'  PUBLIC ENTRY
+' ================================================================================
+Public Function RenderCorridorPng(Optional ByVal outPath As String = "", _
+                                  Optional ByVal band As String = "all") As String
+    Dim ss As Worksheet, dt As Worksheet
+    Dim wasProt As Boolean
+    Dim prevUpdating As Boolean
+    Dim drawn As Boolean
+    Dim wantCorridor As Boolean, wantOps As Boolean
+
+    RenderCorridorPng = ""
+    mLastError = ""
+    mStage = "start"
+    mTypeScale = 1#
+    On Error GoTo Fail
+
+    band = LCase$(Trim$(band))
+    If band = "" Then band = "all"
+    wantCorridor = (band = "all" Or band = "corridor")
+    wantOps = (band = "all" Or band = "ops")
+    If Not wantCorridor And Not wantOps Then Err.Raise 5, , "band must be all|corridor|ops"
+
+    mStage = "resolve sheets"
+    On Error Resume Next
+    Set ss = ThisWorkbook.Worksheets(MDL_PlanGauge.PG_SlidesheetName)
+    Set dt = ThisWorkbook.Worksheets("Data")
+    On Error GoTo Fail
+    If ss Is Nothing Then Err.Raise 5, , "Slidesheet not found"
+    If dt Is Nothing Then Err.Raise 5, , "Data sheet not found"
+
+    If outPath = "" Then
+        outPath = Environ$("TEMP") & "\corridor_" & band & "_" & Format$(Now, "yyyymmdd_hhnnss") & ".png"
+    End If
+
+    mStage = "BuildScene"
+    If Not BuildScene(ss) Then Err.Raise 5, , "BuildScene returned False"
+
+    If wantCorridor And wantOps Then
+        mOpsOrigin = CORRIDOR_H
+        mCanvasH = CORRIDOR_H + MeasureOpsHeight(dt)
+    ElseIf wantCorridor Then
+        mOpsOrigin = CORRIDOR_H
+        mCanvasH = CORRIDOR_H
+    Else
+        mOpsOrigin = 0
+        mCanvasH = MeasureOpsHeight(dt)
+    End If
+
+    prevUpdating = Application.ScreenUpdating
+    Set mWs = ss
+    mNameN = 0
+    mSeq = 0
+    ReDim mNames(0 To 2047)
+
+    mStage = "unprotect"
+    wasProt = MDL_SheetProtect.SheetUnprotectForVba(ss)
+    drawn = True
+    Application.ScreenUpdating = False
+
+    mStage = "DrawCanvas": DrawCanvas
+    If wantCorridor Then
+        mTypeScale = TYPE_SCALE_META
+        mStage = "DrawRoom": DrawRoom
+        mStage = "DrawSection": DrawSection ss
+        mStage = "DrawDay": DrawDay dt
+        mStage = "DrawMetrics": DrawMetrics ss, dt
+    End If
+    If wantOps Then
+        mTypeScale = TYPE_SCALE_OPS
+        mStage = "DrawOps": DrawOps dt
+    End If
+    mTypeScale = 1#
+
+    ' Keep ScreenUpdating off through export so sheet activates / chart paste do
+    ' not paint. CopyPicture still works against the shape model.
+    mStage = "ExportGroup"
+    RenderCorridorPng = ExportGroup(outPath)
+    If RenderCorridorPng = "" Then mLastError = "ExportGroup produced no file"
+
+    mStage = "cleanup"
+    GoTo Done
+
+Fail:
+    mLastError = "stage=" & mStage & " err=" & Err.Number & " " & Err.Description
+    RenderCorridorPng = ""
+
+Done:
+    On Error Resume Next
+    If drawn Then
+        DeleteDrawn
+        MDL_SheetProtect.SheetReprotectAfterVba ss, wasProt
+    End If
+    Application.ScreenUpdating = prevUpdating
+    mTypeScale = 1#
+    Set mWs = Nothing
+End Function
+
+' Whatever went wrong on the last RenderCorridorPng call, "" if it succeeded.
+Public Function CorridorLastError() As String
+    CorridorLastError = mLastError
+End Function
+
+' A one-line description of the scene, for checking the picture against the sheet
+' without having to open the PNG.
+Public Function CorridorSceneInfo() As String
+    CorridorSceneInfo = "window " & Format$(mMD0, "#,##0") & "-" & Format$(mMD1, "#,##0") & _
+        " mMD; " & mSCount & " stations; geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & _
+        " m; lateral " & ChrW(177) & Format$(mLatTol, "0.00") & " m; last svy " & _
+        Format$(mSvyMD, "#,##0.00") & " inc " & Format$(mSvyInc, "0.00") & _
+        " dev " & Format$(mSvyDev, "0.00") & " lat " & Format$(mSvyLat, "0.00") & _
+        "; next wp " & Format$(mWpMD, "#,##0") & " to go " & Format$(mToGo, "0.0") & _
+        " req " & Format$(mReqInc, "0.00") & " shapes " & mNameN
+End Function
+
+' Proves the VBE is honouring On Error rather than breaking on every error, which
+' otherwise makes an unattended render look like a hang.
+Public Function CorridorProbe() As String
+    On Error GoTo Trapped
+    CorridorProbe = "NOT TRAPPED"
+    Err.Raise 5, , "probe"
+    Exit Function
+Trapped:
+    CorridorProbe = "trapped ok: " & Err.Description
+End Function
+
+' Runs the render up to a named stage and stops, so a failure can be bisected
+' without the VBE. stopAfter: scene | canvas | room | section | day | metrics | export
+Public Function CorridorDiag(ByVal stopAfter As String) As String
+    Dim ss As Worksheet, dt As Worksheet
+    Dim wasProt As Boolean, drawn As Boolean
+    Dim png As String
+
+    mLastError = ""
+    mStage = "start"
+    On Error GoTo Fail
+
+    Set ss = ThisWorkbook.Worksheets(MDL_PlanGauge.PG_SlidesheetName)
+    Set dt = ThisWorkbook.Worksheets("Data")
+
+    mStage = "scene"
+    If Not BuildScene(ss) Then Err.Raise 5, , "BuildScene returned False"
+    mOpsOrigin = CORRIDOR_H
+    mCanvasH = CORRIDOR_H + MeasureOpsHeight(dt)
+    mTypeScale = 1#
+    If stopAfter = "scene" Then GoTo Done
+
+    Set mWs = ss
+    mNameN = 0: mSeq = 0
+    ReDim mNames(0 To 2047)
+    wasProt = MDL_SheetProtect.SheetUnprotectForVba(ss)
+    drawn = True
+
+    mStage = "canvas": DrawCanvas
+    If stopAfter = "canvas" Then GoTo Done
+    mStage = "room": DrawRoom
+    If stopAfter = "room" Then GoTo Done
+    mStage = "section": DrawSection ss
+    If stopAfter = "section" Then GoTo Done
+    mStage = "day": DrawDay dt
+    If stopAfter = "day" Then GoTo Done
+    mStage = "metrics": DrawMetrics ss, dt
+    If stopAfter = "metrics" Then GoTo Done
+    mStage = "ops": DrawOps dt
+    If stopAfter = "ops" Then GoTo Done
+
+    mStage = "export"
+    png = ExportGroup(Environ$("TEMP") & "\corridor_diag.png")
+    If png = "" Then Err.Raise 5, , "ExportGroup produced no file"
+
+Done:
+    CorridorDiag = "OK through " & mStage & " | " & CorridorSceneInfo()
+    GoTo Finish
+
+Fail:
+    CorridorDiag = "FAIL at " & mStage & " | err " & Err.Number & " " & Err.Description
+
+Finish:
+    On Error Resume Next
+    If drawn Then
+        DeleteDrawn
+        MDL_SheetProtect.SheetReprotectAfterVba ss, wasProt
+    End If
+    Set mWs = Nothing
+End Function
+
+' Dev helper: render once and say where it landed.
+Public Sub TestRenderCorridor()
+    Dim p As String: p = RenderCorridorPng()
+    If p = "" Then
+        MsgBox "Corridor render failed." & vbCrLf & CorridorLastError(), vbExclamation
+    Else
+        MsgBox "Corridor PNG written to:" & vbCrLf & p & vbCrLf & vbCrLf & CorridorSceneInfo(), vbInformation
+    End If
+End Sub
+
+
+' ================================================================================
+'  SCENE
+' ================================================================================
+Private Function BuildScene(ss As Worksheet) As Boolean
+    BuildScene = False
+    Trace "BuildScene enter"
+
+    mGeoHalf = MDL_PlanGauge.PG_WaypointHalfWidth(ss)
+    If mGeoHalf <= 0# Then mGeoHalf = 2#
+    Trace "  geoHalf=" & mGeoHalf
+    mLatTol = Abs(LatTolFromCell(ss.Range(SS_LAT_TOL_ADDR)))
+    If mLatTol <= 0# Then mLatTol = 10#   ' last-resort default if AA14 empty
+    mLatBox = mLatTol * 1.25
+    Trace "  latTol(AA14)=" & mLatTol
+
+    If Not LoadWaypoints(ss) Then Exit Function
+    Trace "  waypoints=" & mWCount
+    If Not WalkSurveys(ss, True) Then Exit Function      ' pass 1: find the last survey
+    Trace "  pass1 done svyMD=" & mSvyMD & " bitMD=" & mBitMD
+
+    ' The window ends just past the waypoint being drilled to, and reaches back a
+    ' fixed run of hole so the picture keeps a constant scale day to day.
+    Dim i As Long
+    mWpMD = mWMD(mWCount - 1): mWpTvd = mWTvd(mWCount - 1)
+    For i = 0 To mWCount - 1
+        If mWMD(i) > mSvyMD Then
+            mWpMD = mWMD(i): mWpTvd = mWTvd(i)
+            Exit For
+        End If
+    Next i
+
+    mMD1 = mWpMD + RUN_AHEAD
+    mMD0 = mMD1 - WINDOW_LEN
+    Trace "  window " & mMD0 & " to " & mMD1 & " nextWp=" & mWpMD
+
+    If Not WalkSurveys(ss, False) Then Exit Function      ' pass 2: collect the window
+    Trace "  pass2 done stations=" & mSCount
+    If mSCount < 2 Then Exit Function
+
+    ' Datum kept for footer/debug; plot space is flat geo-relative deviation.
+    If Not MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mMD0, mTvdDatum) Then
+        mTvdDatum = mSTvd(0)
+    End If
+
+    ' Vertical extent from hole high/low (mSDev) and the flat geo +/- band.
+    Dim mid As Double
+    mDevHi = -1E+99: mDevLo = 1E+99
+    For i = 0 To mSCount - 1
+        If mSDev(i) > mDevHi Then mDevHi = mSDev(i)
+        If mSDev(i) < mDevLo Then mDevLo = mSDev(i)
+    Next i
+    If mGeoHalf > mDevHi Then mDevHi = mGeoHalf
+    If -mGeoHalf < mDevLo Then mDevLo = -mGeoHalf
+    mDevHi = mDevHi + 1#
+    mDevLo = mDevLo - 1#
+    If mDevHi - mDevLo < 8# Then
+        mid = (mDevHi + mDevLo) / 2#
+        mDevHi = mid + 4#: mDevLo = mid - 4#
+    End If
+
+    mSV = DEV_SPAN_PT / (mDevHi - mDevLo)
+    mX0 = V_X + 70
+    mY0 = V_Y + 42.5 + mDevHi * mSV + mLatBox * KZY
+
+    mToGo = mWpMD - mSvyMD
+    If mToGo <= 0# Then mToGo = 1#
+    Dim c As Double
+    c = (mWpTvd - mSvyTvd) / mToGo
+    If c > 1# Then c = 1#
+    If c < -1# Then c = -1#
+    mReqInc = WorksheetFunction.Acos(c) * 180# / PIE
+    mHoldDevEnd = mWpTvd - (mSvyTvd + mToGo * Cos(mSvyInc * PIE / 180#))
+    mHoldLatEnd = mSvyLat + mToGo * Sin((mSvyAzi - mSvyPlanAzi) * PIE / 180#)
+
+    Trace "BuildScene ok " & CorridorSceneInfo()
+    BuildScene = True
+End Function
+
+Private Function LoadWaypoints(ss As Worksheet) As Boolean
+    LoadWaypoints = False
+    ReDim mWMD(0 To SS_WP_ROW_LAST - SS_WP_ROW_FIRST + 1)
+    ReDim mWTvd(0 To SS_WP_ROW_LAST - SS_WP_ROW_FIRST + 1)
+    ReDim mWInc(0 To SS_WP_ROW_LAST - SS_WP_ROW_FIRST + 1)
+    mWCount = 0
+
+    Dim r As Long, vM As Variant, vT As Variant, vI As Variant
+    For r = SS_WP_ROW_FIRST To SS_WP_ROW_LAST
+        vM = ss.Cells(r, SS_WP_COL_MD).Value2
+        vT = ss.Cells(r, SS_WP_COL_TVD).Value2
+        vI = ss.Cells(r, SS_WP_COL_INC).Value2
+        If Not IsArray(vM) And Not IsArray(vT) Then
+            If IsNumeric(vM) And IsNumeric(vT) Then
+                If Len(Trim$(CStr(vM & ""))) > 0 And Len(Trim$(CStr(vT & ""))) > 0 Then
+                    Dim keep As Boolean
+                    If mWCount = 0 Then keep = True Else keep = (CDbl(vM) > mWMD(mWCount - 1))
+                    If keep Then
+                        mWMD(mWCount) = CDbl(vM)
+                        mWTvd(mWCount) = CDbl(vT)
+                        If IsNumeric(vI) And Len(Trim$(CStr(vI & ""))) > 0 Then
+                            mWInc(mWCount) = CDbl(vI)
+                        Else
+                            mWInc(mWCount) = 0#
+                        End If
+                        mWCount = mWCount + 1
+                    End If
+                End If
+            End If
+        End If
+    Next r
+    LoadWaypoints = (mWCount >= 2)
+End Function
+
+' Integrates the survey block once. findLastOnly stops at recording the final
+' station; otherwise every station inside the window is captured as well.
+Private Function WalkSurveys(ss As Worksheet, ByVal findLastOnly As Boolean) As Boolean
+    Dim pMD() As Double
+    Dim pInc() As Double
+    Dim pAzi() As Double
+    Dim pTvd() As Double
+    Dim pNS() As Double
+    Dim pEW() As Double
+    Dim np As Long
+    Dim prevMD As Double
+    Dim prevInc As Double
+    Dim prevAzi As Double
+    Dim curN As Double
+    Dim curE As Double
+    Dim curV As Double
+    Dim lastRow As Long
+    Dim r As Long
+    Dim rowFirst As Long
+    Dim rowLast As Long
+    Dim vMD As Variant
+    Dim vInc As Variant
+    Dim vAzi As Variant
+    Dim mdv As Double
+    Dim incv As Double
+    Dim aziv As Double
+    Dim dVert As Double
+    Dim dNorth As Double
+    Dim dEast As Double
+    Dim dev As Double
+    Dim lat As Double
+    Dim ok As Boolean
+    ' Plan position at the station. Do not shorten these to oN / oE: VBA is
+    ' case-insensitive, so a variable called oN is the reserved word On and the
+    ' whole procedure fails to compile with a bare "Syntax error".
+    Dim planN As Double
+    Dim planE As Double
+    Dim planV As Double
+    Dim planAzi As Double
+    Dim planInc As Double
+    Dim px As Double
+    Dim py As Double
+    Dim grav As Boolean
+    Dim wt As Double
+
+    WalkSurveys = False
+    Trace "  WalkSurveys findLastOnly=" & findLastOnly
+
+    np = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
+    Trace "  plan points=" & np
+    If np < 2 Then Exit Function
+
+    If Not findLastOnly Then
+        ReDim mSMD(0 To 511)
+        ReDim mSDev(0 To 511)
+        ReDim mSTvd(0 To 511)
+        ReDim mSLat(0 To 511)
+        mSCount = 0
+    End If
+
+    rowFirst = MDL_PlanGauge.PG_SurvRowFirst
+    rowLast = MDL_PlanGauge.PG_SurvRowLast
+
+    For r = rowFirst To rowLast
+        If Not MDL_PlanGauge.PG_IsSurveySummaryRow(ss, r) Then
+            vMD = ss.Cells(r, 5).Value2
+            vInc = ss.Cells(r, 6).Value2
+            vAzi = ss.Cells(r, 7).Value2
+
+            ok = IsNumeric(vMD) And IsNumeric(vInc) And IsNumeric(vAzi)
+            If ok Then
+                ok = Len(CStr(vMD & "")) > 0
+            End If
+            If ok Then
+                ok = Len(CStr(vInc & "")) > 0
+            End If
+            If ok Then
+                ok = Len(CStr(vAzi & "")) > 0
+            End If
+
+            If ok Then
+                mdv = CDbl(vMD)
+                If mdv > prevMD Then
+                    incv = CDbl(vInc)
+                    aziv = CDbl(vAzi)
+                    MDL_PlanGauge.PG_McStep prevMD, prevInc, prevAzi, mdv, incv, aziv, dVert, dNorth, dEast
+                    curN = curN + dNorth
+                    curE = curE + dEast
+                    curV = curV + dVert
+                    prevMD = mdv
+                    prevInc = incv
+                    prevAzi = aziv
+                    lastRow = r
+
+                    If Not findLastOnly Then
+                        If mdv >= mMD0 And mdv <= mMD1 And mSCount <= 511 Then
+                            If StationOffsets(ss, mdv, incv, curN, curE, curV, np, pMD, pInc, pAzi, pTvd, pNS, pEW, dev, lat) Then
+                                mSMD(mSCount) = mdv
+                                mSDev(mSCount) = dev
+                                mSLat(mSCount) = lat
+                                mSTvd(mSCount) = curV
+                                mSCount = mSCount + 1
+                            End If
+                        End If
+                    End If
+                End If
+            End If
+        End If
+    Next r
+
+    If prevMD <= 0# Then Exit Function
+
+    If findLastOnly Then
+        mSvyMD = prevMD
+        mSvyInc = prevInc
+        mSvyAzi = prevAzi
+        mSvyTvd = curV
+
+        MDL_PlanGauge.PG_PlanAt prevMD, np, pMD, pInc, pAzi, pTvd, pNS, pEW, planN, planE, planV, planAzi, planInc
+        mSvyPlanAzi = planAzi
+
+        grav = (prevInc >= MDL_PlanGauge.PG_CrossoverInc)
+        MDL_PlanGauge.PG_FrameComponents grav, planAzi, curN - planN, curE - planE, planV - curV, px, py
+        mSvyLat = px
+
+        If MDL_PlanGauge.PG_WaypointTvdAtMd(ss, prevMD, wt) Then
+            mSvyDev = wt - curV
+        End If
+
+        mBitMD = NumCell(ss.Cells(lastRow, SS_BIT_COL))
+        If mBitMD < prevMD Then mBitMD = prevMD
+    End If
+
+    WalkSurveys = True
+End Function
+
+' Up/down against the geo target line and left/right against the plan, for one
+' station. Returns False when the station sits outside the waypoint table, which
+' is the case above the first waypoint - plotting it would draw a phantom zero.
+Private Function StationOffsets(ss As Worksheet, ByVal md As Double, ByVal inc As Double, ByVal curN As Double, ByVal curE As Double, ByVal curV As Double, ByVal np As Long, pMD() As Double, pInc() As Double, pAzi() As Double, pTvd() As Double, pNS() As Double, pEW() As Double, ByRef outDev As Double, ByRef outLat As Double) As Boolean
+    Dim wt As Double
+    Dim planN As Double
+    Dim planE As Double
+    Dim planV As Double
+    Dim planAzi As Double
+    Dim planInc As Double
+    Dim px As Double
+    Dim py As Double
+    Dim grav As Boolean
+
+    StationOffsets = False
+
+    If Not MDL_PlanGauge.PG_WaypointTvdAtMd(ss, md, wt) Then Exit Function
+    outDev = wt - curV
+
+    MDL_PlanGauge.PG_PlanAt md, np, pMD, pInc, pAzi, pTvd, pNS, pEW, planN, planE, planV, planAzi, planInc
+
+    grav = (inc >= MDL_PlanGauge.PG_CrossoverInc)
+    MDL_PlanGauge.PG_FrameComponents grav, planAzi, curN - planN, curE - planE, planV - curV, px, py
+    outLat = px
+    StationOffsets = True
+End Function
+
+
+' ================================================================================
+'  PROJECTION
+' ================================================================================
+Private Function ObX(ByVal md As Double, ByVal lat As Double) As Double
+    ObX = mX0 + (md - mMD0) * SXD + lat * KZX
+End Function
+
+Private Function ObY(ByVal plot As Double, ByVal lat As Double) As Double
+    ObY = mY0 - plot * mSV - lat * KZY
+End Function
+
+' Screen-up metres relative to the window-start geo TVD (positive = shallower).
+Private Function PlotY(ByVal tvd As Double) As Double
+    PlotY = mTvdDatum - tvd
+End Function
+
+
+' ================================================================================
+'  DRAWING - PANEL 1, THE ROOM
+' ================================================================================
+Private Sub DrawCanvas()
+    If mCanvasH < 40# Then mCanvasH = 40#
+    ' Full report is one continuous dark canvas (corridor + ops).
+    Rect 0, 0, CANVAS_W, mCanvasH, H("1A1A1A"), H("1A1A1A"), 0.5
+End Sub
+
+Private Sub DrawRoom()
+    Dim i As Long
+    Dim plot As Double
+    Dim latLbl As String
+
+    Tx V_X, 20, "WELLBORE CORRIDOR " & ChrW(8212) & " " & Format$(mMD0, "#,##0") & _
+       " to " & Format$(mMD1, "#,##0") & " mMD", 12.5, H("FFFFFF"), "start", True
+    Rect V_X, V_Y, V_W, V_H, H("222222"), H("3A3A3A"), 0.75
+
+    ' ---- back wall, at lat = +mLatBox -----------------------------------------
+    Quad mMD0, mDevHi, mLatBox, mMD1, mDevHi, mLatBox, _
+         mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, H("2A2A2A"), H("4A4A4A"), 0.75
+
+    ' ---- left wall, at lat = -mLatBox : looking down the hole -----------------
+    Quad mMD0, mDevHi, -mLatBox, mMD1, mDevHi, -mLatBox, _
+         mMD1, mDevLo, -mLatBox, mMD0, mDevLo, -mLatBox, H("242424"), H("4A4A4A"), 0.75
+
+    ' Grid ticks (0 = on geo target), then the FLAT geo +/- ribbon.
+    Dim dv As Double
+    For dv = Int(mDevHi / 2#) * 2# To mDevLo Step -2#
+        Dim isZero As Boolean: isZero = (Abs(dv) < 0.001)
+        Ln ObX(mMD0, mLatBox), ObY(dv, mLatBox), ObX(mMD1, mLatBox), ObY(dv, mLatBox), _
+           IIf(isZero, H("555555"), H("3A3A3A")), 0.7, IIf(isZero, msoLineDash, msoLineSysDot)
+        Ln ObX(mMD0, -mLatBox), ObY(dv, -mLatBox), ObX(mMD1, -mLatBox), ObY(dv, -mLatBox), _
+           IIf(isZero, H("444444"), H("333333")), 0.6, IIf(isZero, msoLineDash, msoLineSysDot)
+        Ln ObX(mMD0, -mLatBox), ObY(dv, -mLatBox), ObX(mMD0, mLatBox), ObY(dv, mLatBox), _
+           H("3A3A3A"), 0.6, msoLineSolid
+        Tx ObX(mMD0, -mLatBox) - 5, ObY(dv, -mLatBox) + 3, SignedM(dv), 8.5, H("A8A8A8"), "end"
+    Next dv
+
+    DrawFlatGeoCorridor mLatBox, H("1E3A2F"), H("4CAF7A"), 1.15
+    DrawFlatGeoCorridor -mLatBox, H("1A3328"), H("3D6B54"), 1#
+
+    Tx ObX(mMD1, mLatBox) - 4, ObY(mGeoHalf, mLatBox) - 4, _
+       "geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", 8, H("4CAF7A"), "end"
+
+    ' ---- floor, at plot = mDevLo : left/right against AA14 lateral boundary ----
+    Quad mMD0, mDevLo, -mLatBox, mMD1, mDevLo, -mLatBox, _
+         mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, H("252825"), H("4A4A4A"), 0.75
+    Quad mMD0, mDevLo, -mLatTol, mMD1, mDevLo, -mLatTol, _
+         mMD1, mDevLo, mLatTol, mMD0, mDevLo, mLatTol, H("1E3A2F"), H("4CAF7A"), 1#
+    Ln ObX(mMD0, 0), ObY(mDevLo, 0), ObX(mMD1, 0), ObY(mDevLo, 0), H("4CAF7A"), 0.7, msoLineDash
+
+    ' L/R boundary labels straight from Slidesheet AA14 (two decimals, as displayed)
+    latLbl = Format$(mLatTol, "0.00")
+    Tx ObX(mMD1, mLatTol) + 4, ObY(mDevLo, mLatTol) + 3, _
+       latLbl & " R", 8, H("4CAF7A"), "start"
+    Tx ObX(mMD1, 0) + 4, ObY(mDevLo, 0) + 3, "plan", 8, H("4CAF7A"), "start"
+    Tx ObX(mMD1, -mLatTol) + 4, ObY(mDevLo, -mLatTol) + 3, _
+       latLbl & " L", 8, H("4CAF7A"), "start"
+
+    ' ---- near end wall, at md = mMD0 : flat corridor cross-section ------------
+    Quad mMD0, mDevHi, -mLatBox, mMD0, mDevHi, mLatBox, _
+         mMD0, mDevLo, mLatBox, mMD0, mDevLo, -mLatBox, H("2A2A2A"), H("4A4A4A"), 0.75
+    Quad mMD0, mGeoHalf, -mLatTol, mMD0, mGeoHalf, mLatTol, _
+         mMD0, -mGeoHalf, mLatTol, mMD0, -mGeoHalf, -mLatTol, H("1E3A2F"), H("4CAF7A"), 1.2
+
+    ' ---- room wireframe: ceiling and the open front edges ----------------------
+    Ln ObX(mMD0, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, mLatBox), ObY(mDevHi, mLatBox), H("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD0, -mLatBox), ObY(mDevLo, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
+
+    ' ---- two shadows (back wall + floor), then the hole -------------------------
+    ' Near-wall shadow removed (duplicated the back wall) and no station dropper
+    ' lines - they crowded the room.
+    Dim xs() As Double, ys() As Double
+    ReDim xs(0 To mSCount - 1): ReDim ys(0 To mSCount - 1)
+    For i = 0 To mSCount - 1
+        plot = mSDev(i)
+        xs(i) = ObX(mSMD(i), mLatBox): ys(i) = ObY(plot, mLatBox)
+    Next i
+    PolyLine xs, ys, mSCount, H("6E8A7C"), 1.8, msoLineDash
+
+    For i = 0 To mSCount - 1
+        xs(i) = ObX(mSMD(i), mSLat(i)): ys(i) = ObY(mDevLo, mSLat(i))
+    Next i
+    PolyLine xs, ys, mSCount, H("6E8A7C"), 1.8, msoLineDash
+
+    ' ---- the hole itself, floating in the middle of the room -------------------
+    For i = 0 To mSCount - 1
+        plot = mSDev(i)
+        xs(i) = ObX(mSMD(i), mSLat(i)): ys(i) = ObY(plot, mSLat(i))
+    Next i
+    PolyLine xs, ys, mSCount, H("FFFFFF"), 2.8, msoLineSolid
+
+    ' Waypoint MD markers only — no incline / decline attitude ticks.
+    DrawWaypointMarks
+
+    Dim iWorstDev As Long, iWorstLat As Long
+    iWorstDev = 0: iWorstLat = 0
+    For i = 0 To mSCount - 1
+        Dim bust As Boolean
+        bust = (Abs(mSDev(i)) > mGeoHalf) Or (Abs(mSLat(i)) > mLatTol)
+        Dot xs(i), ys(i), 2.2, IIf(bust, H("FF5555"), H("FFFFFF")), -1, 0
+        If Abs(mSDev(i)) > Abs(mSDev(iWorstDev)) Then iWorstDev = i
+        If Abs(mSLat(i)) > Abs(mSLat(iWorstLat)) Then iWorstLat = i
+    Next i
+
+    ' worst excursions, each called out on the surface where it is measured
+    Dim wx As Double, wy As Double
+    wx = ObX(mSMD(iWorstDev), mLatBox): wy = ObY(mSDev(iWorstDev), mLatBox)
+    Ln wx, wy - 5, wx + 14, wy - 18, H("FF5555"), 0.8, msoLineSolid
+    Tx wx + 17, wy - 16, Format$(mSDev(iWorstDev), "0.00") & " m high at " & _
+       Format$(mSMD(iWorstDev), "#,##0"), 8.5, H("FF5555"), "start"
+
+    Tx ObX(mSMD(iWorstLat), mSLat(iWorstLat)), ObY(mDevLo, mSLat(iWorstLat)) + 11, _
+       Format$(Abs(mSLat(iWorstLat)), "0.0") & " m " & IIf(mSLat(iWorstLat) < 0, "L", "R"), _
+       8, H("8AAB9A"), "middle"
+
+    ' BIT only — no required / held waypoint incline-decline projections.
+    Dim bx As Double, by As Double
+    bx = ObX(mSvyMD, mSvyLat): by = ObY(mSvyDev, mSvyLat)
+    Dot bx, by, 5, H("FF5555"), H("1A1A1A"), 1.4
+    Tx bx - 8, by - 9, "BIT", 10, H("FF5555"), "end", True
+
+    ' ---- reporting-day span along the front foot of the room -------------------
+    ' Bar is clamped to the plotted MD window; label always shows the true day
+    ' depths. If the whole day lies outside the window, draw nothing rather than
+    ' a misleading zero-length bar.
+    Dim d0 As Double, d1 As Double, c0 As Double, c1 As Double, dy As Double
+    d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
+    d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
+    c0 = ClampMd(d0): c1 = ClampMd(d1)
+    If d1 > d0 And c1 - c0 > 0.5 Then
+        dy = V_Y + V_H - 16
+        Rect ObX(c0, -mLatBox), dy - 8, ObX(c1, -mLatBox) - ObX(c0, -mLatBox), 11, _
+             H("1A3348"), H("5BA3D9"), 0.75
+        Tx (ObX(c0, -mLatBox) + ObX(c1, -mLatBox)) / 2, dy, _
+           "24 h " & ChrW(183) & " " & Format$(d0, "#,##0") & " " & ChrW(8594) & " " & _
+           Format$(d1, "#,##0") & " m " & ChrW(183) & " " & Format$(d1 - d0, "#,##0") & " m", _
+           8.5, H("5BA3D9"), "middle"
+    End If
+
+    ' ---- captions and legend ---------------------------------------------------
+    Tx V_X + 6, V_Y + 16, "back / left walls " & ChrW(8212) & " up / down from geo target, m", 8.5, H("A8A8A8"), "start"
+    Tx V_X + V_W - 6, V_Y + V_H - 44, "floor " & ChrW(8212) & " left / right from plan, m", 8.5, H("A8A8A8"), "end"
+
+    Dim ly As Double: ly = V_Y + V_H + 15
+    Ln V_X + 2, ly, V_X + 18, ly, H("FFFFFF"), 2.6, msoLineSolid
+    Tx V_X + 22, ly + 4, "hole", 10, H("FFFFFF"), "start"
+    Ln V_X + 50, ly, V_X + 66, ly, H("6E8A7C"), 1.8, msoLineDash
+    Tx V_X + 70, ly + 4, "shadows", 10, H("FFFFFF"), "start"
+    Dot V_X + 122, ly, 3.2, H("FF5555"), H("1A1A1A"), 1.2
+    Tx V_X + 130, ly + 4, "BIT", 10, H("FFFFFF"), "start"
+    Dot V_X + 168, ly, 2.5, H("4CAF7A"), -1, 0
+    Tx V_X + 176, ly + 4, "WP", 10, H("FFFFFF"), "start"
+    Tx V_X + V_W, ly + 4, "measured depth " & ChrW(247) & Format$(1# / SXD, "0.0") & " " & _
+       ChrW(183) & " up/down " & ChrW(215) & Format$(mSV, "0") & " " & _
+       ChrW(183) & " left/right " & ChrW(215) & Format$(KZX, "0"), 8.5, H("A8A8A8"), "end"
+End Sub
+
+' Flat geo +/- corridor ribbon on one wall (no waypoint sloping).
+Private Sub DrawFlatGeoCorridor(ByVal lat As Double, ByVal fillRgb As Long, _
+                                ByVal lineRgb As Long, ByVal lineW As Double)
+    Quad mMD0, mGeoHalf, lat, mMD1, mGeoHalf, lat, _
+         mMD1, -mGeoHalf, lat, mMD0, -mGeoHalf, lat, fillRgb, -1, 0#
+    On Error Resume Next
+    mWs.Shapes(mNames(mNameN - 1)).Fill.transparency = 0.45
+    On Error GoTo 0
+    Ln ObX(mMD0, lat), ObY(mGeoHalf, lat), ObX(mMD1, lat), ObY(mGeoHalf, lat), _
+       lineRgb, lineW + 0.55, msoLineSolid
+    Ln ObX(mMD0, lat), ObY(-mGeoHalf, lat), ObX(mMD1, lat), ObY(-mGeoHalf, lat), _
+       lineRgb, lineW + 0.55, msoLineSolid
+    Ln ObX(mMD0, lat), ObY(0#, lat), ObX(mMD1, lat), ObY(0#, lat), _
+       lineRgb, 1#, msoLineDash
+End Sub
+
+' Marks each geo waypoint on the left-wall shadow with MD only (no Inc ticks).
+Private Sub DrawWaypointMarks()
+    Dim i As Long
+    For i = 0 To mWCount - 1
+        If mWMD(i) < mMD0 Or mWMD(i) > mMD1 Then GoTo NextWp
+
+        Dim plot As Double, lat As Double
+        If Not HoleAtMdPlot(mWMD(i), plot, lat) Then
+            ' Ahead of / off the surveyed hole: sit on geo centreline.
+            plot = 0#
+            lat = 0#
+        End If
+
+        Dim isNext As Boolean: isNext = (Abs(mWMD(i) - mWpMD) < 0.001)
+        Dim wx As Double, wy As Double
+        wx = ObX(mWMD(i), -mLatBox)
+        wy = ObY(plot, -mLatBox)
+
+        Dot wx, wy, IIf(isNext, 3.2, 2.4), H("4CAF7A"), H("1A1A1A"), 1
+        Tx wx, V_Y + V_H - 30, Format$(mWMD(i), "#,##0"), 8.5, _
+           IIf(isNext, H("4CAF7A"), H("A8A8A8")), "middle", isNext
+NextWp:
+    Next i
+End Sub
+
+' Interpolate as-drilled (geo-relative plotY, lat) at a measured depth.
+Private Function HoleAtMdPlot(ByVal md As Double, ByRef outPlot As Double, ByRef outLat As Double) As Boolean
+    HoleAtMdPlot = False
+    If mSCount < 1 Then Exit Function
+    If md < mSMD(0) - 0.01 Or md > mSMD(mSCount - 1) + 0.01 Then Exit Function
+    If mSCount = 1 Or md <= mSMD(0) Then
+        outPlot = mSDev(0): outLat = mSLat(0): HoleAtMdPlot = True: Exit Function
+    End If
+    If md >= mSMD(mSCount - 1) Then
+        outPlot = mSDev(mSCount - 1): outLat = mSLat(mSCount - 1): HoleAtMdPlot = True: Exit Function
+    End If
+    Dim i As Long
+    For i = 0 To mSCount - 2
+        If md >= mSMD(i) And md <= mSMD(i + 1) Then
+            Dim f As Double
+            If mSMD(i + 1) > mSMD(i) Then f = (md - mSMD(i)) / (mSMD(i + 1) - mSMD(i))
+            outPlot = mSDev(i) + f * (mSDev(i + 1) - mSDev(i))
+            outLat = mSLat(i) + f * (mSLat(i + 1) - mSLat(i))
+            HoleAtMdPlot = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+Private Function ClampMd(ByVal v As Double) As Double
+    ClampMd = v
+    If ClampMd < mMD0 Then ClampMd = mMD0
+    If ClampMd > mMD1 Then ClampMd = mMD1
+End Function
+
+Private Function SignedM(ByVal v As Double) As String
+    If Abs(v) < 0.001 Then
+        SignedM = "0"
+    ElseIf v > 0 Then
+        SignedM = "+" & Format$(v, "0.0")
+    Else
+        SignedM = ChrW(8722) & Format$(Abs(v), "0.0")
+    End If
+End Function
+
+
+' ================================================================================
+'  DRAWING - PANEL 2, THE TRUE 1:1 VERTICAL SECTION
+' ================================================================================
+Private Sub DrawSection(ss As Worksheet)
+    Dim pMD() As Double, pInc() As Double, pAzi() As Double
+    Dim pTvd() As Double, pNS() As Double, pEW() As Double
+    Dim np As Long
+    np = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
+    If np < 2 Then Exit Sub
+
+    ' Vertical section is the horizontal run projected on the plan's own heading,
+    ' taken from the final plan azimuth so the section plane matches the lateral.
+    Dim vsAzi As Double: vsAzi = pAzi(np - 1)
+    Dim vs() As Double
+    ReDim vs(0 To np - 1)
+    Dim i As Long
+    Dim maxVs As Double, maxTvd As Double
+    For i = 0 To np - 1
+        vs(i) = pNS(i) * Cos(vsAzi * PIE / 180#) + pEW(i) * Sin(vsAzi * PIE / 180#)
+        If vs(i) > maxVs Then maxVs = vs(i)
+        If pTvd(i) > maxTvd Then maxTvd = pTvd(i)
+    Next i
+    If maxVs <= 0# Or maxTvd <= 0# Then Exit Sub
+
+    Const PAD As Double = 20
+    Dim sc As Double
+    sc = maxVs / (P_W - 2 * PAD)
+    If maxTvd / (P_H - 2 * PAD) > sc Then sc = maxTvd / (P_H - 2 * PAD)
+    Dim gx As Double, gy As Double
+    gx = P_X + PAD: gy = P_Y + PAD
+
+    Tx P_X, 20, "VERTICAL SECTION " & ChrW(183) & " 1:1", 12.5, H("FFFFFF"), "start", True
+    Rect P_X, P_Y, P_W, P_H, H("222222"), H("3A3A3A"), 0.75
+
+    Ln gx - 8, gy, P_X + P_W - 8, gy, H("4A4A4A"), 1, msoLineSolid
+    Dim tv As Double
+    For tv = 1000 To maxTvd Step 1000
+        Ln gx - 4, gy + tv / sc, P_X + P_W - 8, gy + tv / sc, H("3A3A3A"), 0.6, msoLineSysDot
+        Tx gx - 6, gy + tv / sc + 3, Format$(tv, "#,##0"), 7.5, H("A8A8A8"), "end"
+    Next tv
+
+    ' the plan, split so drilled / remaining / today read differently
+    Dim d0 As Double, d1 As Double
+    d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
+    d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
+    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, 0, mBitMD, H("FFFFFF"), 2.4, msoLineSolid
+    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, mBitMD, pMD(np - 1), H("6A6A6A"), 1.6, msoLineDash
+    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, d0, d1, H("5BA3D9"), 4.2, msoLineSolid
+
+    For i = 0 To mWCount - 1
+        Dim wvs As Double, wtv As Double
+        If SectionAt(pMD, pTvd, vs, np, mWMD(i), wvs, wtv) Then
+            Dot gx + wvs / sc, gy + wtv / sc, 2, H("4CAF7A"), -1, 0
+        End If
+    Next i
+
+    ' build targets from Slidesheet!T2:Y5 - MD in U, name in Y. Repeated names
+    ' (TANGENT appears twice) are only labelled once.
+    Dim tRow As Long, prevName As String
+    For tRow = 2 To 5
+        Dim tMd As Double, tName As String
+        tMd = NumCell(ss.Cells(tRow, 21))
+        tName = Trim$(CStr(ss.Cells(tRow, 25).text))
+        If tMd > 0# And tName <> "" Then
+            Dim gvs As Double, gtv As Double
+            If SectionAt(pMD, pTvd, vs, np, tMd, gvs, gtv) Then
+                Dot gx + gvs / sc, gy + gtv / sc, 3, H("1A1A1A"), H("A8A8A8"), 1
+                If tName <> prevName Then
+                    Tx gx + gvs / sc - 7, gy + gtv / sc + 3, tName, 8, H("A8A8A8"), "end"
+                End If
+                prevName = tName
+            End If
+        End If
+    Next tRow
+
+    Dim bvs As Double, btv As Double
+    If SectionAt(pMD, pTvd, vs, np, mBitMD, bvs, btv) Then
+        Dot gx + bvs / sc, gy + btv / sc, 4, H("FF5555"), H("1A1A1A"), 1.2
+        Tx gx + bvs / sc, gy + btv / sc + 15, "BIT " & Format$(mBitMD, "#,##0"), 8.5, H("FF5555"), "middle", True
+    End If
+    Dim tvs As Double, ttv As Double
+    If SectionAt(pMD, pTvd, vs, np, pMD(np - 1), tvs, ttv) Then
+        Tx gx + tvs / sc, gy + ttv / sc - 8, "TD " & Format$(pMD(np - 1), "#,##0"), 8, H("A8A8A8"), "middle"
+    End If
+
+    Tx gx - 14, gy - 7, "TVD m", 8, H("A8A8A8"), "start"
+    Tx P_X + P_W - 8, P_Y + P_H - 7, "vertical section m " & ChrW(8594), 8, H("A8A8A8"), "end"
+End Sub
+
+Private Function SectionAt(pMD() As Double, pTvd() As Double, vs() As Double, _
+        ByVal np As Long, ByVal md As Double, _
+        ByRef outVs As Double, ByRef outTvd As Double) As Boolean
+    SectionAt = False
+    If np < 2 Then Exit Function
+    If md <= pMD(0) Then
+        outVs = vs(0): outTvd = pTvd(0): SectionAt = True: Exit Function
+    End If
+    If md >= pMD(np - 1) Then
+        outVs = vs(np - 1): outTvd = pTvd(np - 1): SectionAt = True: Exit Function
+    End If
+    Dim i As Long
+    For i = 0 To np - 2
+        If md >= pMD(i) And md <= pMD(i + 1) Then
+            Dim f As Double
+            If pMD(i + 1) > pMD(i) Then f = (md - pMD(i)) / (pMD(i + 1) - pMD(i))
+            outVs = vs(i) + f * (vs(i + 1) - vs(i))
+            outTvd = pTvd(i) + f * (pTvd(i + 1) - pTvd(i))
+            SectionAt = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+Private Sub SectionSeg(pMD() As Double, pTvd() As Double, vs() As Double, _
+        ByVal np As Long, ByVal sc As Double, ByVal gx As Double, ByVal gy As Double, _
+        ByVal mdA As Double, ByVal mdB As Double, _
+        ByVal clr As Long, ByVal wt As Double, ByVal dash As Long)
+    If mdB <= mdA Then Exit Sub
+
+    Dim xs() As Double, ys() As Double
+    ReDim xs(0 To np + 1): ReDim ys(0 To np + 1)
+    Dim n As Long: n = 0
+
+    Dim avs As Double, atv As Double
+    If SectionAt(pMD, pTvd, vs, np, mdA, avs, atv) Then
+        xs(n) = gx + avs / sc: ys(n) = gy + atv / sc: n = n + 1
+    End If
+    Dim i As Long
+    For i = 0 To np - 1
+        If pMD(i) > mdA And pMD(i) < mdB Then
+            xs(n) = gx + vs(i) / sc: ys(n) = gy + pTvd(i) / sc: n = n + 1
+        End If
+    Next i
+    Dim bvs As Double, btv As Double
+    If SectionAt(pMD, pTvd, vs, np, mdB, bvs, btv) Then
+        xs(n) = gx + bvs / sc: ys(n) = gy + btv / sc: n = n + 1
+    End If
+
+    PolyLine xs, ys, n, clr, wt, dash
+End Sub
+
+
+' ================================================================================
+'  DRAWING - REPORTING DAY AND METRICS
+'
+'  Every figure below is the Data sheet's own printed text, so the picture says
+'  exactly what the cells say and the D7:F17 block stays read-only.
+' ================================================================================
+Private Sub DrawDay(dt As Worksheet)
+    Rect P_X, Q_Y, P_W, Q_H, H("222222"), H("3A3A3A"), 0.75
+    Tx P_X + 11, Q_Y + 17, "REPORTING DAY", 9.5, H("FFFFFF"), "start", True
+    Ln P_X + 11, Q_Y + 22, P_X + P_W - 11, Q_Y + 22, H("4A4A4A"), 0.75, msoLineSolid
+
+    Dim y As Double: y = Q_Y + 38
+    KV P_X, P_W, y, "00:00 " & ChrW(8594) & " midnight", _
+       cellText(dt, "C4") & " " & ChrW(8594) & " " & cellText(dt, "C5"), 10, H("FFFFFF"), False
+    y = y + 17
+    KV P_X, P_W, y, "Drilled", cellText(dt, "C6"), 10, H("5BA3D9"), True
+    y = y + 17
+    KV P_X, P_W, y, "Slid / rotated", cellText(dt, "C7") & " / " & cellText(dt, "C8"), 10, H("FFFFFF"), False
+    y = y + 17
+    KV P_X, P_W, y, "Sliding", cellText(dt, "C9"), 9, H("FFFFFF"), False
+    y = y + 14
+    KV P_X, P_W, y, "Rotating", cellText(dt, "C10"), 9, H("FFFFFF"), False
+End Sub
+
+Private Sub DrawMetrics(ss As Worksheet, dt As Worksheet)
+    Tx M_X, 20, "LAST SURVEY " & ChrW(183) & " POSITION " & ChrW(183) & " REQUIREMENT", _
+       12.5, H("FFFFFF"), "start", True
+    Rect M_X, V_Y, M_W, M_H, H("222222"), H("3A3A3A"), 0.75
+
+    Dim y As Double: y = V_Y + 20
+
+    MHead y, "LAST SURVEY"
+    ' E7 and E10 carry a degree suffix in their number format, so they are
+    ' formatted from the value here rather than echoed as text
+    KV M_X, M_W, y, "Depth", Format$(mSvyMD, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "INC", cellText(dt, "E8"), 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "AZM", cellText(dt, "E9"), 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "TVD", Format$(mSvyTvd, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "DLS", cellText(dt, "E11"), 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Bit depth", Format$(mBitMD, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
+
+    MHead y, "POSITION OF WELLBORE"
+    KV M_X, M_W, y, cellText(dt, "D13"), cellText(dt, "E13") & " " & cellText(dt, "F13"), _
+       10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, cellText(dt, "D14"), cellText(dt, "E14") & " " & cellText(dt, "F14"), _
+       10.5, H("4CAF7A"), True: y = y + 16
+    KV M_X, M_W, y, cellText(dt, "D15"), cellText(dt, "E15"), 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Corridor used", _
+       Format$(100# * Abs(mSvyDev) / mGeoHalf, "0") & "% of " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", _
+       10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Lateral used", _
+       Format$(100# * Abs(mSvyLat) / mLatTol, "0") & "% of " & ChrW(177) & Format$(mLatTol, "0.00") & " m", _
+       10.5, H("FFFFFF"), False: y = y + 16
+
+    MHead y, "REQUIREMENT TO WP " & Format$(mWpMD, "#,##0")
+    KV M_X, M_W, y, "Distance to go", Format$(mToGo, "#,##0.0") & " m", 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Target TVD", Format$(mWpTvd, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Required inclination", Format$(mReqInc, "0.00") & ChrW(176), 10.5, H("FF5555"), True: y = y + 16
+    KV M_X, M_W, y, "Holding", Format$(mSvyInc, "0.00") & ChrW(176), 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Correction", Format$(Abs(mReqInc - mSvyInc), "0.00") & ChrW(176) & " " & _
+       IIf(mReqInc < mSvyInc, "drop", "build"), 10.5, H("FF5555"), True: y = y + 16
+    KV M_X, M_W, y, "Arrival if held", Format$(Abs(mHoldDevEnd), "0.00") & " m " & _
+       IIf(mHoldDevEnd >= 0, "above", "below"), 10.5, H("E09A3D"), False: y = y + 16
+End Sub
+
+Private Sub MHead(ByRef y As Double, ByVal t As String)
+    y = y + 5
+    Tx M_X + 11, y, t, 9.5, H("FFFFFF"), "start", True
+    Ln M_X + 11, y + 4, M_X + M_W - 11, y + 4, H("4A4A4A"), 0.75, msoLineSolid
+    y = y + 16
+End Sub
+
+Private Sub KV(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
+               ByVal k As String, ByVal v As String, ByVal sz As Double, _
+               ByVal clr As Long, ByVal bold As Boolean)
+    Tx px + 11, y, k, sz, H("A8A8A8"), "start"
+    Tx px + pw - 11, y, v, sz, clr, "end", bold
+End Sub
+
+
+' ================================================================================
+'  DRAWING - DARK OPS BAND (under the corridor)
+'
+'  Mirrors the old B2:F55 reading order without last-survey / position (already
+'  in the light metrics panel) and without empty AC / motors rows.
+' ================================================================================
+Private Function OpsColW() As Double
+    OpsColW = (CANVAS_W - 2 * OPS_PAD - OPS_COL_GAP) / 2#
+End Function
+
+Private Function CountFilledAc(dt As Worksheet) As Long
+    Dim r As Long, n As Long
+    n = 0
+    For r = 35 To 42
+        If Len(Trim$(cellText(dt, "B" & r))) > 0 Then n = n + 1
+    Next r
+    CountFilledAc = n
+End Function
+
+Private Function CountFilledMotors(dt As Worksheet) As Long
+    Dim r As Long, n As Long
+    n = 0
+    For r = 45 To 55
+        If Len(Trim$(cellText(dt, "B" & r))) > 0 Then n = n + 1
+    Next r
+    CountFilledMotors = n
+End Function
+
+Private Function MeasureOpsHeight(dt As Worksheet) As Double
+    Dim nAc As Long, nMot As Long
+    Dim acH As Double, motH As Double
+    nAc = CountFilledAc(dt)
+    nMot = CountFilledMotors(dt)
+    ' Row pitch must clear TYPE_SCALE_OPS text (see DrawOps AC / motors loops).
+    Const ROW_PITCH As Double = 22#
+    If nAc = 0 Then acH = 44# Else acH = 32# + ROW_PITCH * CDbl(nAc)
+    If nMot = 0 Then motH = 44# Else motH = 32# + ROW_PITCH * CDbl(nMot)
+    ' chips + day/BHA + motor band + AC + motors + gaps + footer
+    MeasureOpsHeight = OPS_GAP + 52# + OPS_GAP + 175# + OPS_GAP + 275# + _
+                       OPS_GAP + acH + OPS_GAP + motH + 28#
+End Function
+
+Private Sub KVDark(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
+                   ByVal k As String, ByVal v As String, ByVal sz As Double, _
+                   ByVal clr As Long, ByVal bold As Boolean)
+    Tx px + 11, y, k, sz, H("A8A8A8"), "start"
+    Tx px + pw - 11, y, v, sz, clr, "end", bold
+End Sub
+
+Private Sub PanelHeadDark(ByVal px As Double, ByVal pw As Double, ByRef y As Double, ByVal t As String)
+    Tx px + 11, y, t, 9.5, H("FFFFFF"), "start", True
+    Ln px + 11, y + 4, px + pw - 11, y + 4, H("4A4A4A"), 0.75, msoLineSolid
+    y = y + 16
+End Sub
+
+Private Sub SecBarDark(ByVal y As Double, ByVal t As String)
+    Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 22, H("2A2A2A"), H("3A3A3A"), 0.5
+    Tx CANVAS_W / 2#, y + 15, t, 10, H("FFFFFF"), "middle", True
+End Sub
+
+Private Sub DrawOps(dt As Worksheet)
+    Const ROW_PITCH As Double = 22#
+    Dim y As Double
+    Dim lx As Double, rx As Double, cw As Double
+    Dim ly As Double, ry As Double
+    Dim r As Long, n As Long
+
+    cw = OpsColW()
+    lx = OPS_PAD
+    rx = OPS_PAD + cw + OPS_COL_GAP
+    y = mOpsOrigin + OPS_GAP
+
+    ' ---- header chips: plan / BHA / costs ------------------------------------
+    Rect lx, y, CANVAS_W - 2 * OPS_PAD, 44, H("222222"), H("3A3A3A"), 0.75
+    Tx lx + 14, y + 28, cellText(dt, "B2") & " " & cellText(dt, "C2"), 12, H("FFFFFF"), "start", True
+    Tx lx + 220, y + 28, cellText(dt, "B3") & " " & cellText(dt, "C3"), 12, H("FFFFFF"), "start", True
+    Tx lx + 400, y + 28, cellText(dt, "D3") & " " & cellText(dt, "E3"), 12, H("FFFFFF"), "start", False
+    Tx CANVAS_W - OPS_PAD - 14, y + 28, cellText(dt, "D4") & " " & cellText(dt, "E4"), 12, H("FFFFFF"), "end", True
+    y = y + 44 + OPS_GAP
+
+    ' ---- day drilling | BHA totals -------------------------------------------
+    Rect lx, y, cw, 167, H("222222"), H("3A3A3A"), 0.75
+    Rect rx, y, cw, 167, H("222222"), H("3A3A3A"), 0.75
+    ly = y + 20: ry = y + 20
+    PanelHeadDark lx, cw, ly, "DAY DRILLING"
+    KVDark lx, cw, ly, cellText(dt, "B4"), cellText(dt, "C4"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B5"), cellText(dt, "C5"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B6"), cellText(dt, "C6"), 11, H("5BA3D9"), True: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B7"), cellText(dt, "C7"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B8"), cellText(dt, "C8"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B9"), cellText(dt, "C9"), 10.5, H("FFFFFF"), False: ly = ly + 16
+    KVDark lx, cw, ly, cellText(dt, "B10"), cellText(dt, "C10"), 10.5, H("FFFFFF"), False: ly = ly + 16
+    KVDark lx, cw, ly, cellText(dt, "B11"), cellText(dt, "C11"), 10.5, H("FFFFFF"), False
+
+    PanelHeadDark rx, cw, ry, "TOTALS FOR BHA " & cellText(dt, "C12")
+    KVDark rx, cw, ry, cellText(dt, "B13"), cellText(dt, "C13"), 11, H("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B14"), cellText(dt, "C14"), 11, H("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B15"), cellText(dt, "C15"), 11, H("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B16"), cellText(dt, "C16"), 11, H("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B17"), cellText(dt, "C17"), 11, H("FFFFFF"), False
+    y = y + 167 + OPS_GAP
+
+    ' ---- ROP + motor perf | motor info + 3rd party ---------------------------
+    Rect lx, y, cw, 267, H("222222"), H("3A3A3A"), 0.75
+    Rect rx, y, cw, 267, H("222222"), H("3A3A3A"), 0.75
+    ly = y + 20: ry = y + 20
+    PanelHeadDark lx, cw, ly, "PERFORMANCE"
+    KVDark lx, cw, ly, cellText(dt, "B18"), cellText(dt, "C18"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B19"), cellText(dt, "C19"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B20"), cellText(dt, "C20"), 11, H("FFFFFF"), False: ly = ly + 20
+    PanelHeadDark lx, cw, ly, "MOTOR PERFORMANCE"
+    KVDark lx, cw, ly, cellText(dt, "D19"), cellText(dt, "E19"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "D20"), cellText(dt, "E20"), 11, H("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "D21"), cellText(dt, "E21"), 11, H("FFFFFF"), False
+
+    PanelHeadDark rx, cw, ry, "MOTOR INFORMATION"
+    KVDark rx, cw, ry, cellText(dt, "B22"), cellText(dt, "C22"), 11, H("FFFFFF"), True: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B23"), cellText(dt, "C23"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B24"), cellText(dt, "C24"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B25"), cellText(dt, "C25"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B26"), cellText(dt, "C26"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B27"), cellText(dt, "C27"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B28"), cellText(dt, "C28"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B29"), cellText(dt, "C29"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B30"), cellText(dt, "C30"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B31"), cellText(dt, "C31"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B32"), cellText(dt, "C32"), 10.5, H("FFFFFF"), False: ry = ry + 18
+    PanelHeadDark rx, cw, ry, cellText(dt, "D23")
+    KVDark rx, cw, ry, cellText(dt, "D24"), _
+           cellText(dt, "E24") & "  /  " & cellText(dt, "F24"), 10.5, H("FFFFFF"), False: ry = ry + 16
+    PanelHeadDark rx, cw, ry, cellText(dt, "D29")
+    KVDark rx, cw, ry, cellText(dt, "D30"), _
+           cellText(dt, "E30") & "  /  " & cellText(dt, "F30"), 10.5, H("FFFFFF"), False
+    y = y + 267 + OPS_GAP
+
+    ' ---- AC Info (filled rows only) ------------------------------------------
+    n = CountFilledAc(dt)
+    SecBarDark y, cellText(dt, "B33")
+    y = y + 28
+    If n = 0 Then
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, H("222222"), H("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 20, "none", 11, H("A8A8A8"), "start"
+        y = y + 32
+    Else
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), H("222222"), H("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 16, "Offset Well", 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 620, y + 16, "SF", 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 720, y + 16, "C2C (m)", 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 860, y + 16, "Closest C2C", 10, H("A8A8A8"), "start"
+        y = y + 24
+        For r = 35 To 42
+            If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
+                Rect OPS_PAD + 2, y - 12, CANVAS_W - 2 * OPS_PAD - 4, 18, H("1E3A2F"), -1, 0
+                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 10.5, H("FFFFFF"), "start"
+                Tx OPS_PAD + 620, y + 2, cellText(dt, "D" & r), 10.5, H("FFFFFF"), "start"
+                Tx OPS_PAD + 720, y + 2, cellText(dt, "E" & r), 10.5, H("FFFFFF"), "start"
+                Tx OPS_PAD + 860, y + 2, cellText(dt, "F" & r), 10.5, H("FFFFFF"), "start"
+                y = y + ROW_PITCH
+            End If
+        Next r
+        y = y + 6
+    End If
+    y = y + OPS_GAP
+
+    ' ---- Motors on location (filled rows only) -------------------------------
+    n = CountFilledMotors(dt)
+    SecBarDark y, cellText(dt, "B43")
+    y = y + 28
+    If n = 0 Then
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, H("222222"), H("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 20, "none", 11, H("A8A8A8"), "start"
+        y = y + 32
+    Else
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), H("222222"), H("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 16, cellText(dt, "B44"), 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 220, y + 16, cellText(dt, "C44"), 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 420, y + 16, cellText(dt, "D44"), 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 560, y + 16, cellText(dt, "E44"), 10, H("A8A8A8"), "start"
+        Tx OPS_PAD + 720, y + 16, cellText(dt, "F44"), 10, H("A8A8A8"), "start"
+        y = y + 24
+        For r = 45 To 55
+            If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
+                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 11, H("FFFFFF"), "start"
+                Tx OPS_PAD + 220, y + 2, cellText(dt, "C" & r), 11, H("FFFFFF"), "start"
+                Tx OPS_PAD + 420, y + 2, cellText(dt, "D" & r), 11, H("FFFFFF"), "start"
+                Tx OPS_PAD + 560, y + 2, cellText(dt, "E" & r), 11, H("FFFFFF"), "start"
+                Tx OPS_PAD + 720, y + 2, cellText(dt, "F" & r), 11, H("FFFFFF"), "start"
+                y = y + ROW_PITCH
+            End If
+        Next r
+        y = y + 6
+    End If
+
+    Tx CANVAS_W - OPS_PAD, mCanvasH - 10, _
+       "Plan " & cellText(dt, "C2") & " " & ChrW(183) & " geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & _
+       " m (AB14) " & ChrW(183) & " lateral " & ChrW(177) & Format$(mLatTol, "0.00") & " m (AA14)", _
+       8.5, H("7A7A7A"), "end"
+End Sub
+
+
+' ================================================================================
+'  SHAPE PRIMITIVES
+' ================================================================================
+Private Function NextName() As String
+    mSeq = mSeq + 1
+    NextName = SHP_PREFIX & Format$(mSeq, "0000")
+End Function
+
+Private Sub Remember(ByVal nm As String)
+    If mNameN > UBound(mNames) Then ReDim Preserve mNames(0 To mNameN + 512)
+    mNames(mNameN) = nm
+    mNameN = mNameN + 1
+End Sub
+
+Private Function MinD(ByVal a As Double, ByVal b As Double) As Double
+    If a < b Then MinD = a Else MinD = b
+End Function
+
+Private Function H(ByVal hex6 As String) As Long
+    H = RGB(CLng("&H" & mid$(hex6, 1, 2)), _
+            CLng("&H" & mid$(hex6, 3, 2)), _
+            CLng("&H" & mid$(hex6, 5, 2)))
+End Function
+
+Private Sub StyleLine(shp As Shape, ByVal clr As Long, ByVal wt As Double, ByVal dash As Long)
+    If clr < 0 Then
+        shp.line.Visible = msoFalse
+    Else
+        shp.line.Visible = msoTrue
+        shp.line.ForeColor.RGB = clr
+        shp.line.Weight = wt
+        shp.line.DashStyle = dash
+    End If
+End Sub
+
+Private Sub StyleFill(shp As Shape, ByVal clr As Long)
+    If clr < 0 Then
+        shp.Fill.Visible = msoFalse
+    Else
+        shp.Fill.Visible = msoTrue
+        shp.Fill.Solid
+        shp.Fill.ForeColor.RGB = clr
+    End If
+End Sub
+
+Private Sub Rect(ByVal l As Double, ByVal t As Double, ByVal w As Double, ByVal hgt As Double, _
+                 ByVal fillClr As Long, ByVal lineClr As Long, ByVal wt As Double)
+    If w < 0.1 Then w = 0.1
+    If hgt < 0.1 Then hgt = 0.1
+    Dim shp As Shape
+    Set shp = mWs.Shapes.AddShape(msoShapeRectangle, l, t, w, hgt)
+    shp.name = NextName(): Remember shp.name
+    StyleFill shp, fillClr
+    StyleLine shp, lineClr, wt, msoLineSolid
+    shp.Shadow.Visible = msoFalse
+End Sub
+
+Private Sub Ln(ByVal x1 As Double, ByVal y1 As Double, ByVal x2 As Double, ByVal y2 As Double, _
+               ByVal clr As Long, ByVal wt As Double, ByVal dash As Long)
+    Dim shp As Shape
+    Set shp = mWs.Shapes.AddLine(x1, y1, x2, y2)
+    shp.name = NextName(): Remember shp.name
+    StyleLine shp, clr, wt, dash
+End Sub
+
+Private Sub Dot(ByVal cx As Double, ByVal cy As Double, ByVal r As Double, _
+                ByVal fillClr As Long, ByVal lineClr As Long, ByVal wt As Double)
+    Dim shp As Shape
+    Set shp = mWs.Shapes.AddShape(msoShapeOval, cx - r, cy - r, 2 * r, 2 * r)
+    shp.name = NextName(): Remember shp.name
+    StyleFill shp, fillClr
+    StyleLine shp, lineClr, wt, msoLineSolid
+    shp.Shadow.Visible = msoFalse
+End Sub
+
+' A closed four-sided face of the room, given in world coordinates.
+Private Sub Quad(ByVal m1 As Double, ByVal d1 As Double, ByVal l1 As Double, _
+                 ByVal m2 As Double, ByVal d2 As Double, ByVal l2 As Double, _
+                 ByVal m3 As Double, ByVal d3 As Double, ByVal l3 As Double, _
+                 ByVal m4 As Double, ByVal d4 As Double, ByVal l4 As Double, _
+                 ByVal fillClr As Long, ByVal lineClr As Long, ByVal wt As Double)
+    Dim fb As FreeformBuilder
+    Set fb = mWs.Shapes.BuildFreeform(msoEditingCorner, ObX(m1, l1), ObY(d1, l1))
+    fb.AddNodes msoSegmentLine, msoEditingAuto, ObX(m2, l2), ObY(d2, l2)
+    fb.AddNodes msoSegmentLine, msoEditingAuto, ObX(m3, l3), ObY(d3, l3)
+    fb.AddNodes msoSegmentLine, msoEditingAuto, ObX(m4, l4), ObY(d4, l4)
+    fb.AddNodes msoSegmentLine, msoEditingAuto, ObX(m1, l1), ObY(d1, l1)
+
+    Dim shp As Shape
+    Set shp = fb.ConvertToShape
+    shp.name = NextName(): Remember shp.name
+    StyleFill shp, fillClr
+    StyleLine shp, lineClr, wt, msoLineSolid
+    shp.Shadow.Visible = msoFalse
+End Sub
+
+Private Sub PolyLine(xs() As Double, ys() As Double, ByVal n As Long, _
+                     ByVal clr As Long, ByVal wt As Double, ByVal dash As Long)
+    If n < 2 Then Exit Sub
+    Dim fb As FreeformBuilder
+    Set fb = mWs.Shapes.BuildFreeform(msoEditingCorner, xs(0), ys(0))
+    Dim i As Long
+    For i = 1 To n - 1
+        fb.AddNodes msoSegmentLine, msoEditingAuto, xs(i), ys(i)
+    Next i
+
+    Dim shp As Shape
+    Set shp = fb.ConvertToShape
+    shp.name = NextName(): Remember shp.name
+    shp.Fill.Visible = msoFalse
+    StyleLine shp, clr, wt, dash
+    shp.Shadow.Visible = msoFalse
+End Sub
+
+' Text placed the way SVG places it: x is the anchor, y is the baseline.
+Private Sub Tx(ByVal x As Double, ByVal y As Double, ByVal s As String, _
+               ByVal sz As Double, ByVal clr As Long, ByVal anchor As String, _
+               Optional ByVal bold As Boolean = False)
+    ' The box is only a container for the alignment; it is invisible. It must not
+    ' run past the canvas edge, because the group's bounding box is what gets
+    ' exported and a box hanging over the right edge silently widens the image.
+    Dim l As Double, w As Double, align As Long
+    If mTypeScale > 0.01 Then sz = sz * mTypeScale
+    Select Case LCase$(anchor)
+        Case "end"
+            l = 0: w = x: align = msoAlignRight
+        Case "middle"
+            w = 2 * MinD(x, CANVAS_W - x)
+            l = x - w / 2: align = msoAlignCenter
+        Case Else
+            l = x: w = CANVAS_W - x: align = msoAlignLeft
+    End Select
+    If w < 8 Then w = 8
+
+    Dim shp As Shape
+    Set shp = mWs.Shapes.AddTextbox(msoTextOrientationHorizontal, l, y - sz * 1.25, w, sz * 1.8)
+    shp.name = NextName(): Remember shp.name
+    shp.Fill.Visible = msoFalse
+    shp.line.Visible = msoFalse
+    shp.Shadow.Visible = msoFalse
+    With shp.TextFrame2
+        .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
+        .WordWrap = msoFalse
+        .AutoSize = msoAutoSizeNone
+        .VerticalAnchor = msoAnchorTop
+        With .TextRange
+            .text = s
+            .ParagraphFormat.Alignment = align
+            .Font.name = "Calibri"
+            .Font.Size = sz
+            .Font.bold = IIf(bold, msoTrue, msoFalse)
+            .Font.Fill.ForeColor.RGB = clr
+        End With
+    End With
+End Sub
+
+
+' ================================================================================
+'  EXPORT
+' ================================================================================
+' Groups everything drawn and exports it through a throwaway chart. Shapes.Range
+' gets unreliable with very large name arrays, so the group is built in chunks and
+' the chunks are then grouped together.
+Private Function ExportGroup(ByVal outPath As String) As String
+    ExportGroup = ""
+    Trace "  ExportGroup shapes=" & mNameN
+    If mNameN = 0 Then Exit Function
+
+    Dim current As Collection
+    Set current = New Collection
+    Dim i As Long
+    For i = 0 To mNameN - 1
+        current.Add mNames(i)
+    Next i
+
+    Dim nxt As Collection
+    Do While current.Count > 1
+        Set nxt = New Collection          ' must be a fresh one each pass
+        Dim idx As Long: idx = 1
+        Do While idx <= current.Count
+            Dim take As Long
+            take = current.Count - idx + 1
+            If take > 60 Then take = 60
+            If take = 1 Then
+                nxt.Add current(idx)
+                idx = idx + 1
+            Else
+                Dim arr() As Variant
+                ReDim arr(0 To take - 1)
+                Dim k As Long
+                For k = 0 To take - 1
+                    arr(k) = current(idx + k)
+                Next k
+                Dim g As Shape
+                Set g = mWs.Shapes.Range(arr).Group
+                g.name = NextName(): Remember g.name
+                nxt.Add g.name
+                idx = idx + take
+            End If
+        Loop
+        Set current = nxt
+    Loop
+
+    Dim grp As Shape
+    Set grp = mWs.Shapes(current(1))
+    Trace "  grouped into " & grp.name & " " & Format$(grp.Width, "0") & "x" & Format$(grp.Height, "0") & " pt"
+
+    ' Activate the sheet/chart under ScreenUpdating=False so nothing paints.
+    ' Only force the application visible when it was started invisible (automation);
+    ' never flash a session the user already has open.
+    Dim prevVisible As Boolean
+    Dim prevSheet As Object
+    Dim forcedVisible As Boolean
+    prevVisible = Application.Visible
+    Set prevSheet = mWs.Parent.ActiveSheet
+    forcedVisible = False
+    If Not prevVisible Then
+        Application.Visible = True
+        forcedVisible = True
+    End If
+    mWs.Activate
+
+    Dim co As ChartObject
+    Set co = mWs.ChartObjects.Add(0, 0, grp.Width, grp.Height)
+    co.name = SHP_PREFIX & "CHART"
+    Trace "  chart added"
+
+    On Error GoTo Fail
+    co.Chart.ChartArea.Border.LineStyle = xlNone
+    co.Chart.ChartArea.Fill.Visible = msoFalse
+
+    grp.CopyPicture xlScreen, xlPicture
+    Trace "  copied to clipboard"
+
+    ' Chart.Paste only takes a picture when the chart is the active object; called
+    ' on an inactive chart it reports success and pastes nothing.
+    co.Activate
+    co.Chart.Paste
+    Trace "  pasted, chart shapes=" & co.Chart.Shapes.Count
+
+    If co.Chart.Shapes.Count = 0 Then
+        grp.CopyPicture xlScreen, xlBitmap
+        co.Chart.Paste
+        Trace "  bitmap retry, chart shapes=" & co.Chart.Shapes.Count
+    End If
+    If co.Chart.Shapes.Count = 0 Then Err.Raise 5, , "nothing pasted into the chart"
+
+    co.Chart.Shapes(1).Left = 0
+    co.Chart.Shapes(1).Top = 0
+    co.Chart.Shapes(1).Width = co.Width
+    co.Chart.Shapes(1).Height = co.Height
+
+    co.Chart.Export FileName:=outPath, FilterName:="PNG"
+    Trace "  exported " & outPath
+
+    co.Delete
+    prevSheet.Activate
+    If forcedVisible Then Application.Visible = prevVisible
+    ExportGroup = outPath
+    Exit Function
+
+Fail:
+    mLastError = "ExportGroup err " & Err.Number & " " & Err.Description
+    Trace "  EXPORT FAIL " & mLastError
+    On Error Resume Next
+    If Not co Is Nothing Then co.Delete
+    If Not prevSheet Is Nothing Then prevSheet.Activate
+    If forcedVisible Then Application.Visible = prevVisible
+End Function
+
+Private Sub DeleteDrawn()
+    Dim i As Long
+    For i = mWs.Shapes.Count To 1 Step -1
+        If Left$(mWs.Shapes(i).name, Len(SHP_PREFIX)) = SHP_PREFIX Then mWs.Shapes(i).Delete
+    Next i
+    Dim co As ChartObject
+    For Each co In mWs.ChartObjects
+        If Left$(co.name, Len(SHP_PREFIX)) = SHP_PREFIX Then co.Delete
+    Next co
+    mNameN = 0
+End Sub
+
+
+' ================================================================================
+'  CELL HELPERS
+' ================================================================================
+Private Function NumCell(rg As Range) As Double
+    Dim v As Variant
+    On Error Resume Next
+    v = rg.Value2
+    On Error GoTo 0
+    If IsArray(v) Then Exit Function
+    If IsNumeric(v) Then NumCell = CDbl(v)
+End Function
+
+' Lateral half-width from Slidesheet AA14 (numeric, or text like "+/-10.00 m").
+Private Function LatTolFromCell(rg As Range) As Double
+    Dim v As Variant
+    Dim s As String
+    Dim i As Long
+    Dim ch As String
+    Dim buf As String
+    Dim started As Boolean
+
+    LatTolFromCell = 0#
+    On Error Resume Next
+    v = rg.Value2
+    On Error GoTo 0
+    If Not IsArray(v) Then
+        If IsNumeric(v) Then
+            LatTolFromCell = Abs(CDbl(v))
+            Exit Function
+        End If
+    End If
+
+    On Error Resume Next
+    s = Trim$(CStr(rg.Text))
+    On Error GoTo 0
+    If Len(s) = 0 Then Exit Function
+
+    buf = ""
+    started = False
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If (ch >= "0" And ch <= "9") Or ch = "." Then
+            buf = buf & ch
+            started = True
+        ElseIf started Then
+            Exit For
+        End If
+    Next i
+    If Len(buf) > 0 And IsNumeric(buf) Then LatTolFromCell = Abs(CDbl(buf))
+End Function
+
+Private Function cellText(ws As Worksheet, ByVal addr As String) As String
+    On Error Resume Next
+    cellText = Trim$(CStr(ws.Range(addr).text))
+    On Error GoTo 0
+    ' the sheet prints its own trailing colons on labels; the panel adds its own layout
+    If right$(cellText, 1) = ":" Then cellText = Left$(cellText, Len(cellText) - 1)
+End Function

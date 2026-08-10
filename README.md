@@ -1,9 +1,12 @@
 # PHX OpenCap — Data Export & Field Reporting Ecosystem
 
-**Chrome Extension + Excel VBA Dashboard**
-*Bridging wellsite data capture, office reporting, and equipment lifecycle tracking.*
+**Chrome Extension + Excel Slide Sheet Workbook**
+*Browser capture. Workbook intelligence. Same job folder.*
 
-**Current Chrome extension revision:** `v3.1.5`
+**Project site:** [freebrew.github.io/OpenCap_PHX_Exporter](https://freebrew.github.io/OpenCap_PHX_Exporter/)  
+**Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)
+
+**Current Chrome extension revision:** `v3.1.8`
 
 ---
 
@@ -42,14 +45,14 @@ The system consists of two main components:
 │  ┌──────────────────────────────────────────┐ │                  │
 │  │           popup.js + popup.html          │ │                  │
 │  │  • Job ID input                          │◄┘                  │
-│  │  • 5-checkbox export selector            │                    │
+│  │  • 6-checkbox export selector            │                    │
 │  │  • Bottom Line Verification suppressor   │                    │
 │  │  • Fetch & Build CSVs                    │                    │
 │  │  • File System Access API → OpenCap/     │                    │
 │  │  • Per-export status cards               │                    │
 │  └──────────────────────┬───────────────────┘                    │
 └─────────────────────────┼────────────────────────────────────────┘
-                          │  5 CSV files under OpenCap/
+                          │  CSV files under OpenCap/
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              Local File System (workbook folder)                  │
@@ -59,6 +62,7 @@ The system consists of two main components:
 │    fieldcap-job-{id}-bha-equipment.csv                           │
 │    fieldcap-job-{id}-inventory.csv                               │
 │    fieldcap-job-{id}-slide-rotate-metres-by-day.csv              │
+│    fieldcap-job-{id}-ticket-costs-by-day.csv                     │
 └─────────────────────────┬────────────────────────────────────────┘
                           │  VBA Refresh import
                           ▼
@@ -82,7 +86,7 @@ The system consists of two main components:
 2. **Intercepts** FieldCap's own internal API calls (XHR/Fetch) to capture hour statistics and metric fields not exposed on the public OData endpoints.
 3. **Scrapes** the visible DOM (BHA grid) to capture real-time component values.
 4. **Suppresses** the FieldCap "Bottom Line Verification" popup when enabled, auto-dismissing it with the same reminder action available in the site UI.
-5. **Generates** 5 clean, properly-typed CSV files ready for Excel or any downstream system.
+5. **Generates** clean, properly-typed CSV files ready for Excel or any downstream system.
 
 ### CSV Outputs
 
@@ -93,6 +97,7 @@ The system consists of two main components:
 | `fieldcap-job-{id}-bha-equipment.csv` | One row per BHA component with serial, hours, meters, fatigue data |
 | `fieldcap-job-{id}-inventory.csv` | One row per job tool / inventory item with serial, item, status, dispatch/return, and hour fields where available |
 | `fieldcap-job-{id}-slide-rotate-metres-by-day.csv` | Daily slide and rotate metres per BHA, sourced directly from ActivityLogs |
+| `fieldcap-job-{id}-ticket-costs-by-day.csv` | One row per calendar day with summed Ticket Total from the Tickets tab |
 
 ### FieldCap UI Helper
 
@@ -191,7 +196,7 @@ PHX_FieldCap/
 │
 └── src/
     ├── chrome-extension/
-    │   ├── manifest.json             (Manifest V3, v3.1.5)
+    │   ├── manifest.json             (Manifest V3, v3.1.8)
     │   ├── background.js            (OData fetch, CSV generation, ActivityLog parsing)
     │   ├── content.js               (DOM scraping, table detection, auto-scrape, popup suppression)
     │   ├── injected-spy.js          (page-context XHR/Fetch interception)
@@ -220,6 +225,18 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### v3.1.8 — Ticket Costs by Day Export
+- **New export: Ticket Costs by Day** — 6th CSV with one row per calendar day (`Date`, `Daily Cost`, `Ticket Count`), totals summed from FieldCap Tickets.
+- **OData-first with DOM fallback** — discovers Ticket* entity sets from the service document; if empty, scrapes the open Ticket List table.
+- **Costs tab upsert** — Setup **REFRESH CSVs** loads `ticket-costs-by-day.csv` and upserts `Daily Costs` / running `Total Costs` on the workbook **Costs** sheet by matching calendar dates.
+
+### v3.1.7 — Rig Name Capture Fix
+- **Fixed missing Rig Name** — Well Parameters / Rig pages now cache Rig Name even with no BHA tables; scraper handles split label/value layouts (e.g. `Akita-520`).
+- **Fixed empty custom-field overwrite** — an empty FieldCap `Rig Name` custom value no longer wipes a good scraped/OData rig name in the job-details CSV.
+
+### v3.1.6 — Extension List Sort Name
+- **Extension display name** — renamed to `.OpenCap Data Exporter` so it sorts near the top of Chrome’s extension list.
 
 ### v3.1.5 — OpenCap CSV Subfolder
 - **CSV output folder** — choosing the Excel workbook root now creates/uses an `OpenCap` subfolder; all scraped FieldCap CSVs write there instead of cluttering the root.

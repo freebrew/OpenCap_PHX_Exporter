@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" onLoad="Ribbon_OnLoad">
+  <ribbon>
+    <tabs>
+      <tab id="tabPipeTally" label="PipeTally Calculator">
+        <group id="grpPipeTally" label="Pipe Tally">
+          <button id="btnOpenPipeTally" label="Open Calculator" size="large" onAction="RibbonShowPipeTally"/>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>

@@ -1,0 +1,152 @@
+Option Explicit
+
+Private m_busy As Boolean
+
+Private Sub UserForm_Initialize()
+    m_busy = True
+    Me.Caption = "Pipe Tally Calculator"
+    lstPreview.Clear
+    lstPreview.ColumnCount = 2
+    lstPreview.ColumnWidths = "70;90"
+    ReloadFromSheet
+    m_busy = False
+End Sub
+
+Private Sub UserForm_Activate()
+    If Not m_busy Then
+        lblStart.Caption = FormatStart(PipeTallyStartDepth())
+    End If
+End Sub
+
+Private Sub btnPaste_Click()
+    Dim txt As String
+    Dim lengths As Variant
+    Dim errMsg As String
+    txt = GetClipboardText()
+    If Not ParsePipeLengthColumn(txt, lengths, errMsg) Then
+        lblStatus.Caption = errMsg
+        MsgBox errMsg, vbExclamation, "Paste pipe lengths"
+        Exit Sub
+    End If
+    ApplyLengths lengths
+    lblStatus.Caption = "Pasted " & CStr(UBound(lengths)) & " pipe length(s)."
+End Sub
+
+Private Sub btnClear_Click()
+    ClearPipeTallyInputs
+    lstPreview.Clear
+    lblStatus.Caption = "Cleared pipe tally inputs."
+    lblCount.Caption = "0 joints"
+End Sub
+
+Private Sub btnAdd_Click()
+    Dim depths As Variant
+    SyncSettingsToSheet
+    depths = PipeTallyReadBitDepths()
+    If IsEmpty(depths) Then
+        MsgBox "No tally bit depths to add. Paste pipe lengths first.", vbExclamation
+        Exit Sub
+    End If
+    AppendTallyBitDepths
+    ReloadFromSheet
+    lblStatus.Caption = "Append finished (sheet tally cleared)."
+End Sub
+
+Private Sub btnRefresh_Click()
+    ReloadFromSheet
+    lblStatus.Caption = "Refreshed from sheet."
+End Sub
+
+Private Sub btnClose_Click()
+    Unload Me
+End Sub
+
+Private Sub txtStands_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    If m_busy Then Exit Sub
+    SyncSettingsToSheet
+    RefreshPreviewFromSheet
+End Sub
+
+Private Sub txtSplit_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    If m_busy Then Exit Sub
+    SyncSettingsToSheet
+    RefreshPreviewFromSheet
+End Sub
+
+Private Sub ReloadFromSheet()
+    Dim stands As Variant, splitLen As Variant
+    Dim lengths As Variant
+    m_busy = True
+    lblStart.Caption = FormatStart(PipeTallyStartDepth())
+    PipeTallyGetSettings stands, splitLen
+    txtStands.Text = NzText(stands)
+    txtSplit.Text = NzText(splitLen)
+    lengths = PipeTallyReadLengths()
+    PopulatePreview lengths, PipeTallyReadBitDepths()
+    m_busy = False
+End Sub
+
+Private Sub ApplyLengths(ByRef lengths As Variant)
+    SyncSettingsToSheet
+    PipeTallyWriteLengths lengths
+    RefreshPreviewFromSheet
+End Sub
+
+Private Sub SyncSettingsToSheet()
+    Dim st As Variant, sp As Variant
+    If Len(Trim$(txtStands.Text)) = 0 Then
+        st = 1
+    ElseIf IsNumeric(txtStands.Text) Then
+        st = CLng(Val(txtStands.Text))
+        If st < 1 Then st = 1
+    Else
+        st = 1
+    End If
+    txtStands.Text = CStr(st)
+    If Len(Trim$(txtSplit.Text)) = 0 Then
+        sp = ""
+    ElseIf IsNumeric(txtSplit.Text) Then
+        sp = CDbl(Val(txtSplit.Text))
+    Else
+        sp = ""
+    End If
+    PipeTallySetSettings st, sp
+End Sub
+
+Private Sub RefreshPreviewFromSheet()
+    PopulatePreview PipeTallyReadLengths(), PipeTallyReadBitDepths()
+End Sub
+
+Private Sub PopulatePreview(ByVal lengths As Variant, ByVal depths As Variant)
+    Dim i As Long, nL As Long, nD As Long, n As Long
+    Dim lenTxt As String, depTxt As String
+    lstPreview.Clear
+    nL = 0: nD = 0
+    If Not IsEmpty(lengths) Then nL = UBound(lengths)
+    If Not IsEmpty(depths) Then nD = UBound(depths)
+    n = nL
+    If nD > n Then n = nD
+    For i = 1 To n
+        If i <= nL Then lenTxt = Format$(lengths(i), "0.00") Else lenTxt = ""
+        If i <= nD Then depTxt = Format$(depths(i), "0.00") Else depTxt = ""
+        lstPreview.AddItem lenTxt
+        lstPreview.List(lstPreview.ListCount - 1, 1) = depTxt
+    Next i
+    lblCount.Caption = CStr(nL) & " joints / " & CStr(nD) & " depths"
+End Sub
+
+Private Function FormatStart(ByVal v As Variant) As String
+    If IsNumeric(v) Then
+        FormatStart = Format$(CDbl(v), "0.00")
+    Else
+        FormatStart = "-"
+    End If
+End Function
+
+Private Function NzText(ByVal v As Variant) As String
+    If IsNull(v) Or IsEmpty(v) Then
+        NzText = ""
+    Else
+        NzText = CStr(v)
+    End If
+End Function
