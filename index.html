@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCap — FieldCap to Slide Sheet · PHX Field Workbook</title>
+  <meta name="description" content="OpenCap pairs a Chrome data exporter with a standalone Excel Slide Sheet workbook — FieldCap capture in the browser, directional guidance and morning reports on the pad.">
+  <meta name="theme-color" content="#0b1412">
+  <link rel="canonical" href="https://freebrew.github.io/OpenCap_PHX_Exporter/">
+  <meta property="og:title" content="OpenCap — Browser capture. Workbook intelligence.">
+  <meta property="og:description" content="Chrome extension + Slide Sheet .xlsm. Pull FieldCap once. Guide the well. Email the morning package.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://freebrew.github.io/OpenCap_PHX_Exporter/">
+  <meta property="og:image" content="https://freebrew.github.io/OpenCap_PHX_Exporter/docs/corridor_live.png?v=flat3">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #e8f0ec;
+      --ink-dim: #9aafa4;
+      --ink-mute: #6d8178;
+      --bg: #0b1412;
+      --bg-2: #11201c;
+      --panel: #152821;
+      --line: rgba(160, 210, 180, 0.16);
+      --teal: #2fd4a1;
+      --teal-deep: #1a9a74;
+      --amber: #e8b45a;
+      --danger: #e86a5a;
+      --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+      --font-body: "Sora", "Segoe UI", sans-serif;
+      --max: 1120px;
+      --radius: 2px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: var(--font-body);
+      font-size: 1.02rem;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    img { max-width: 100%; display: block; height: auto; }
+    a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: #7ff0cb; }
+
+    .wrap {
+      width: min(var(--max), calc(100% - 2.5rem));
+      margin-inline: auto;
+    }
+
+    /* —— Nav —— */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      backdrop-filter: blur(14px);
+      background: rgba(11, 20, 18, 0.78);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.85rem 0;
+    }
+    .brand {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.55rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .brand span { color: var(--teal); }
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 1.1rem;
+      align-items: center;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .nav-links a {
+      color: var(--ink-dim);
+      text-decoration: none;
+    }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.45rem 0.9rem;
+      background: var(--teal);
+      color: #062018 !important;
+      font-weight: 600;
+      text-decoration: none !important;
+      border-radius: var(--radius);
+    }
+    .nav-cta:hover { background: #7ff0cb; color: #062018 !important; }
+
+    /* —— Hero —— */
+    .hero {
+      position: relative;
+      min-height: min(92vh, 820px);
+      display: flex;
+      align-items: flex-end;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-media {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, rgba(11,20,18,0.35) 0%, rgba(11,20,18,0.55) 45%, rgba(11,20,18,0.96) 100%),
+        linear-gradient(90deg, rgba(11,20,18,0.75) 0%, rgba(11,20,18,0.2) 55%, rgba(11,20,18,0.55) 100%),
+        url("docs/corridor_live.png?v=flat3") center / cover no-repeat;
+      transform: scale(1.02);
+      animation: heroDrift 18s ease-in-out infinite alternate;
+    }
+    @keyframes heroDrift {
+      from { transform: scale(1.02) translate3d(0, 0, 0); }
+      to { transform: scale(1.06) translate3d(-1.2%, -0.8%, 0); }
+    }
+    .hero-content {
+      position: relative;
+      z-index: 2;
+      padding: 5.5rem 0 3.2rem;
+      max-width: 38rem;
+    }
+    .hero-kicker {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin: 0 0 0.75rem;
+      opacity: 0;
+      animation: rise 0.8s ease 0.1s forwards;
+    }
+    .hero h1 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: clamp(3.4rem, 9vw, 5.8rem);
+      line-height: 0.92;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      margin: 0 0 1rem;
+      opacity: 0;
+      animation: rise 0.9s ease 0.2s forwards;
+    }
+    .hero h1 em {
+      font-style: normal;
+      color: var(--teal);
+    }
+    .hero-lead {
+      font-size: 1.08rem;
+      color: var(--ink-dim);
+      max-width: 34rem;
+      margin: 0 0 1.75rem;
+      opacity: 0;
+      animation: rise 0.9s ease 0.35s forwards;
+    }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      opacity: 0;
+      animation: rise 0.9s ease 0.5s forwards;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      padding: 0.85rem 1.25rem;
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--teal);
+      color: #062018;
+    }
+    .btn-primary:hover { background: #7ff0cb; color: #062018; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--line);
+    }
+    .btn-ghost:hover { border-color: var(--teal); color: var(--teal); }
+    .hero-meta {
+      margin-top: 1.6rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 1.4rem;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      opacity: 0;
+      animation: rise 0.9s ease 0.65s forwards;
+    }
+    .hero-meta strong { color: var(--ink-dim); font-weight: 500; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* —— Sections —— */
+    section { padding: 4.5rem 0; border-bottom: 1px solid var(--line); }
+    .section-label {
+      font-family: var(--font-display);
+      font-size: 0.9rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin: 0 0 0.6rem;
+    }
+    h2 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: clamp(2.1rem, 4.5vw, 3.2rem);
+      line-height: 1;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      margin: 0 0 1rem;
+    }
+    .lede {
+      color: var(--ink-dim);
+      max-width: 40rem;
+      margin: 0 0 2rem;
+    }
+
+    /* —— Symbiosis —— */
+    .symbiosis {
+      background:
+        radial-gradient(ellipse 70% 50% at 50% 0%, rgba(47, 212, 161, 0.08), transparent 70%),
+        var(--bg);
+    }
+    .bridge {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 1rem;
+      align-items: stretch;
+      margin-top: 2rem;
+    }
+    @media (max-width: 820px) {
+      .bridge { grid-template-columns: 1fr; }
+      .bridge-link { transform: rotate(90deg); margin: 0.25rem auto; }
+    }
+    .bridge-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 1.5rem 1.4rem 1.35rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .bridge-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--teal-deep), var(--teal));
+    }
+    .bridge-card.workbook::before {
+      background: linear-gradient(90deg, #b8842f, var(--amber));
+    }
+    .bridge-card h3 {
+      font-family: var(--font-display);
+      font-size: 1.55rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 0.35rem;
+    }
+    .bridge-card .role {
+      color: var(--ink-mute);
+      font-size: 0.85rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 0.9rem;
+    }
+    .bridge-card ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--ink-dim);
+      font-size: 0.95rem;
+    }
+    .bridge-card li {
+      padding: 0.35rem 0;
+      border-top: 1px solid var(--line);
+    }
+    .bridge-card li:first-child { border-top: 0; }
+    .bridge-link {
+      align-self: center;
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--amber);
+      text-align: center;
+      line-height: 1.15;
+      padding: 0.5rem;
+    }
+    .bridge-link small {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--ink-mute);
+      letter-spacing: 0.18em;
+      margin-top: 0.25rem;
+    }
+    .split-line {
+      margin-top: 2rem;
+      padding: 1.1rem 1.25rem;
+      border-left: 3px solid var(--teal);
+      background: rgba(47, 212, 161, 0.06);
+      color: var(--ink);
+      font-size: 1.05rem;
+    }
+    .split-line strong { color: var(--teal); }
+
+    /* —— Flow —— */
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.65rem;
+      counter-reset: step;
+    }
+    @media (max-width: 900px) {
+      .flow { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 520px) {
+      .flow { grid-template-columns: 1fr; }
+    }
+    .flow-step {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      padding: 1.1rem 1rem 1.15rem;
+      min-height: 9.5rem;
+      position: relative;
+    }
+    .flow-step::before {
+      counter-increment: step;
+      content: "0" counter(step);
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--teal);
+      display: block;
+      line-height: 1;
+      margin-bottom: 0.55rem;
+    }
+    .flow-step h3 {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 0.4rem;
+    }
+    .flow-step p {
+      margin: 0;
+      color: var(--ink-dim);
+      font-size: 0.9rem;
+    }
+
+    /* —— Feature grids —— */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.85rem;
+    }
+    @media (max-width: 900px) {
+      .feature-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .feature-grid { grid-template-columns: 1fr; }
+    }
+    .feature {
+      padding: 1.25rem 1.15rem;
+      border: 1px solid var(--line);
+      background: linear-gradient(160deg, rgba(47,212,161,0.05), transparent 55%), var(--panel);
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .feature:hover {
+      border-color: rgba(47, 212, 161, 0.45);
+      transform: translateY(-2px);
+    }
+    .feature h3 {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 0.45rem;
+    }
+    .feature p {
+      margin: 0;
+      color: var(--ink-dim);
+      font-size: 0.92rem;
+    }
+
+    /* —— Showcase —— */
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 1.25rem;
+      align-items: start;
+    }
+    @media (max-width: 860px) {
+      .showcase-grid { grid-template-columns: 1fr; }
+    }
+    .shot {
+      border: 1px solid var(--line);
+      background: #060b0a;
+      overflow: hidden;
+    }
+    .shot img {
+      width: 100%;
+      opacity: 0.96;
+    }
+    .shot figcaption {
+      padding: 0.75rem 1rem;
+      font-size: 0.82rem;
+      color: var(--ink-mute);
+      border-top: 1px solid var(--line);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .sheet-list {
+      display: grid;
+      gap: 0.65rem;
+    }
+    .sheet-item {
+      border: 1px solid var(--line);
+      padding: 0.95rem 1rem;
+      background: var(--bg-2);
+    }
+    .sheet-item h3 {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin: 0 0 0.3rem;
+      color: var(--amber);
+    }
+    .sheet-item p {
+      margin: 0;
+      color: var(--ink-dim);
+      font-size: 0.9rem;
+    }
+
+    /* —— CSV table —— */
+    .csv-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    .csv-table th,
+    .csv-table td {
+      text-align: left;
+      padding: 0.75rem 0.85rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .csv-table th {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--teal);
+      font-weight: 600;
+    }
+    .csv-table td:first-child {
+      color: var(--ink);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .csv-table td:last-child { color: var(--ink-dim); }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    /* —— Audience —— */
+    .audience {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+    @media (max-width: 900px) {
+      .audience { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 520px) {
+      .audience { grid-template-columns: 1fr; }
+    }
+    .audience article {
+      padding: 1.2rem 1.1rem;
+      border-top: 3px solid var(--teal);
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+    .audience h3 {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 0.45rem;
+    }
+    .audience p {
+      margin: 0;
+      color: var(--ink-dim);
+      font-size: 0.9rem;
+    }
+
+    /* —— Install —— */
+    .install {
+      background:
+        radial-gradient(ellipse 60% 80% at 100% 0%, rgba(232, 180, 90, 0.08), transparent 55%),
+        var(--bg-2);
+    }
+    .install-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+    @media (max-width: 760px) {
+      .install-grid { grid-template-columns: 1fr; }
+    }
+    .install-card {
+      border: 1px solid var(--line);
+      padding: 1.5rem 1.35rem;
+      background: var(--panel);
+    }
+    .install-card h3 {
+      font-family: var(--font-display);
+      font-size: 1.6rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 0.85rem;
+    }
+    .install-card ol {
+      margin: 0 0 1.25rem;
+      padding-left: 1.2rem;
+      color: var(--ink-dim);
+    }
+    .install-card li { margin: 0.4rem 0; }
+    .code {
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      font-size: 0.82rem;
+      background: #060b0a;
+      border: 1px solid var(--line);
+      padding: 0.75rem 0.9rem;
+      color: var(--teal);
+      overflow-x: auto;
+    }
+
+    /* —— Closing CTA —— */
+    .close-band {
+      padding: 5rem 0;
+      text-align: center;
+      background:
+        linear-gradient(180deg, rgba(11,20,18,0.2), rgba(11,20,18,0.92)),
+        url("docs/corridor_email.png?v=flat3") center 30% / cover no-repeat;
+      border-bottom: 1px solid var(--line);
+    }
+    .close-band h2 {
+      max-width: 18ch;
+      margin-inline: auto;
+    }
+    .close-band .lede {
+      margin-inline: auto;
+      text-align: center;
+    }
+    .close-band .cta-row { justify-content: center; }
+
+    /* —— Footer —— */
+    footer {
+      padding: 2.5rem 0 3rem;
+      color: var(--ink-mute);
+      font-size: 0.88rem;
+    }
+    footer .foot-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 2rem;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    footer strong { color: var(--ink-dim); font-weight: 500; }
+    .legal {
+      margin-top: 1.5rem;
+      max-width: 52rem;
+      line-height: 1.55;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero-media { animation: none; }
+      .hero-kicker, .hero h1, .hero-lead, .cta-row, .hero-meta {
+        opacity: 1;
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top">Open<span>Cap</span></a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#symbiosis">System</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#extension">Extension</a>
+        <a href="#workbook">Workbook</a>
+        <a href="#slidesheet">Slidesheet</a>
+        <a href="#adopt">Adopt</a>
+        <a class="nav-cta" href="https://github.com/freebrew/OpenCap_PHX_Exporter">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-label="OpenCap hero">
+      <div class="hero-media" role="img" aria-label="Wellbore corridor graphic from the OpenCap Field Workbook"></div>
+      <div class="wrap hero-content">
+        <p class="hero-kicker">PHX OpenCap · Field Workbook Ecosystem</p>
+        <h1>Open<em>Cap</em><br>Browser in.<br>Intelligence out.</h1>
+        <p class="hero-lead">
+          A symbiotic pair: the Chrome exporter captures FieldCap; the Slide Sheet workbook turns that pack into plan vs. wellbore guidance, costs, fatigue, and morning EMAIL — without leaving the pad’s spreadsheet.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://chromewebstore.google.com/detail/opencap-data-exporter/egafclljokidcoiipaiojlaamgkooffb">Add to Chrome — free</a>
+          <a class="btn btn-ghost" href="https://github.com/freebrew/OpenCap_PHX_Exporter">Get the repo</a>
+          <a class="btn btn-ghost" href="#symbiosis">See the symbiotic loop</a>
+        </div>
+        <div class="hero-meta">
+          <span><strong>Extension</strong> v3.1.8 · MV3</span>
+          <span><strong>Workbook</strong> Slide Sheet · Demo.xlsm</span>
+          <span><strong>Bus</strong> OpenCap\ CSVs</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="symbiosis" id="symbiosis">
+      <div class="wrap">
+        <p class="section-label">The product is the pair</p>
+        <h2>Symbiotic by design</h2>
+        <p class="lede">
+          FieldCap already knows the job. Excel already runs the well. OpenCap closes the gap — capture in the browser, decisions in the sheet — so lunchtime copy-paste stops owning your directional day.
+        </p>
+
+        <div class="bridge" aria-label="Extension and workbook relationship">
+          <article class="bridge-card">
+            <h3>.OpenCap Data Exporter</h3>
+            <div class="role">Chrome · capture layer</div>
+            <ul>
+              <li>Uses your live FieldCap session — no second login</li>
+              <li>OData + XHR/Fetch spy + DOM scrape for complete packs</li>
+              <li>Writes typed CSVs into the workbook’s <code>OpenCap\</code> folder</li>
+              <li>Job, crew, BHA, inventory, slide/rotate days, ticket costs</li>
+            </ul>
+          </article>
+          <div class="bridge-link" aria-hidden="true">
+            CSV
+            <small>OpenCap\</small>
+            →
+          </div>
+          <article class="bridge-card workbook">
+            <h3>Slide Sheet Workbook</h3>
+            <div class="role">Excel · intelligence layer</div>
+            <ul>
+              <li>One REFRESH joins Setup, DD Tools, Costs, motors</li>
+              <li>Slidesheet proximity, BURR, slide advisor, Sail geo window</li>
+              <li>Data tab EMAIL: HTML ops body + corridor PNG</li>
+              <li>Fully usable offline after sync — FieldCap can close</li>
+            </ul>
+          </article>
+        </div>
+
+        <p class="split-line">
+          <strong>Browser for capture. Workbook for decision.</strong>
+          Same job folder. Same truth. That split is the product.
+        </p>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="wrap">
+        <p class="section-label">Five moves · zero archaeology</p>
+        <h2>From FieldCap to morning email</h2>
+        <p class="lede">
+          The workbook folder is the integration bus. No reporting database. No second platform to learn on tour.
+        </p>
+        <div class="flow">
+          <article class="flow-step">
+            <h3>Open the job</h3>
+            <p>Log into FieldCap. Stay in the job you’re running.</p>
+          </article>
+          <article class="flow-step">
+            <h3>Fetch &amp; Build</h3>
+            <p>Confirm Job ID, tick the CSV set, write into the workbook’s OpenCap folder.</p>
+          </article>
+          <article class="flow-step">
+            <h3>REFRESH</h3>
+            <p>Setup / Data / DD Tools import the newest files and merge into hidden _OC_* tables.</p>
+          </article>
+          <article class="flow-step">
+            <h3>Guide</h3>
+            <p>Surveys, plan, proximity dial, BURR, and Comments slide advisor on the Slidesheet.</p>
+          </article>
+          <article class="flow-step">
+            <h3>Report</h3>
+            <p>EMAIL HTML + corridor PNG — the dial you drilled by matches the picture you send.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="extension">
+      <div class="wrap">
+        <p class="section-label">Part 1 · Chrome intake valve</p>
+        <h2>Capture without retyping</h2>
+        <p class="lede">
+          FieldCap does not expose every useful field on one public endpoint. The exporter combines three techniques so the pack is complete enough for the pad.
+        </p>
+
+        <div class="feature-grid" style="margin-bottom: 2rem;">
+          <article class="feature">
+            <h3>OData fetches</h3>
+            <p>Job, crew, BHA, inventory, ActivityLogs, and tickets — pulled with your active browser session.</p>
+          </article>
+          <article class="feature">
+            <h3>XHR / Fetch spy</h3>
+            <p>Intercepts FieldCap’s own traffic for hour and metric fields that never show up on public endpoints.</p>
+          </article>
+          <article class="feature">
+            <h3>DOM scrape</h3>
+            <p>Reads the live BHA grid when the UI holds the truth — then normalizes into typed CSVs.</p>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table class="csv-table">
+            <thead>
+              <tr>
+                <th>Export</th>
+                <th>Role in the workbook</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Job details</td>
+                <td>Identity, contacts, land, rig, directional constants → Setup</td>
+              </tr>
+              <tr>
+                <td>Crew / personnel</td>
+                <td>Names, emails, phones, roles → Setup crew manifest</td>
+              </tr>
+              <tr>
+                <td>BHA equipment</td>
+                <td>Serials, hours, metres, fatigue → DD Tools + Data motors sync</td>
+              </tr>
+              <tr>
+                <td>Inventory</td>
+                <td>Tool status and hour fields for job tooling</td>
+              </tr>
+              <tr>
+                <td>Slide / rotate by day</td>
+                <td>ActivityLog-derived daily metres per BHA — matches FieldCap’s Slide Sheet tab</td>
+              </tr>
+              <tr>
+                <td>Ticket costs by day</td>
+                <td>Calendar daily ticket totals → Costs form / Costs sheet (CSV wins on match)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="workbook">
+      <div class="wrap">
+        <p class="section-label">Part 2 · Standalone .xlsm cockpit</p>
+        <h2>Everything that has to live next to the hole</h2>
+        <p class="lede">
+          Once CSVs are in, the workbook is fully usable offline. You do not need the extension open to project the bit, paint the proximity dial, edit costs, or send EMAIL.
+        </p>
+
+        <div class="showcase-grid">
+          <figure class="shot">
+            <img src="docs/corridor_live.png?v=flat3" alt="OpenCap Field Workbook dark flat wellbore corridor and daily ops reporting surface" width="1200" height="675" loading="lazy">
+            <figcaption>Flat geo corridor (dark) + ops band — lateral L/R from Slidesheet AA14</figcaption>
+          </figure>
+          <div class="sheet-list">
+            <article class="sheet-item">
+              <h3>Setup</h3>
+              <p>Job identity, geometry, contacts, crew, OpenCap file status, Import Plan / AC, REFRESH / REBUILD.</p>
+            </article>
+            <article class="sheet-item">
+              <h3>DD Tools</h3>
+              <p>BHA selectors, slide/rotate/circ hours, serial-hour fatigue with high-hour emphasis.</p>
+            </article>
+            <article class="sheet-item">
+              <h3>Data</h3>
+              <p>Ops KPIs, motors, day-roll, AC concerns, TD calc, toolbar: EMAIL · Mini · Full · Costs · REFRESH.</p>
+            </article>
+            <article class="sheet-item">
+              <h3>Costs</h3>
+              <p>Modeless calendar form over hidden Costs — OpenCap ticket totals stay authoritative on refresh.</p>
+            </article>
+            <article class="sheet-item">
+              <h3>Pipe Tally · Sidetrack</h3>
+              <p>Joint paste → bit depths; doubles/triples/triple-half stands; sidetrack sheets on demand.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="slidesheet">
+      <div class="wrap">
+        <p class="section-label">Part 3 · Directional console</p>
+        <h2>Surveys meet the plan</h2>
+        <p class="lede">
+          The Slidesheet is where measured depth marches down the page — plan targets beside you, live projections from the last survey to the bit, and Comments that tell the directional hand what to do next stand.
+        </p>
+
+        <div class="showcase-grid" style="margin-bottom: 2rem;">
+          <div class="feature-grid" style="grid-template-columns: 1fr;">
+            <article class="feature">
+              <h3>Proximity gauge</h3>
+              <p>Plan center, survey marker, projected-to-bit. Gravity mode (Inc ≥ 5°) for UP/DN + LT/RT; magnetic mode near vertical with PRP distance.</p>
+            </article>
+            <article class="feature">
+              <h3>Sail + geo window</h3>
+              <p>Waypoint TVD corridor and lateral budget feed both the dial and the emailed corridor PNG — one vertical story with Data’s wellbore position.</p>
+            </article>
+            <article class="feature">
+              <h3>BURR → slide advisor</h3>
+              <p>Active target → build-up rate required → metres to slide / remain to rotate → required TF → Comments like <em>Sliding 12.25m @ L90 · BURR 2.40</em>, corrected by |cos(TF)|.</p>
+            </article>
+            <article class="feature">
+              <h3>Run lifecycle</h3>
+              <p>End-of-run archives Data to a well-named PDF, clears day fields, clones a fresh Slidesheet — no “Copy of Copy of FINAL v3.”</p>
+            </article>
+          </div>
+          <figure class="shot">
+            <img src="docs/gauge_two_dials.png" alt="Proximity gauge showing gravity and projected-to-bit markers" width="640" height="360" loading="lazy">
+            <figcaption>Proximity dial — plan vs as-drilled, gravity &amp; PTB</figcaption>
+          </figure>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature">
+            <h3>EMAIL that survives Outlook</h3>
+            <p>Light fixed-width HTML of the ops block people already know, plus a full corridor PNG attachment — not one crushed megaimage.</p>
+          </article>
+          <article class="feature">
+            <h3>Same maths, two surfaces</h3>
+            <p>Corridor renderer shares plan/proximity helpers with the on-sheet gauge. The dial you drilled by and the picture you emailed do not disagree.</p>
+          </article>
+          <article class="feature">
+            <h3>Field-hardened macros</h3>
+            <p>Protection-aware unprotect/work/reprotect, flicker-free screen guards, shortcuts for new Slidesheet and PDF when gloves are on.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="audience">
+      <div class="wrap">
+        <p class="section-label">Who ships with it</p>
+        <h2>Built for the tour, not a demo deck</h2>
+        <div class="audience">
+          <article>
+            <h3>Directional / MWD</h3>
+            <p>Slidesheet guidance, pipe tally, day roll, motors on location — offline after refresh.</p>
+          </article>
+          <article>
+            <h3>DD coordinator</h3>
+            <p>EMAIL + corridor PNG, Mini/Full text, costs calendar that stays tied to FieldCap tickets.</p>
+          </article>
+          <article>
+            <h3>Office / sales</h3>
+            <p>A consistent morning package without spreadsheet archaeology or “final_final_v7.”</p>
+          </article>
+          <article>
+            <h3>Toolpush / Co. man</h3>
+            <p>HTML they can read in Outlook; PNG when they want the spatial story at full size.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="install" id="adopt">
+      <div class="wrap">
+        <p class="section-label">Adopt in an afternoon</p>
+        <h2>Install the loop</h2>
+        <p class="lede">
+          Independent, unofficial, MIT-licensed. Not affiliated with PHX Technology or FieldCap — built to make their data portable into the sheet that already runs the well.
+        </p>
+        <div class="install-grid">
+          <article class="install-card">
+            <h3>1 · Chrome extension</h3>
+            <ol>
+              <li>Install <a href="https://chromewebstore.google.com/detail/opencap-data-exporter/egafclljokidcoiipaiojlaamgkooffb">.OpenCap Data Exporter</a> from the Chrome Web Store (v3.1.8) — one click, no developer mode.</li>
+              <li>On FieldCap, open the popup → pick the workbook folder → Fetch &amp; Build into <code>OpenCap\</code>.</li>
+              <li>Prefer source? Clone <a href="https://github.com/freebrew/OpenCap_PHX_Exporter">OpenCap_PHX_Exporter</a> and load <code>src/chrome-extension/</code> unpacked.</li>
+            </ol>
+            <div class="code">chromewebstore.google.com  →  .OpenCap Data Exporter  →  Add to Chrome</div>
+          </article>
+          <article class="install-card">
+            <h3>2 · Slide Sheet workbook</h3>
+            <ol>
+              <li>Open <code>Slide Sheet - Demo.xlsm</code> (enable macros).</li>
+              <li>Confirm CSVs landed beside the file under <code>OpenCap\</code>.</li>
+              <li>Click <strong>REFRESH CSVs</strong> on Setup (or REFRESH on Data / DD Tools).</li>
+              <li>Import plan / AC as needed, then drill on the Slidesheet.</li>
+            </ol>
+            <div class="code">Slide Sheet - Demo.xlsm  +  OpenCap\*.csv</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="close-band" aria-label="Closing call to action">
+      <div class="wrap">
+        <p class="section-label">Ship the morning package</p>
+        <h2>Stop rebuilding the well in Outlook</h2>
+        <p class="lede">
+          Pull authoritative ops data once. Guide with the same plan maths that paints the dial. Email a body people can read and a corridor they can trust.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://chromewebstore.google.com/detail/opencap-data-exporter/egafclljokidcoiipaiojlaamgkooffb">Add to Chrome — free</a>
+          <a class="btn btn-ghost" href="https://github.com/freebrew/OpenCap_PHX_Exporter">Star &amp; clone on GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/freebrew/OpenCap_PHX_Exporter/blob/main/docs/PHX_OpenCap_Field_Workbook_Overview.md">Read the full overview</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div>
+          <strong>OpenCap</strong> · Created by Bruno Brottes<br>
+          Workbook: <code>Slide Sheet - Demo.xlsm</code> · Extension: .OpenCap Data Exporter (Chrome MV3)
+        </div>
+        <div>
+          <a href="https://chromewebstore.google.com/detail/opencap-data-exporter/egafclljokidcoiipaiojlaamgkooffb">Chrome Web Store</a>
+          · <a href="https://github.com/freebrew/OpenCap_PHX_Exporter">Repository</a>
+          · <a href="privacy-disclaimer.html">Privacy &amp; disclaimer</a>
+          · <a href="https://github.com/freebrew/OpenCap_PHX_Exporter/blob/main/README.md">Technical README</a>
+        </div>
+      </div>
+      <p class="legal">
+        OpenCap is an independent, unofficial tool. It is not affiliated with, endorsed by, or supported by PHX Technology, FieldCap, or any other third party.
+        All trademarks belong to their respective owners. The extension uses your existing FieldCap session; data stays local (browser storage + CSV files). No telemetry.
+        MIT License.
+      </p>
+    </div>
+  </footer>
+</body>
+</html>
