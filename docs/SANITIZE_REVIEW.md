@@ -1,15 +1,13 @@
 ﻿# Sanitize review â€” fictional Setup data
 
-**Public/demo workbook:** `Slide Sheet - Demo.xlsm` (fictional identity applied).
-
 **Do not push until you open the workbook and confirm.**
 
 Real (sensitive) workbook backup:
-`backups/Slide Sheet - 34801.xlsm.bak_REAL_SENSITIVE_*`
+`backups/Slide Sheet - Demo.xlsm.bak_REAL_SENSITIVE_*`
 
 Restore field copy (Excel closed):
 ```powershell
-Copy-Item -LiteralPath (Get-ChildItem 'backups\Slide Sheet - 34801.xlsm.bak_REAL_SENSITIVE_*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName -Destination 'Slide Sheet - Demo.xlsm' -Force
+Copy-Item -LiteralPath (Get-ChildItem 'backups\Slide Sheet - Demo.xlsm.bak_REAL_SENSITIVE_*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName -Destination 'Slide Sheet - Demo.xlsm' -Force
 ```
 
 ## Fictional values now in the workbook

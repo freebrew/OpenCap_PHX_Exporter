@@ -20,6 +20,12 @@ Option Explicit
 '   "_OC_Slide"     = hidden  Slide-Rotate by Day CSV
 '   "_OC_Inventory" = hidden  Equipment Inventory CSV
 '   "_OC_Costs"     = hidden  Ticket Costs by Day CSV
+'
+'  LAYOUT WARNING:
+'   BuildSetupUI / RebuildSetup / InitSetup CLEAR the entire Setup sheet and
+'   redraw it from this module. Manual Setup tweaks are lost unless they are
+'   encoded here (section gap rowHeight=20, notes box = 5 rows, etc.).
+'   Agents must NOT run Rebuild/Init unless the user explicitly asks.
 ' ================================================================================
 
 ' -- Sheet names ---------------------------------------------------------------
@@ -451,7 +457,9 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- WELL GEOMETRY ------------------------------------------------------------
-    ws.Rows(r).rowHeight = 7: r = r + 1
+    ' Section gap height is intentional UI (do not shrink back to 7 - it gets wiped
+    ' every Rebuild and has been re-applied by hand too many times).
+    ws.Rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  WELL GEOMETRY", cTealLt(), cBlk()
     r = r + 1
     Pair ws, r, "GROUND MSL", ValUnit(GF(j, "GroundMSL"), " m"), _
@@ -468,7 +476,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- DIRECTIONAL PARAMETERS ---------------------------------------------------
-    ws.Rows(r).rowHeight = 7: r = r + 1
+    ws.Rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  DIRECTIONAL PARAMETERS", cTealLt(), cBlk()
     r = r + 1
     Pair ws, r, "MAG DECL", ValUnit(GF(j, "MagneticDeclination"), Chr(176)), _
@@ -488,7 +496,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- EQUIPMENT & RIG ----------------------------------------------------------
-    ws.Rows(r).rowHeight = 7: r = r + 1
+    ws.Rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  EQUIPMENT & RIG", cTeal(), cBlk()
     r = r + 1
     Pair ws, r, "RIG TYPE", GF(j, "RigType"), _
@@ -505,7 +513,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- CONTACTS -----------------------------------------------------------------
-    ws.Rows(r).rowHeight = 7: r = r + 1
+    ws.Rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  CONTACTS", cTeal(), cBlk()
     r = r + 1
     Pair ws, r, "COMPANY MAN", GF(j, "CompanyMan"), _
@@ -858,9 +866,10 @@ Private Sub DrawNotesPanel(ws As Worksheet, startRow As Long)
     ws.Rows(r).rowHeight = 18
     r = r + 1
 
+    ' Five note rows (r .. r+4) - matches the hand-tuned Field layout (J33:R37).
     Dim nr As Long
-    For nr = r To r + 5: ws.Rows(nr).rowHeight = 16: Next nr
-    With ws.Range(ws.Cells(r, cL), ws.Cells(r + 5, cR))
+    For nr = r To r + 4: ws.Rows(nr).rowHeight = 16: Next nr
+    With ws.Range(ws.Cells(r, cL), ws.Cells(r + 4, cR))
         .Merge
         .Interior.Color = cBg()
         .Font.Color = cDk()

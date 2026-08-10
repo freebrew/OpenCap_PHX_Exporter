@@ -83,36 +83,27 @@ Public Sub ClosePipeTallyFormIfOpen()
     On Error GoTo 0
 End Sub
 
-' Form-control button on Slidesheet, parked under Clear Slidesheet (AA2).
+' Form-control button on Slidesheet, in merged Z4:Z6 (under Clear Ranges in Z1:Z3).
 Public Sub EnsurePipeTallyFormButton()
     Dim ss As Worksheet
-    Dim clearShp As Shape
+    Dim rng As Range
     Dim btn As Button
     Dim shp As Shape
-    Dim gap As Double
 
-    Const CLEAR_BTN As String = "btnClearSlidesheetRanges"
     Const PT_BTN As String = "btnPipeTallyForm"
     Const PT_CAPTION As String = "Pipe Tally Calculator"
+    Const PT_ANCHOR As String = "Z4:Z6"
 
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
-    On Error Resume Next
-    Set clearShp = ss.Shapes(CLEAR_BTN)
-    On Error GoTo 0
-    If clearShp Is Nothing Then
-        MsgBox "Clear Slidesheet button not found; cannot place Pipe Tally button.", vbExclamation
-        Exit Sub
-    End If
-
-    gap = 4#
+    Set rng = ss.Range(PT_ANCHOR)
+    If rng.Cells.Count = 1 Then Set rng = rng.MergeArea
 
     On Error Resume Next
     ss.Buttons(PT_BTN).Delete
     ss.Shapes(PT_BTN).Delete
     On Error GoTo 0
 
-    Set btn = ss.Buttons.Add(clearShp.Left, clearShp.Top + clearShp.Height + gap, _
-                             clearShp.Width, clearShp.Height)
+    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.Width, rng.Height)
     btn.name = PT_BTN
     btn.caption = PT_CAPTION
     btn.OnAction = "'" & ThisWorkbook.name & "'!ShowPipeTallyForm"

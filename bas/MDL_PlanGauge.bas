@@ -2,7 +2,7 @@ Attribute VB_Name = "MDL_PlanGauge"
 Option Explicit
 
 ' ================================================================================
-'  PLAN PROXIMITY GAUGE  (Slidesheet AA1:AE7)
+'  PLAN PROXIMITY GAUGE  (Slidesheet AA1:AC7 - dial left in AA:AB, metrics right, ending at AC)
 '
 '  Single bullseye: plan at centre, survey (filled) + PTB (hollow) on one dial.
 '
@@ -24,7 +24,7 @@ Option Explicit
 
 Private Const SS_SHEET As String = "Slidesheet"
 Private Const PLAN_SHEET As String = "_OC_Survey"
-Private Const GAUGE_RANGE As String = "AA1:AE7"
+Private Const GAUGE_RANGE As String = "AA1:AC7"
 Private Const SHP_PREFIX As String = "OCG_"
 
 Private Const FS_HDR As Single = 12
@@ -498,17 +498,12 @@ Private Sub RenderPlanGaugeCore()
         If scaleS < 0.5 Then scaleS = 0.5
     End If
 
-    Dim caption As String
-    caption = "MD " & Format(sMD, "0.0") & "m  INC " & Format(sInc, "0.0") & Chr(176)
-    If hasBand Then
-        caption = caption & "  WP +/-" & Format(halfW, "0.##") & "m"
-    End If
     DrawGauge ws, True, ax, ay, IIf(gravityMode, "GRAV", "MAG"), showPtb, bx, by, _
-              caption, hasBand, yTop, yBot, scaleS
+              "", hasBand, yTop, yBot, scaleS
 
-    ' Data "Position of Wellbore": gauge LT/RT + Sail AB Up/down + Pythagoras total
+    ' Data "Position of Wellbore": gauge LT/RT + gauge UP/DN (plan) + GEO Window AB
     On Error Resume Next
-    UpdateWellborePosition ax, True, lastRow
+    UpdateWellborePosition ax, True, ay, True, lastRow
     On Error GoTo 0
 End Sub
 
@@ -531,30 +526,35 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
     Dim l As Double, t As Double, w As Double, H As Double
     l = area.Left: t = area.Top: w = area.Width: H = area.Height
 
-    ' Tight left text column; dial sits immediately to its right (no centred gap).
-    Dim textW As Double: textW = 78#
-    Dim gap As Double: gap = 4#
+    ' Dial hugs the left edge (AA into AB) and grows with the AA1:AC7 height
+    ' (rows 1-7 at 15 pt). Tight metrics column sits to its right, ending at AC.
+    Dim textW As Double: textW = 72#
+    Dim gap As Double: gap = 3#
     Dim r As Double
-    r = (H - 8#) / 2#
-    Dim dialLeft As Double: dialLeft = l + textW + gap
-    If dialLeft + 2# * r > l + w - 2# Then r = (l + w - 2# - dialLeft) / 2#
+    r = (H - 4#) / 2#
+    Dim dialLeft As Double: dialLeft = l + 1#
+    If dialLeft + 2# * r > l + w - textW - gap - 1# Then _
+        r = (l + w - textW - gap - 1# - dialLeft) / 2#
     If r < 18# Then r = 18#
 
     Dim cx As Double, cy As Double
     cx = dialLeft + r
     cy = t + H / 2#
 
+    Dim textX As Double: textX = l + w - textW - 1#
+    If textX < dialLeft + 2# * r + gap Then textX = dialLeft + 2# * r + gap
+
     Dim boxL As Double, boxT As Double, boxR As Double, boxB As Double
-    boxL = dialLeft - 2#
-    If boxL < l + textW Then boxL = l + textW
-    boxT = t + 2#
-    boxR = l + w - 2#
-    boxB = t + H - 2#
+    boxL = l + 1#
+    boxT = t + 1#
+    boxR = textX - 1#
+    If boxR < dialLeft + 2# * r + 1# Then boxR = dialLeft + 2# * r + 1#
+    boxB = t + H - 1#
 
     If Not hasData Then
         DrawCombinedDial ws, cx, cy, r, modeTxt, scaleS, False, 0, 0, False, 0, 0, _
                          False, 0, 0, boxL, boxT, boxR, boxB
-        AddGaugeText ws, SHP_PREFIX & "Note", l + 2, t + 2, textW, FS_HDR + 4, _
+        AddGaugeText ws, SHP_PREFIX & "Note", textX, t + 2, textW, FS_HDR + 4, _
                      caption, cInk(), FS_HDR, True
         GoTo Reprotect
     End If
@@ -570,39 +570,34 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
     aOut = hasBand And (ay > yTop Or ay < yBot)
     bOut = hasBand And showPtb And (by > yTop Or by < yBot)
 
-    AddGaugeText ws, SHP_PREFIX & "Mode", l + 2, y0, textW, FS_HDR + 1, _
+    AddGaugeText ws, SHP_PREFIX & "Mode", textX, y0, textW, FS_HDR + 1, _
                  IIf(modeTxt = "GRAV", "GRAVITY", "MAGNETIC"), cInk(), FS_HDR, True
-    AddGaugeText ws, SHP_PREFIX & "RdY", l + 2, y0 + rowH, textW, FS_VAL + 1, _
+    AddGaugeText ws, SHP_PREFIX & "RdY", textX, y0 + rowH, textW, FS_VAL + 1, _
                  AxisLabel(modeTxt, True, ay) & IIf(aOut, " OUT", ""), _
                  IIf(aOut, cBandOutInk(), cAct()), FS_VAL, False
-    AddGaugeText ws, SHP_PREFIX & "RdX", l + 2, y0 + 2 * rowH, textW, FS_VAL + 1, _
+    AddGaugeText ws, SHP_PREFIX & "RdX", textX, y0 + 2 * rowH, textW, FS_VAL + 1, _
                  AxisLabel(modeTxt, False, ax), cAct(), FS_VAL, False
-    AddGaugeText ws, SHP_PREFIX & "RdT", l + 2, y0 + 3 * rowH, textW, FS_VAL + 1, _
+    AddGaugeText ws, SHP_PREFIX & "RdT", textX, y0 + 3 * rowH, textW, FS_VAL + 1, _
                  IIf(modeTxt = "GRAV", "TOT", "PRP") & Space(1) & Format(magA, "0.00") & "m", _
                  cInk(), FS_VAL, False
 
     Dim yPtb As Double: yPtb = y0 + 4 * rowH + 2
     If showPtb Then
-        AddGaugeText ws, SHP_PREFIX & "PtbHdr", l + 2, yPtb, textW, FS_HDR + 1, _
+        AddGaugeText ws, SHP_PREFIX & "PtbHdr", textX, yPtb, textW, FS_HDR + 1, _
                      "PTB", cPtb(), FS_HDR, True
-        AddGaugeText ws, SHP_PREFIX & "PtbY", l + 2, yPtb + rowH, textW, FS_VAL + 1, _
+        AddGaugeText ws, SHP_PREFIX & "PtbY", textX, yPtb + rowH, textW, FS_VAL + 1, _
                      AxisLabel(modeTxt, True, by) & IIf(bOut, " OUT", ""), _
                      IIf(bOut, cBandOutInk(), cPtb()), FS_VAL, False
-        AddGaugeText ws, SHP_PREFIX & "PtbX", l + 2, yPtb + 2 * rowH, textW, FS_VAL + 1, _
+        AddGaugeText ws, SHP_PREFIX & "PtbX", textX, yPtb + 2 * rowH, textW, FS_VAL + 1, _
                      AxisLabel(modeTxt, False, bx), cPtb(), FS_VAL, False
-        AddGaugeText ws, SHP_PREFIX & "PtbT", l + 2, yPtb + 3 * rowH, textW, FS_VAL + 1, _
+        AddGaugeText ws, SHP_PREFIX & "PtbT", textX, yPtb + 3 * rowH, textW, FS_VAL + 1, _
                      IIf(modeTxt = "GRAV", "TOT", "PRP") & Space(1) & Format(magB, "0.00") & "m", _
                      cInk(), FS_VAL, False
-        ' Survey MD/INC/WP under the PTB block (never under the dial / overlapping PTB)
-        AddGaugeText ws, SHP_PREFIX & "Cap", l + 2, yPtb + 4 * rowH + 2, textW + 8, FS_CAP + 2, _
-                     caption, cGrid(), FS_CAP, False
     Else
-        AddGaugeText ws, SHP_PREFIX & "PtbHdr", l + 2, yPtb, textW, FS_HDR + 1, _
+        AddGaugeText ws, SHP_PREFIX & "PtbHdr", textX, yPtb, textW, FS_HDR + 1, _
                      "PTB", cGrid(), FS_HDR, True
-        AddGaugeText ws, SHP_PREFIX & "PtbY", l + 2, yPtb + rowH, textW + 10, FS_VAL + 1, _
+        AddGaugeText ws, SHP_PREFIX & "PtbY", textX, yPtb + rowH, textW + 10, FS_VAL + 1, _
                      "off target", cGrid(), FS_VAL, False
-        AddGaugeText ws, SHP_PREFIX & "Cap", l + 2, yPtb + 2 * rowH + 2, textW + 8, FS_CAP + 2, _
-                     caption, cGrid(), FS_CAP, False
     End If
 
 Reprotect:
@@ -672,7 +667,7 @@ Private Sub DrawCombinedDial(ws As Worksheet, _
 End Sub
 
 ' Horizontal waypoint corridor clipped to the circle's bounding square so the
-' green/red fills stay aligned with the dial (not the wider AA1:AE7 cell).
+' green/red fills stay aligned with the dial (not the wider AA1:AC7 cell).
 ' Green = inside [yBot, yTop]; red = above/below. Markers may still sit outside.
 Private Sub DrawWaypointBand(ws As Worksheet, ByVal cx As Double, ByVal cy As Double, _
         ByVal r As Double, ByVal scaleS As Double, _

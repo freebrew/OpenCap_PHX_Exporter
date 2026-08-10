@@ -12,7 +12,7 @@ $tmp = Join-Path $env:TEMP ("corr_" + [Guid]::NewGuid().ToString("N").Substring(
 Copy-Item -LiteralPath $book -Destination $tmp -Force
 
 $modules = @(
-    @{ name = "MDL_PlanGauge"; file = Join-Path $root "bas\live\MDL_PlanGauge.bas" }
+    @{ name = "MDL_PlanGauge"; file = Join-Path $root "bas\MDL_PlanGauge.bas" }
     @{ name = "MDL_CorridorImage"; file = Join-Path $root "bas\MDL_CorridorImage.bas" }
 )
 

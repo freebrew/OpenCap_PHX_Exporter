@@ -42,6 +42,19 @@ start_litellm_BYOK.ps1
 backups/
 *.bak_REAL_SENSITIVE_*
 
+# Field workbook — real job data; NEVER commit (Demo is the GitHub workbook)
+Slide Sheet - 34801.xlsm
+**/Slide Sheet - 34801.xlsm
+OpenCap_REAL_SENSITIVE*
+*REAL_SENSITIVE*
+
+# Dual VBA caches (local sync tooling; may contain Field exports)
+bas/cache_demo/
+bas/cache_field/
+bas/cache_demo_*/
+bas/cache_field_*/
+bas/_dual_sync_diff_report.txt
+
 # PII dumps
 docs/_setup_pii_dump.txt
 **/job_fields_dump.txt
@@ -79,4 +92,7 @@ bas/_*.ps1
 !bas/_sanitize_setup_for_github.ps1
 !bas/_export_live_modules.ps1
 !bas/_check_compile_safe.ps1
+!bas/_dual_export_caches.ps1
+!bas/_dual_diff_vba.ps1
+!bas/_dual_mirror_demo_to_field.ps1
 bas/live/

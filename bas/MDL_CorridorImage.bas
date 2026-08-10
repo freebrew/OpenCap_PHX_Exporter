@@ -14,11 +14,10 @@ Option Explicit
 '      world y -> TVD plot (plotY = datum - TVD) -> screen y, heavily exaggerated
 '      world z -> left/right from the plan       -> oblique axis, receding
 '
-'  The hole hangs in the middle of the room and casts two shadows, and each shadow
-'  is a chart in its own right. The back / left walls carry up/down from the geo
-'  target as a FLAT +/- band (Slidesheet AB14) — not a sloping waypoint ribbon.
-'  The floor carries left/right against the lateral boundary from Slidesheet AA14
-'  (labels read the live cell; no hardcoded 10). Dark canvas throughout.
+'  The hole hangs in the middle of the room and casts shadows: back + left walls
+'  show TVD vs MD; the floor shows left/right from plan (AA14). The plan path
+'  (P2) runs at lat=0 on plan TVD. No near-end (front) path shadow and no
+'  vertical floor tracers. Geo +/- (AB14) slopes between waypoints on the walls.
 '
 '  Two panels sit beside it: a true 1:1 vertical section of the whole well, and
 '  the last-survey / position / requirement figures as text. Those figures are the
@@ -58,7 +57,7 @@ Private Const RUN_AHEAD As Double = 20#         ' mMD drawn past the next waypoi
 ' panel 1, the room
 Private Const V_X As Double = 12
 Private Const V_Y As Double = 30
-Private Const V_W As Double = 506
+Private Const V_W As Double = 490
 Private Const V_H As Double = 376
 Private Const KZX As Double = 3#                ' oblique axis, pt per m of lateral
 Private Const KZY As Double = 2.2
@@ -73,9 +72,9 @@ Private Const P_H As Double = 250
 Private Const Q_Y As Double = 290
 Private Const Q_H As Double = 116
 
-' panel 3, the metrics
-Private Const M_X As Double = 774
-Private Const M_W As Double = 237
+' panel 3, the metrics (wider so long position values clear the labels)
+Private Const M_X As Double = 758
+Private Const M_W As Double = 253
 Private Const M_H As Double = 376
 
 Private Const SS_WP_ROW_FIRST As Long = 14
@@ -97,8 +96,8 @@ Private mX0 As Double, mY0 As Double, mSV As Double
 ' ---- gathered survey stations inside the window -------------------------------
 Private mSMD() As Double, mSDev() As Double, mSLat() As Double, mSTvd() As Double
 Private mSCount As Long
-' Vertical plot on the walls: plotY = geo TVD - as-drilled TVD (mSDev),
-' positive = high / shallower than geo. Flat corridor sits at +/- mGeoHalf.
+' Vertical plot on the walls: plotY = mTvdDatum - TVD (positive = shallower).
+' Geo corridor ribbons slope with waypoint TVD; hole uses the same frame.
 Private mTvdDatum As Double
 
 ' ---- last survey and forward projection ---------------------------------------
@@ -388,20 +387,37 @@ Private Function BuildScene(ss As Worksheet) As Boolean
     Trace "  pass2 done stations=" & mSCount
     If mSCount < 2 Then Exit Function
 
-    ' Datum kept for footer/debug; plot space is flat geo-relative deviation.
+    ' Datum = geo TVD at the window start so the sloping corridor reads clearly.
     If Not MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mMD0, mTvdDatum) Then
         mTvdDatum = mSTvd(0)
     End If
 
-    ' Vertical extent from hole high/low (mSDev) and the flat geo +/- band.
-    Dim mid As Double
+    ' Vertical extent from hole TVD and the sloping geo +/- band.
+    Dim py As Double, gT As Double, gHi As Double, gLo As Double, mid As Double
     mDevHi = -1E+99: mDevLo = 1E+99
     For i = 0 To mSCount - 1
-        If mSDev(i) > mDevHi Then mDevHi = mSDev(i)
-        If mSDev(i) < mDevLo Then mDevLo = mSDev(i)
+        py = PlotY(mSTvd(i))
+        If py > mDevHi Then mDevHi = py
+        If py < mDevLo Then mDevLo = py
     Next i
-    If mGeoHalf > mDevHi Then mDevHi = mGeoHalf
-    If -mGeoHalf < mDevLo Then mDevLo = -mGeoHalf
+    For i = 0 To mWCount - 1
+        If mWMD(i) >= mMD0 - 0.1 And mWMD(i) <= mMD1 + 0.1 Then
+            gHi = PlotY(mWTvd(i) - mGeoHalf)
+            gLo = PlotY(mWTvd(i) + mGeoHalf)
+            If gHi > mDevHi Then mDevHi = gHi
+            If gLo < mDevLo Then mDevLo = gLo
+        End If
+    Next i
+    If MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mMD0, gT) Then
+        gHi = PlotY(gT - mGeoHalf): gLo = PlotY(gT + mGeoHalf)
+        If gHi > mDevHi Then mDevHi = gHi
+        If gLo < mDevLo Then mDevLo = gLo
+    End If
+    If MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mMD1, gT) Then
+        gHi = PlotY(gT - mGeoHalf): gLo = PlotY(gT + mGeoHalf)
+        If gHi > mDevHi Then mDevHi = gHi
+        If gLo < mDevLo Then mDevLo = gLo
+    End If
     mDevHi = mDevHi + 1#
     mDevLo = mDevLo - 1#
     If mDevHi - mDevLo < 8# Then
@@ -653,8 +669,7 @@ End Sub
 
 Private Sub DrawRoom()
     Dim i As Long
-    Dim plot As Double
-    Dim latLbl As String
+    Dim plot As Double, endGeo As Double, endHi As Double
 
     Tx V_X, 20, "WELLBORE CORRIDOR " & ChrW(8212) & " " & Format$(mMD0, "#,##0") & _
        " to " & Format$(mMD1, "#,##0") & " mMD", 12.5, H("FFFFFF"), "start", True
@@ -668,7 +683,7 @@ Private Sub DrawRoom()
     Quad mMD0, mDevHi, -mLatBox, mMD1, mDevHi, -mLatBox, _
          mMD1, mDevLo, -mLatBox, mMD0, mDevLo, -mLatBox, H("242424"), H("4A4A4A"), 0.75
 
-    ' Grid ticks (0 = on geo target), then the FLAT geo +/- ribbon.
+    ' Grid ticks first (0 = geo TVD at the window start), then the sloping ribbon.
     Dim dv As Double
     For dv = Int(mDevHi / 2#) * 2# To mDevLo Step -2#
         Dim isZero As Boolean: isZero = (Abs(dv) < 0.001)
@@ -681,30 +696,35 @@ Private Sub DrawRoom()
         Tx ObX(mMD0, -mLatBox) - 5, ObY(dv, -mLatBox) + 3, SignedM(dv), 8.5, H("A8A8A8"), "end"
     Next dv
 
-    DrawFlatGeoCorridor mLatBox, H("1E3A2F"), H("4CAF7A"), 1.15
-    DrawFlatGeoCorridor -mLatBox, H("1A3328"), H("3D6B54"), 1#
+    DrawGeoCorridorRibbon mLatBox, H("1E3A2F"), H("4CAF7A"), 1.15
+    DrawGeoCorridorRibbon -mLatBox, H("1A3328"), H("3D6B54"), 1#
 
-    Tx ObX(mMD1, mLatBox) - 4, ObY(mGeoHalf, mLatBox) - 4, _
+    If Not MDL_PlanGauge.PG_WaypointTvdAtMd(mWs, mMD1, endGeo) Then endGeo = mWpTvd
+    endHi = PlotY(endGeo - mGeoHalf)
+    Tx ObX(mMD1, mLatBox) - 4, ObY(endHi, mLatBox) - 4, _
        "geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", 8, H("4CAF7A"), "end"
 
-    ' ---- floor, at plot = mDevLo : left/right against AA14 lateral boundary ----
+    ' ---- floor, at plot = mDevLo : left/right against the lateral boundary ----
     Quad mMD0, mDevLo, -mLatBox, mMD1, mDevLo, -mLatBox, _
          mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, H("252825"), H("4A4A4A"), 0.75
     Quad mMD0, mDevLo, -mLatTol, mMD1, mDevLo, -mLatTol, _
          mMD1, mDevLo, mLatTol, mMD0, mDevLo, mLatTol, H("1E3A2F"), H("4CAF7A"), 1#
     Ln ObX(mMD0, 0), ObY(mDevLo, 0), ObX(mMD1, 0), ObY(mDevLo, 0), H("4CAF7A"), 0.7, msoLineDash
 
-    ' L/R boundary labels straight from Slidesheet AA14 (two decimals, as displayed)
-    latLbl = Format$(mLatTol, "0.00")
-    Tx ObX(mMD1, mLatTol) + 4, ObY(mDevLo, mLatTol) + 3, _
+    ' L/R boundary labels straight from Slidesheet AA14 (two decimals, as displayed).
+    ' Walking down-hole (+MD, screen right) the traveler's RIGHT is the near/front
+    ' edge (-lat on screen) and LEFT is the far/back edge (+lat) - see LatScr.
+    Dim latLbl As String: latLbl = Format$(mLatTol, "0.00")
+    Tx ObX(mMD1, -mLatTol) + 4, ObY(mDevLo, -mLatTol) + 3, _
        latLbl & " R", 8, H("4CAF7A"), "start"
     Tx ObX(mMD1, 0) + 4, ObY(mDevLo, 0) + 3, "plan", 8, H("4CAF7A"), "start"
-    Tx ObX(mMD1, -mLatTol) + 4, ObY(mDevLo, -mLatTol) + 3, _
+    Tx ObX(mMD1, mLatTol) + 4, ObY(mDevLo, mLatTol) + 3, _
        latLbl & " L", 8, H("4CAF7A"), "start"
 
-    ' ---- near end wall, at md = mMD0 : flat corridor cross-section ------------
+    ' ---- near end wall, at md = mMD0 : corridor cross-section at window start -
     Quad mMD0, mDevHi, -mLatBox, mMD0, mDevHi, mLatBox, _
          mMD0, mDevLo, mLatBox, mMD0, mDevLo, -mLatBox, H("2A2A2A"), H("4A4A4A"), 0.75
+    ' Datum is geo at mMD0, so the aperture is still +/- mGeoHalf around plot 0.
     Quad mMD0, mGeoHalf, -mLatTol, mMD0, mGeoHalf, mLatTol, _
          mMD0, -mGeoHalf, mLatTol, mMD0, -mGeoHalf, -mLatTol, H("1E3A2F"), H("4CAF7A"), 1.2
 
@@ -714,30 +734,44 @@ Private Sub DrawRoom()
     Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
     Ln ObX(mMD0, -mLatBox), ObY(mDevLo, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
 
-    ' ---- two shadows (back wall + floor), then the hole -------------------------
-    ' Near-wall shadow removed (duplicated the back wall) and no station dropper
-    ' lines - they crowded the room.
+    ' ---- shadows --------------------------------------------------------------
+    ' Back wall (+lat) = the only TVD path shadow. The near/front wall keeps its
+    ' axis labels but no path shadow, and there are no vertical floor tracers.
     Dim xs() As Double, ys() As Double
     ReDim xs(0 To mSCount - 1): ReDim ys(0 To mSCount - 1)
-    For i = 0 To mSCount - 1
-        plot = mSDev(i)
-        xs(i) = ObX(mSMD(i), mLatBox): ys(i) = ObY(plot, mLatBox)
-    Next i
-    PolyLine xs, ys, mSCount, H("6E8A7C"), 1.8, msoLineDash
 
     For i = 0 To mSCount - 1
-        xs(i) = ObX(mSMD(i), mSLat(i)): ys(i) = ObY(mDevLo, mSLat(i))
+        plot = PlotY(mSTvd(i))
+        xs(i) = ObX(mSMD(i), mLatBox): ys(i) = ObY(plot, mLatBox)
     Next i
-    PolyLine xs, ys, mSCount, H("6E8A7C"), 1.8, msoLineDash
+    PolyLine xs, ys, mSCount, H("A8CBB8"), 2.4, msoLineDash
+
+    ' Floor shadow: left/right from plan (data sign: + = Right of plan).
+    For i = 0 To mSCount - 1
+        xs(i) = ObX(mSMD(i), LatScr(mSLat(i))): ys(i) = ObY(mDevLo, LatScr(mSLat(i)))
+    Next i
+    PolyLine xs, ys, mSCount, H("B6DBC8"), 3#, msoLineSolid
+
+    If mSCount >= 1 Then
+        Dim iLast As Long: iLast = mSCount - 1
+        Dot ObX(mSMD(iLast), LatScr(mSLat(iLast))), ObY(mDevLo, LatScr(mSLat(iLast))), _
+            3.4, H("B6DBC8"), H("1A1A1A"), 1
+        Tx ObX(mSMD(iLast), LatScr(mSLat(iLast))), ObY(mDevLo, LatScr(mSLat(iLast))) + 12, _
+           Format$(Abs(mSLat(iLast)), "0.0") & " m " & IIf(mSLat(iLast) < 0#, "L", "R"), _
+           8.5, H("B6DBC8"), "middle"
+    End If
 
     ' ---- the hole itself, floating in the middle of the room -------------------
     For i = 0 To mSCount - 1
-        plot = mSDev(i)
-        xs(i) = ObX(mSMD(i), mSLat(i)): ys(i) = ObY(plot, mSLat(i))
+        plot = PlotY(mSTvd(i))
+        xs(i) = ObX(mSMD(i), LatScr(mSLat(i))): ys(i) = ObY(plot, LatScr(mSLat(i)))
     Next i
     PolyLine xs, ys, mSCount, H("FFFFFF"), 2.8, msoLineSolid
 
-    ' Waypoint MD markers only — no incline / decline attitude ticks.
+    ' Plan path on top of the hole so P2 reads clearly through the room.
+    DrawPlanPathInRoom
+
+    ' Geo waypoints: MD + Inc to next (AE). Attitude ticks on the left-wall shadow.
     DrawWaypointMarks
 
     Dim iWorstDev As Long, iWorstLat As Long
@@ -752,74 +786,207 @@ Private Sub DrawRoom()
 
     ' worst excursions, each called out on the surface where it is measured
     Dim wx As Double, wy As Double
-    wx = ObX(mSMD(iWorstDev), mLatBox): wy = ObY(mSDev(iWorstDev), mLatBox)
+    wx = ObX(mSMD(iWorstDev), mLatBox): wy = ObY(PlotY(mSTvd(iWorstDev)), mLatBox)
     Ln wx, wy - 5, wx + 14, wy - 18, H("FF5555"), 0.8, msoLineSolid
     Tx wx + 17, wy - 16, Format$(mSDev(iWorstDev), "0.00") & " m high at " & _
        Format$(mSMD(iWorstDev), "#,##0"), 8.5, H("FF5555"), "start"
 
-    Tx ObX(mSMD(iWorstLat), mSLat(iWorstLat)), ObY(mDevLo, mSLat(iWorstLat)) + 11, _
+    Tx ObX(mSMD(iWorstLat), LatScr(mSLat(iWorstLat))), ObY(mDevLo, LatScr(mSLat(iWorstLat))) + 11, _
        Format$(Abs(mSLat(iWorstLat)), "0.0") & " m " & IIf(mSLat(iWorstLat) < 0, "L", "R"), _
        8, H("8AAB9A"), "middle"
 
-    ' BIT only — no required / held waypoint incline-decline projections.
+    ' ---- forward projections from the last survey ------------------------------
+    Dim n As Long: n = Int(mToGo / 4#) + 2
+    Dim rx() As Double, ry() As Double, hx() As Double, hy() As Double
+    ReDim rx(0 To n - 1): ReDim ry(0 To n - 1)
+    ReDim hx(0 To n - 1): ReDim hy(0 To n - 1)
+    Dim k As Long, a As Double, md As Double, tvdProj As Double, latH As Double
+    For k = 0 To n - 1
+        a = k * 4#
+        If a > mToGo Then a = mToGo
+        md = mSvyMD + a
+        tvdProj = mSvyTvd + a * Cos(mReqInc * PIE / 180#)
+        rx(k) = ObX(md, LatScr(mSvyLat * (1# - a / mToGo)))
+        ry(k) = ObY(PlotY(tvdProj), LatScr(mSvyLat * (1# - a / mToGo)))
+        latH = mSvyLat + a * Sin((mSvyAzi - mSvyPlanAzi) * PIE / 180#)
+        tvdProj = mSvyTvd + a * Cos(mSvyInc * PIE / 180#)
+        hx(k) = ObX(md, LatScr(latH))
+        hy(k) = ObY(PlotY(tvdProj), LatScr(latH))
+    Next k
+    PolyLine rx, ry, n, H("FF5555"), 2.4, msoLineSolid
+    PolyLine hx, hy, n, H("E09A3D"), 2.2, msoLineDash
+
     Dim bx As Double, by As Double
-    bx = ObX(mSvyMD, mSvyLat): by = ObY(mSvyDev, mSvyLat)
+    bx = ObX(mSvyMD, LatScr(mSvyLat)): by = ObY(PlotY(mSvyTvd), LatScr(mSvyLat))
     Dot bx, by, 5, H("FF5555"), H("1A1A1A"), 1.4
-    Tx bx - 8, by - 9, "BIT", 10, H("FF5555"), "end", True
+    Tx bx - 10, by - 11, "BIT", 10, H("FF5555"), "end", True
+
+    Dim ax As Double, ay As Double
+    tvdProj = mSvyTvd + mToGo * Cos(mSvyInc * PIE / 180#)
+    ax = ObX(mWpMD, LatScr(mHoldLatEnd)): ay = ObY(PlotY(tvdProj), LatScr(mHoldLatEnd))
+    Dot ax, ay, 4, H("1A1A1A"), H("E09A3D"), 2
+    ' Keep held-arrival label clear of the BIT tag.
+    Tx ax + 10, ay + 12, Format$(mHoldDevEnd, "0.00") & " m high", 8.5, H("E09A3D"), "start"
 
     ' ---- reporting-day span along the front foot of the room -------------------
-    ' Bar is clamped to the plotted MD window; label always shows the true day
-    ' depths. If the whole day lies outside the window, draw nothing rather than
-    ' a misleading zero-length bar.
-    Dim d0 As Double, d1 As Double, c0 As Double, c1 As Double, dy As Double
-    d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
-    d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
-    c0 = ClampMd(d0): c1 = ClampMd(d1)
-    If d1 > d0 And c1 - c0 > 0.5 Then
-        dy = V_Y + V_H - 16
-        Rect ObX(c0, -mLatBox), dy - 8, ObX(c1, -mLatBox) - ObX(c0, -mLatBox), 11, _
-             H("1A3348"), H("5BA3D9"), 0.75
-        Tx (ObX(c0, -mLatBox) + ObX(c1, -mLatBox)) / 2, dy, _
-           "24 h " & ChrW(183) & " " & Format$(d0, "#,##0") & " " & ChrW(8594) & " " & _
-           Format$(d1, "#,##0") & " m " & ChrW(183) & " " & Format$(d1 - d0, "#,##0") & " m", _
-           8.5, H("5BA3D9"), "middle"
-    End If
+    ' drawn last so it sits over the floor edge rather than under it
+    Dim d0 As Double, d1 As Double, dy As Double
+    d0 = ClampMd(NumCell(ThisWorkbook.Worksheets("Data").Range("C4")))
+    d1 = ClampMd(NumCell(ThisWorkbook.Worksheets("Data").Range("C5")))
+    dy = V_Y + V_H - 16
+    Rect ObX(d0, -mLatBox), dy - 8, ObX(d1, -mLatBox) - ObX(d0, -mLatBox), 11, _
+         H("1A3348"), H("5BA3D9"), 0.75
+    Tx (ObX(d0, -mLatBox) + ObX(d1, -mLatBox)) / 2, dy, _
+       "24 h " & ChrW(183) & " " & Format$(d0, "#,##0") & " " & ChrW(8594) & " " & _
+       Format$(d1, "#,##0") & " m " & ChrW(183) & " " & Format$(d1 - d0, "#,##0") & " m", _
+       8.5, H("5BA3D9"), "middle"
 
     ' ---- captions and legend ---------------------------------------------------
-    Tx V_X + 6, V_Y + 16, "back / left walls " & ChrW(8212) & " up / down from geo target, m", 8.5, H("A8A8A8"), "start"
+    Tx V_X + 6, V_Y + 16, "back wall " & ChrW(8212) & " TVD plot (0 = geo at window start), m", 8.5, H("A8A8A8"), "start"
     Tx V_X + V_W - 6, V_Y + V_H - 44, "floor " & ChrW(8212) & " left / right from plan, m", 8.5, H("A8A8A8"), "end"
 
     Dim ly As Double: ly = V_Y + V_H + 15
     Ln V_X + 2, ly, V_X + 18, ly, H("FFFFFF"), 2.6, msoLineSolid
     Tx V_X + 22, ly + 4, "hole", 10, H("FFFFFF"), "start"
-    Ln V_X + 50, ly, V_X + 66, ly, H("6E8A7C"), 1.8, msoLineDash
-    Tx V_X + 70, ly + 4, "shadows", 10, H("FFFFFF"), "start"
-    Dot V_X + 122, ly, 3.2, H("FF5555"), H("1A1A1A"), 1.2
-    Tx V_X + 130, ly + 4, "BIT", 10, H("FFFFFF"), "start"
-    Dot V_X + 168, ly, 2.5, H("4CAF7A"), -1, 0
-    Tx V_X + 176, ly + 4, "WP", 10, H("FFFFFF"), "start"
-    Tx V_X + V_W, ly + 4, "measured depth " & ChrW(247) & Format$(1# / SXD, "0.0") & " " & _
-       ChrW(183) & " up/down " & ChrW(215) & Format$(mSV, "0") & " " & _
-       ChrW(183) & " left/right " & ChrW(215) & Format$(KZX, "0"), 8.5, H("A8A8A8"), "end"
+    Ln V_X + 52, ly, V_X + 68, ly, H("5BA3D9"), 2.2, msoLineSolid
+    Tx V_X + 72, ly + 4, "plan", 10, H("FFFFFF"), "start"
+    Ln V_X + 108, ly, V_X + 124, ly, H("9EC9B0"), 2#, msoLineDash
+    Tx V_X + 128, ly + 4, "shadows", 10, H("FFFFFF"), "start"
+    Ln V_X + 178, ly, V_X + 194, ly, H("FF5555"), 2.4, msoLineSolid
+    Tx V_X + 198, ly + 4, "required " & Format$(mReqInc, "0.00") & ChrW(176), 10, H("FFFFFF"), "start"
+    Ln V_X + 292, ly, V_X + 308, ly, H("E09A3D"), 2.2, msoLineDash
+    Tx V_X + 312, ly + 4, "if " & Format$(mSvyInc, "0.00") & ChrW(176) & " held", 10, H("FFFFFF"), "start"
+    Dot V_X + 420, ly, 2.5, H("4CAF7A"), -1, 0
+    Tx V_X + 428, ly + 4, "WP", 10, H("FFFFFF"), "start"
+    Tx V_X + V_W, ly + 4, "MD " & ChrW(247) & Format$(1# / SXD, "0.0") & " " & _
+       ChrW(183) & " TVD " & ChrW(215) & Format$(mSV, "0") & " " & _
+       ChrW(183) & " L/R " & ChrW(215) & Format$(KZX, "0"), 8.5, H("A8A8A8"), "end"
 End Sub
 
-' Flat geo +/- corridor ribbon on one wall (no waypoint sloping).
-Private Sub DrawFlatGeoCorridor(ByVal lat As Double, ByVal fillRgb As Long, _
-                                ByVal lineRgb As Long, ByVal lineW As Double)
-    Quad mMD0, mGeoHalf, lat, mMD1, mGeoHalf, lat, _
-         mMD1, -mGeoHalf, lat, mMD0, -mGeoHalf, lat, fillRgb, -1, 0#
-    On Error Resume Next
-    mWs.Shapes(mNames(mNameN - 1)).Fill.transparency = 0.45
-    On Error GoTo 0
-    Ln ObX(mMD0, lat), ObY(mGeoHalf, lat), ObX(mMD1, lat), ObY(mGeoHalf, lat), _
-       lineRgb, lineW + 0.55, msoLineSolid
-    Ln ObX(mMD0, lat), ObY(-mGeoHalf, lat), ObX(mMD1, lat), ObY(-mGeoHalf, lat), _
-       lineRgb, lineW + 0.55, msoLineSolid
-    Ln ObX(mMD0, lat), ObY(0#, lat), ObX(mMD1, lat), ObY(0#, lat), _
-       lineRgb, 1#, msoLineDash
+' Plan trajectory through the room: the true P2 well plan (Plan sheet TVD at
+' each MD, lat = 0 since lateral offsets are measured from this plan line).
+' A constant-inclination plan section renders as one smooth straight slope.
+Private Sub DrawPlanPathInRoom()
+    Dim pMD() As Double, pInc() As Double, pAzi() As Double
+    Dim pTvd() As Double, pNS() As Double, pEW() As Double
+    Dim nPlan As Long
+    nPlan = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
+    If nPlan < 2 Then Exit Sub
+
+    Dim stepMd As Double, n As Long, i As Long, k As Long
+    Dim md As Double, plot As Double
+    Dim pN As Double, pE As Double, pV As Double, pA As Double, pI As Double
+    Dim xs() As Double, ys() As Double
+    Dim planName As String
+
+    stepMd = 8#
+    n = Int((mMD1 - mMD0) / stepMd) + 2
+    ReDim xs(0 To n - 1)
+    ReDim ys(0 To n - 1)
+
+    ' Clip (not clamp) to the drawn room: where the plan runs above or below the
+    ' TVD window the line simply exits, instead of smearing along the ceiling.
+    Dim lastX As Double, lastY As Double, drawn As Boolean
+    k = 0
+    For i = 0 To n - 1
+        md = mMD0 + CDbl(i) * stepMd
+        If md > mMD1 Then md = mMD1
+        MDL_PlanGauge.PG_PlanAt md, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, _
+                                pN, pE, pV, pA, pI
+        plot = PlotY(pV)
+        If plot >= mDevLo And plot <= mDevHi Then
+            xs(k) = ObX(md, 0#)
+            ys(k) = ObY(plot, 0#)
+            k = k + 1
+        Else
+            If k >= 2 Then
+                PolyLine xs, ys, k, H("5BA3D9"), 2.3, msoLineSolid
+                lastX = xs(k - 1): lastY = ys(k - 1): drawn = True
+            End If
+            k = 0
+        End If
+        If md >= mMD1 Then Exit For
+    Next i
+    If k >= 2 Then
+        PolyLine xs, ys, k, H("5BA3D9"), 2.3, msoLineSolid
+        lastX = xs(k - 1): lastY = ys(k - 1): drawn = True
+    End If
+    If Not drawn Then Exit Sub
+
+    planName = Trim$(cellText(ThisWorkbook.Worksheets("Data"), "C2"))
+    If Len(planName) = 0 Then planName = "Plan"
+    Tx lastX + 4, lastY - 6, planName, 9, H("5BA3D9"), "start", True
 End Sub
 
-' Marks each geo waypoint on the left-wall shadow with MD only (no Inc ticks).
+' Data lateral sign -> screen lateral. Positive data lat = RIGHT of plan.
+' Walking down-hole (+MD, drawn to screen right) the traveler's right hand
+' points toward the viewer, i.e. the near/front (-lat) side of the room.
+Private Function LatScr(ByVal l As Double) As Double
+    LatScr = -l
+End Function
+
+' Geo +/- corridor as a sloping ribbon between waypoint TVDs (plus window ends).
+Private Sub DrawGeoCorridorRibbon(ByVal lat As Double, ByVal fillRgb As Long, _
+                                  ByVal lineRgb As Long, ByVal lineW As Double)
+    Dim mdK() As Double, tvdK() As Double, nK As Long
+    Dim i As Long, gT As Double
+    Dim hi() As Double, lo() As Double, midY() As Double
+    Dim xs() As Double, ys() As Double
+
+    ReDim mdK(0 To mWCount + 3)
+    ReDim tvdK(0 To mWCount + 3)
+    nK = 0
+
+    If MDL_PlanGauge.PG_WaypointTvdAtMd(mWs, mMD0, gT) Then
+        mdK(nK) = mMD0: tvdK(nK) = gT: nK = nK + 1
+    End If
+    For i = 0 To mWCount - 1
+        If mWMD(i) > mMD0 + 0.05 And mWMD(i) < mMD1 - 0.05 Then
+            mdK(nK) = mWMD(i): tvdK(nK) = mWTvd(i): nK = nK + 1
+        End If
+    Next i
+    If MDL_PlanGauge.PG_WaypointTvdAtMd(mWs, mMD1, gT) Then
+        mdK(nK) = mMD1: tvdK(nK) = gT: nK = nK + 1
+    End If
+    If nK < 2 Then Exit Sub
+
+    ReDim hi(0 To nK - 1)
+    ReDim lo(0 To nK - 1)
+    ReDim midY(0 To nK - 1)
+    For i = 0 To nK - 1
+        hi(i) = PlotY(tvdK(i) - mGeoHalf)
+        lo(i) = PlotY(tvdK(i) + mGeoHalf)
+        midY(i) = PlotY(tvdK(i))
+    Next i
+
+    ' Fill only (no per-segment stroke) so joints do not read as stair steps;
+    ' continuous polylines carry the sloping geo ± outline.
+    For i = 0 To nK - 2
+        Quad mdK(i), hi(i), lat, mdK(i + 1), hi(i + 1), lat, _
+             mdK(i + 1), lo(i + 1), lat, mdK(i), lo(i), lat, _
+             fillRgb, -1, 0#
+        On Error Resume Next
+        mWs.Shapes(mNames(mNameN - 1)).Fill.transparency = 0.45
+        On Error GoTo 0
+    Next i
+
+    ReDim xs(0 To nK - 1): ReDim ys(0 To nK - 1)
+    For i = 0 To nK - 1
+        xs(i) = ObX(mdK(i), lat): ys(i) = ObY(hi(i), lat)
+    Next i
+    PolyLine xs, ys, nK, lineRgb, lineW + 0.55, msoLineSolid
+    For i = 0 To nK - 1
+        ys(i) = ObY(lo(i), lat)
+    Next i
+    PolyLine xs, ys, nK, lineRgb, lineW + 0.55, msoLineSolid
+    For i = 0 To nK - 1
+        ys(i) = ObY(midY(i), lat)
+    Next i
+    PolyLine xs, ys, nK, lineRgb, 1#, msoLineDash
+End Sub
+
+' Marks each geo waypoint on the left-wall shadow with MD + Inc-to-next, and a
+' short attitude tick (Inc 90 deg = along MD; >90 tips toward drop / higher TVD).
 Private Sub DrawWaypointMarks()
     Dim i As Long
     For i = 0 To mWCount - 1
@@ -827,8 +994,8 @@ Private Sub DrawWaypointMarks()
 
         Dim plot As Double, lat As Double
         If Not HoleAtMdPlot(mWMD(i), plot, lat) Then
-            ' Ahead of / off the surveyed hole: sit on geo centreline.
-            plot = 0#
+            ' Ahead of / off the surveyed hole: sit on geo TVD at plan centre.
+            plot = PlotY(mWTvd(i))
             lat = 0#
         End If
 
@@ -838,29 +1005,44 @@ Private Sub DrawWaypointMarks()
         wy = ObY(plot, -mLatBox)
 
         Dot wx, wy, IIf(isNext, 3.2, 2.4), H("4CAF7A"), H("1A1A1A"), 1
+
+        ' Attitude tick in the MD / up-down plane on the left wall.
+        ' Inc 90 deg = along MD; >90 tips toward drop (higher TVD / lower "high").
+        If mWInc(i) > 0.1 Then
+            Dim tick As Double, ang As Double, tx2 As Double, ty2 As Double
+            tick = 14#
+            ang = (mWInc(i) - 90#) * PIE / 180#
+            tx2 = wx + tick * Cos(ang)
+            ty2 = wy + tick * Sin(ang)
+            Ln wx, wy, tx2, ty2, H("4CAF7A"), IIf(isNext, 1.8, 1.2), msoLineSolid
+            Tx wx, wy - 10, Format$(mWInc(i), "0.00") & ChrW(176), 8, _
+               IIf(isNext, H("4CAF7A"), H("8AAB9A")), "middle", isNext
+        End If
+
         Tx wx, V_Y + V_H - 30, Format$(mWMD(i), "#,##0"), 8.5, _
            IIf(isNext, H("4CAF7A"), H("A8A8A8")), "middle", isNext
 NextWp:
     Next i
 End Sub
 
-' Interpolate as-drilled (geo-relative plotY, lat) at a measured depth.
+' Interpolate as-drilled (plotY, lat) at a measured depth inside the window.
 Private Function HoleAtMdPlot(ByVal md As Double, ByRef outPlot As Double, ByRef outLat As Double) As Boolean
     HoleAtMdPlot = False
     If mSCount < 1 Then Exit Function
     If md < mSMD(0) - 0.01 Or md > mSMD(mSCount - 1) + 0.01 Then Exit Function
     If mSCount = 1 Or md <= mSMD(0) Then
-        outPlot = mSDev(0): outLat = mSLat(0): HoleAtMdPlot = True: Exit Function
+        outPlot = PlotY(mSTvd(0)): outLat = mSLat(0): HoleAtMdPlot = True: Exit Function
     End If
     If md >= mSMD(mSCount - 1) Then
-        outPlot = mSDev(mSCount - 1): outLat = mSLat(mSCount - 1): HoleAtMdPlot = True: Exit Function
+        outPlot = PlotY(mSTvd(mSCount - 1)): outLat = mSLat(mSCount - 1): HoleAtMdPlot = True: Exit Function
     End If
     Dim i As Long
     For i = 0 To mSCount - 2
         If md >= mSMD(i) And md <= mSMD(i + 1) Then
-            Dim f As Double
+            Dim f As Double, tvd As Double
             If mSMD(i + 1) > mSMD(i) Then f = (md - mSMD(i)) / (mSMD(i + 1) - mSMD(i))
-            outPlot = mSDev(i) + f * (mSDev(i + 1) - mSDev(i))
+            tvd = mSTvd(i) + f * (mSTvd(i + 1) - mSTvd(i))
+            outPlot = PlotY(tvd)
             outLat = mSLat(i) + f * (mSLat(i + 1) - mSLat(i))
             HoleAtMdPlot = True
             Exit Function
@@ -1069,11 +1251,13 @@ Private Sub DrawMetrics(ss As Worksheet, dt As Worksheet)
     KV M_X, M_W, y, "Bit depth", Format$(mBitMD, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
 
     MHead y, "POSITION OF WELLBORE"
-    KV M_X, M_W, y, cellText(dt, "D13"), cellText(dt, "E13") & " " & cellText(dt, "F13"), _
+    ' Short keys so values stay clear of labels in the narrow metrics column.
+    KV M_X, M_W, y, "R/L from plan", cellText(dt, "E13") & " " & cellText(dt, "F13"), _
        10.5, H("FFFFFF"), False: y = y + 16
-    KV M_X, M_W, y, cellText(dt, "D14"), cellText(dt, "E14") & " " & cellText(dt, "F14"), _
+    KV M_X, M_W, y, "Above/Below plan", cellText(dt, "E14") & " " & cellText(dt, "F14"), _
        10.5, H("4CAF7A"), True: y = y + 16
-    KV M_X, M_W, y, cellText(dt, "D15"), cellText(dt, "E15"), 10.5, H("FFFFFF"), False: y = y + 16
+    KV M_X, M_W, y, "Dist. from geo", cellText(dt, "E15") & " " & cellText(dt, "F15"), _
+       10.5, H("FFFFFF"), False: y = y + 16
     KV M_X, M_W, y, "Corridor used", _
        Format$(100# * Abs(mSvyDev) / mGeoHalf, "0") & "% of " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", _
        10.5, H("FFFFFF"), False: y = y + 16
@@ -1102,7 +1286,13 @@ End Sub
 Private Sub KV(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
                ByVal k As String, ByVal v As String, ByVal sz As Double, _
                ByVal clr As Long, ByVal bold As Boolean)
-    Tx px + 11, y, k, sz, H("A8A8A8"), "start"
+    ' Reserve a value column so long labels (e.g. Distance from Current Geo Target)
+    ' cannot paint over the right-aligned value.
+    Dim valW As Double, keyW As Double
+    valW = 112#
+    keyW = pw - 22# - valW
+    If keyW < 56# Then keyW = 56#
+    Tx px + 11, y, k, sz, H("A8A8A8"), "start", False, keyW
     Tx px + pw - 11, y, v, sz, clr, "end", bold
 End Sub
 
@@ -1424,7 +1614,8 @@ End Sub
 ' Text placed the way SVG places it: x is the anchor, y is the baseline.
 Private Sub Tx(ByVal x As Double, ByVal y As Double, ByVal s As String, _
                ByVal sz As Double, ByVal clr As Long, ByVal anchor As String, _
-               Optional ByVal bold As Boolean = False)
+               Optional ByVal bold As Boolean = False, _
+               Optional ByVal maxW As Double = 0#)
     ' The box is only a container for the alignment; it is invisible. It must not
     ' run past the canvas edge, because the group's bounding box is what gets
     ' exported and a box hanging over the right edge silently widens the image.
@@ -1432,13 +1623,29 @@ Private Sub Tx(ByVal x As Double, ByVal y As Double, ByVal s As String, _
     If mTypeScale > 0.01 Then sz = sz * mTypeScale
     Select Case LCase$(anchor)
         Case "end"
-            l = 0: w = x: align = msoAlignRight
+            If maxW > 0# Then
+                w = maxW
+                l = x - w
+                If l < 0# Then l = 0#: w = x
+            Else
+                l = 0: w = x
+            End If
+            align = msoAlignRight
         Case "middle"
             w = 2 * MinD(x, CANVAS_W - x)
+            If maxW > 0# And maxW < w Then w = maxW
             l = x - w / 2: align = msoAlignCenter
         Case Else
-            l = x: w = CANVAS_W - x: align = msoAlignLeft
+            l = x
+            If maxW > 0# Then
+                w = maxW
+            Else
+                w = CANVAS_W - x
+            End If
+            align = msoAlignLeft
     End Select
+    If w < 8 Then w = 8
+    If l + w > CANVAS_W Then w = CANVAS_W - l
     If w < 8 Then w = 8
 
     Dim shp As Shape

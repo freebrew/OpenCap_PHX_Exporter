@@ -1,37 +1,43 @@
 Attribute VB_Name = "MDL_WellborePos"
 Option Explicit
 
-' Sync Data "Position of Wellbore (as of last survey)" from gauge lateral + Sail Up/down.
+' Sync Data "Position of Wellbore (as of last survey)":
+'   R/L from Plan     <- gauge frame X (ax): >=0 Right, <0 Left
+'   Above/Below Plan  <- gauge frame Y (ay): plan TVD - as-drilled TVD (>=0 Above/UP, <0 Below/DN)
+'   Distance from Geo <- Slidesheet GEO Window column AB on the last survey row
+'                       (skip AB14 header; >=0 Above geo, <0 Below geo)
 
 Private Const SH_DATA As String = "Data"
 Private Const SH_SS As String = "Slidesheet"
 Private Const SURV_FIRST As Long = 13
 Private Const SURV_LAST As Long = 320
-Private Const COL_SAIL_UPDN As Long = 28  ' AB (skip AB14 geo window — only survey rows)
+Private Const COL_GEO_AB As Long = 28  ' AB GEO Window (skip AB14)
 
 Private Const ROW_RL As Long = 13
 Private Const ROW_AB As Long = 14
-Private Const ROW_TOT As Long = 15
+Private Const ROW_GEO As Long = 15
 Private Const COL_VAL As Long = 5         ' E
 Private Const COL_DIR As Long = 6         ' F
 
-' latM: gauge frame X (same sign as OCG_RdX: >=0 Right, <0 Left).
+' latM / planUpM: same frame as OCG gauge markers (FrameComponents).
 ' survRow: Slidesheet row of last real survey (from ActualAtLastSurvey); 0 = scan.
 Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean, _
+                                  ByVal planUpM As Double, ByVal hasPlanUp As Boolean, _
                                   Optional ByVal survRow As Long = 0)
     Dim wsD As Worksheet
     Dim wasProt As Boolean
     Dim latAbs As Double
     Dim latDir As String
-    Dim vertM As Double
-    Dim hasVert As Boolean
-    Dim vertAbs As Double
-    Dim vertDir As String
-    Dim totM As Double
+    Dim planAbs As Double
+    Dim planDir As String
+    Dim geoM As Double
+    Dim hasGeo As Boolean
+    Dim geoAbs As Double
+    Dim geoDir As String
 
     Set wsD = ThisWorkbook.Worksheets(SH_DATA)
 
-    hasVert = SailUpDownAtSurvey(survRow, vertM)
+    hasGeo = GeoWindowAtSurvey(survRow, geoM)
 
     wasProt = SheetUnprotectForVba(wsD)
     On Error GoTo FailWrite
@@ -43,27 +49,26 @@ Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean,
         wsD.Cells(ROW_RL, COL_DIR).Value = latDir
     End If
 
-    If hasVert Then
-        vertAbs = Abs(vertM)
-        If vertM < 0# Then
-            vertDir = "Below"
+    If hasPlanUp Then
+        planAbs = Abs(planUpM)
+        If planUpM < 0# Then
+            planDir = "Below"
         Else
-            vertDir = "Above"
+            planDir = "Above"
         End If
-        wsD.Cells(ROW_AB, COL_VAL).Value = Format$(vertAbs, "0.00") & "m"
-        wsD.Cells(ROW_AB, COL_DIR).Value = vertDir
+        wsD.Cells(ROW_AB, COL_VAL).Value = Format$(planAbs, "0.00") & "m"
+        wsD.Cells(ROW_AB, COL_DIR).Value = planDir
     End If
 
-    If hasLat And hasVert Then
-        totM = Sqr(latAbs * latAbs + vertAbs * vertAbs)
-        wsD.Cells(ROW_TOT, COL_VAL).Value = Format$(totM, "0.00") & "m"
-        wsD.Cells(ROW_TOT, COL_DIR).Value = "Total"
-    ElseIf hasLat And Not hasVert Then
-        wsD.Cells(ROW_TOT, COL_VAL).Value = Format$(latAbs, "0.00") & "m"
-        wsD.Cells(ROW_TOT, COL_DIR).Value = "Total"
-    ElseIf hasVert And Not hasLat Then
-        wsD.Cells(ROW_TOT, COL_VAL).Value = Format$(vertAbs, "0.00") & "m"
-        wsD.Cells(ROW_TOT, COL_DIR).Value = "Total"
+    If hasGeo Then
+        geoAbs = Abs(geoM)
+        If geoM < 0# Then
+            geoDir = "Below"
+        Else
+            geoDir = "Above"
+        End If
+        wsD.Cells(ROW_GEO, COL_VAL).Value = Format$(geoAbs, "0.00") & "m"
+        wsD.Cells(ROW_GEO, COL_DIR).Value = geoDir
     End If
 
     SheetReprotectAfterVba wsD, wasProt
@@ -73,22 +78,22 @@ FailWrite:
     SheetReprotectAfterVba wsD, wasProt
 End Sub
 
-' Sail AB Up/down on the gauge's last survey row; fallback = last real survey with numeric AB.
-Private Function SailUpDownAtSurvey(ByVal survRow As Long, ByRef upDownM As Double) As Boolean
+' GEO Window (AB) on the gauge's last survey row; fallback = last real survey with numeric AB.
+Private Function GeoWindowAtSurvey(ByVal survRow As Long, ByRef geoM As Double) As Boolean
     Dim ws As Worksheet
     Dim r As Long
     Dim fE As String, fF As String, fd As String
 
-    SailUpDownAtSurvey = False
-    upDownM = 0#
+    GeoWindowAtSurvey = False
+    geoM = 0#
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(SH_SS)
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
 
     If survRow >= SURV_FIRST And survRow <= SURV_LAST And survRow <> 14 Then
-        If ReadNumericAb(ws, survRow, upDownM) Then
-            SailUpDownAtSurvey = True
+        If ReadNumericAb(ws, survRow, geoM) Then
+            GeoWindowAtSurvey = True
             Exit Function
         End If
     End If
@@ -103,26 +108,25 @@ Private Function SailUpDownAtSurvey(ByVal survRow As Long, ByRef upDownM As Doub
         If InStr(1, fE, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
         If InStr(1, fF, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
         If InStr(1, fd, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
-        ' Real survey stations have MD/Inc/Azm in E/F/G (same as PlanGauge).
         If Not IsNumeric(ws.Cells(r, 5).Value2) Then GoTo NextR
         If Not IsNumeric(ws.Cells(r, 6).Value2) Then GoTo NextR
         If Not IsNumeric(ws.Cells(r, 7).Value2) Then GoTo NextR
-        If Not ReadNumericAb(ws, r, upDownM) Then GoTo NextR
-        SailUpDownAtSurvey = True
+        If Not ReadNumericAb(ws, r, geoM) Then GoTo NextR
+        GeoWindowAtSurvey = True
         Exit Function
 NextR:
     Next r
 End Function
 
-Private Function ReadNumericAb(ws As Worksheet, ByVal r As Long, ByRef upDownM As Double) As Boolean
+Private Function ReadNumericAb(ws As Worksheet, ByVal r As Long, ByRef geoM As Double) As Boolean
     Dim v As Variant
     Dim t As String
     ReadNumericAb = False
-    v = ws.Cells(r, COL_SAIL_UPDN).Value2
-    t = Trim$(CStr(ws.Cells(r, COL_SAIL_UPDN).text & ""))
+    v = ws.Cells(r, COL_GEO_AB).Value2
+    t = Trim$(CStr(ws.Cells(r, COL_GEO_AB).text & ""))
     If Len(t) = 0 Then Exit Function
     If Not IsNumeric(v) Then Exit Function
     If Not IsNumeric(t) Then Exit Function   ' reject "Last H/L" etc.
-    upDownM = CDbl(v)
+    geoM = CDbl(v)
     ReadNumericAb = True
 End Function

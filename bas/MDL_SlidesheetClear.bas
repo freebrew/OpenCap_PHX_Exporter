@@ -4,8 +4,8 @@ Option Explicit
 Private Const SS_SHEET As String = "Slidesheet"
 Private Const BTN_NAME As String = "btnClearSlidesheetRanges"
 Private Const BTN_CAPTION As String = "Clear Ranges"
-' AD1:AE2 - clear of the plan proximity gauge which owns merged AA1:AC7
-Private Const BTN_ANCHOR As String = "AD1:AE2"
+' Merged Z1:Z3 - left of the plan proximity gauge which owns merged AA1:AC7
+Private Const BTN_ANCHOR As String = "Z1:Z3"
 Private Const Y_FIRST As Long = 12
 Private Const Y_LAST As Long = 305
 Private Const Y_DATA_FIRST As Long = 13
@@ -406,8 +406,7 @@ Public Sub EnsureSlidesheetClearButton()
 End Sub
 
 ' Only creates the button when it is missing.  An existing button is left exactly
-' where it is: the buttons have been positioned by hand, and re-anchoring them
-' would drop them back on top of the plan gauge (AA1:AE7).
+' where it is (anchor Z1:Z3, clear of the plan gauge in AA1:AC7).
 Public Sub ResizeSlidesheetClearButton()
     Dim ss As Worksheet
     Dim shp As Shape
