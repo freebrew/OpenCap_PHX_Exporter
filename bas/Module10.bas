@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module10"
 Sub CLEAR_Geo()
-Attribute CLEAR_Geo.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' CLEAR_Geo Macro
 '

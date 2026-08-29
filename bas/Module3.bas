@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module3"
 Sub data_PDF()
-Attribute data_PDF.VB_ProcData.VB_Invoke_Func = "l\n14"
 
 
 CarryOn = MsgBox("Do you want make a copy and clear all data?", vbYesNo, "NEW DATA")
@@ -33,5 +32,6 @@ If CarryOn = vbYes Then
     
 End If
 End Sub
+
 
 

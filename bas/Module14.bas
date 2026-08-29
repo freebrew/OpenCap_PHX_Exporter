@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module14"
 Sub NEWWWW()
-Attribute NEWWWW.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' NEWWWW Macro
 '

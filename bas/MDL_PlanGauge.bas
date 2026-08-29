@@ -327,18 +327,18 @@ Private Function ActualAtLastSurvey(ws As Worksheet, _
     For r = SURV_ROW_FIRST To SURV_ROW_LAST
         If IsSurveySummaryRow(ws, r) Then GoTo NextSurveyRow
 
-        Dim vMD As Variant, vInc As Variant, vAzi As Variant
-        vMD = ws.Cells(r, 5).Value2
+        Dim vMd As Variant, vInc As Variant, vAzi As Variant
+        vMd = ws.Cells(r, 5).Value2
         vInc = ws.Cells(r, 6).Value2
         vAzi = ws.Cells(r, 7).Value2
 
-        If Not (IsNumeric(vMD) And IsNumeric(vInc) And IsNumeric(vAzi) _
-                And Len(CStr(vMD & "")) > 0 And Len(CStr(vInc & "")) > 0 _
+        If Not (IsNumeric(vMd) And IsNumeric(vInc) And IsNumeric(vAzi) _
+                And Len(CStr(vMd & "")) > 0 And Len(CStr(vInc & "")) > 0 _
                 And Len(CStr(vAzi & "")) > 0) Then
             GoTo NextSurveyRow
         End If
 
-        Dim mdv As Double: mdv = CDbl(vMD)
+        Dim mdv As Double: mdv = CDbl(vMd)
         If mdv <= prevMD Then GoTo NextSurveyRow
 
         Dim dv As Double, dN As Double, dE As Double
@@ -501,9 +501,9 @@ Private Sub RenderPlanGaugeCore()
     DrawGauge ws, True, ax, ay, IIf(gravityMode, "GRAV", "MAG"), showPtb, bx, by, _
               "", hasBand, yTop, yBot, scaleS
 
-    ' Data "Position of Wellbore": gauge LT/RT + gauge UP/DN (plan) + GEO Window AB
+    ' Data "Position of Wellbore": LT/RT + UP/DN from plan; geo = hypot until lateral
     On Error Resume Next
-    UpdateWellborePosition ax, True, ay, True, lastRow
+    UpdateWellborePosition ax, True, ay, True, lastRow, sMD, sInc
     On Error GoTo 0
 End Sub
 
@@ -915,3 +915,5 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+

@@ -131,6 +131,14 @@ Public Sub RefreshData()
     EnsureDataBhaMirrorUnlocked
     On Error GoTo ErrHandler
 
+    ' Recalc mirror formulas, then fill blank Sliding Meters / Time Sliding on
+    ' Data daily rows (e.g. End of Run) from remaining BHA totals delta.
+    Application.StatusBar = "Refresh: backfilling Data slide metrics..."
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo ErrHandler
+    DayRoll_BackfillSlideMetrics
+
     On Error Resume Next
     prevSheet.Activate
     prevSheet.Range(prevCellAddr).Select
@@ -1703,6 +1711,8 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
 
 
 

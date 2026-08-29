@@ -1099,110 +1099,35 @@ Private Sub PutTextOnClipboard(ByVal txt As String)
     dataObj.SetText txt
     dataObj.PutInClipboard
 End Sub
-Sub PickAttachmentFile_Y14()
+Private Sub PickAttachmentFileRow(ByVal r As Long)
     Dim ws As Worksheet
-    Dim pathCell As Range
     Dim fd As FileDialog
-
     Set ws = ThisWorkbook.Worksheets("Data")
-    Set pathCell = ws.Range("I29")
-
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
-
     With fd
         .title = "Select attachment file"
         .AllowMultiSelect = False
         .Filters.Clear
         .Filters.Add "All Files", "*.*"
-
         If .Show = -1 Then
-            pathCell.Value = .SelectedItems(1)
+            Module11.StoreAttachPath ws.Cells(r, "I"), .SelectedItems(1)
         End If
     End With
+End Sub
+Sub PickAttachmentFile_Y14()
+    PickAttachmentFileRow 29
 End Sub
 Sub PickAttachmentFile_Y15()
-    Dim ws As Worksheet
-    Dim pathCell As Range
-    Dim fd As FileDialog
-
-    Set ws = ThisWorkbook.Worksheets("Data")
-    Set pathCell = ws.Range("I30")
-
-    Set fd = Application.FileDialog(msoFileDialogFilePicker)
-
-    With fd
-        .title = "Select attachment file"
-        .AllowMultiSelect = False
-        .Filters.Clear
-        .Filters.Add "All Files", "*.*"
-
-        If .Show = -1 Then
-            pathCell.Value = .SelectedItems(1)
-        End If
-    End With
+    PickAttachmentFileRow 30
 End Sub
 Sub PickAttachmentFile_Y16()
-    Dim ws As Worksheet
-    Dim pathCell As Range
-    Dim fd As FileDialog
-
-    Set ws = ThisWorkbook.Worksheets("Data")
-    Set pathCell = ws.Range("I31")
-
-    Set fd = Application.FileDialog(msoFileDialogFilePicker)
-
-    With fd
-        .title = "Select attachment file"
-        .AllowMultiSelect = False
-        .Filters.Clear
-        .Filters.Add "All Files", "*.*"
-
-        If .Show = -1 Then
-            pathCell.Value = .SelectedItems(1)
-        End If
-    End With
+    PickAttachmentFileRow 31
 End Sub
 Sub PickAttachmentFile_Y17()
-    Dim ws As Worksheet
-    Dim pathCell As Range
-    Dim fd As FileDialog
-
-    Set ws = ThisWorkbook.Worksheets("Data")
-    Set pathCell = ws.Range("I32")
-
-    Set fd = Application.FileDialog(msoFileDialogFilePicker)
-
-    With fd
-        .title = "Select attachment file"
-        .AllowMultiSelect = False
-        .Filters.Clear
-        .Filters.Add "All Files", "*.*"
-
-        If .Show = -1 Then
-            pathCell.Value = .SelectedItems(1)
-        End If
-    End With
+    PickAttachmentFileRow 32
 End Sub
 Sub PickAttachmentFile_Y18()
-    Dim ws As Worksheet
-    Dim pathCell As Range
-    Dim fd As FileDialog
-
-    Set ws = ThisWorkbook.Worksheets("Data")
-    Set pathCell = ws.Range("I33")
-
-    Set fd = Application.FileDialog(msoFileDialogFilePicker)
-
-    With fd
-        .title = "Select attachment file"
-        .AllowMultiSelect = False
-        .Filters.Clear
-        .Filters.Add "All Files", "*.*"
-
-        If .Show = -1 Then
-            pathCell.Value = .SelectedItems(1)
-        End If
-    End With
+    PickAttachmentFileRow 33
 End Sub
 Private Function MiniPercentFromValue(ByVal v As Variant, ByRef pct As Double) As Boolean
     Dim n As Double

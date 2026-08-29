@@ -30,7 +30,7 @@ Two workbooks share **one VBA codebase**:
 | Role | File | GitHub | Data |
 |------|------|--------|------|
 | **Primary (Demo)** | `Slide Sheet - Demo.xlsm` | Yes (mock / sanitized) | Fictional personnel & well data |
-| **Field mirror** | `Slide Sheet - 34801.xlsm` | **Never** | Real job data for field test |
+| **Field mirror** | `Slide Sheet - 35780.xlsm` | **Never** | Real job data for field test |
 
 **Rules**
 
@@ -47,6 +47,8 @@ powershell -NoProfile -File bas/_dual_diff_vba.ps1
 
 `Module11` mail headers (`.To` / `.CC` / `.Subject`) may differ (Demo mock vs Field real) until they are sheet-driven.
 
+When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
+
 **Setup sheet warning:** `RebuildSetup` / `InitSetup` clear and redraw the entire Setup tab from `MDL_Setup.bas`. Hand-tuned layout must be encoded in that module or it will be wiped.
 
 ---
@@ -58,6 +60,8 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 ### Highlights
 
 - **OpenCap Setup** — import FieldCap CSVs from `OpenCap/`, job/crew/contacts dashboard, plan & anti-collision import.
+- **Crew manifest** — six tight rows in the same Setup block (J3:R10); title shows `6+N` when OpenCap crew is longer. Role dropdown remains DD/MWD.
+- **Import Plan** — COMPASS well-plan **PDF** (Plan Sections / SECTION DETAILS). Names targets **KOP / TANGENT / SOT / EOT / HEEL / TD** (Y2:Y5 dropdown to override). All sections stay on hidden `_OC_PlanSec`; Slidesheet `T2:Y5` shows four at a time and slides as the bit passes the highlighted next target. Sibling `.csv` next to the PDF still loads the dense plan surveys into `_OC_Survey` (gauge / Planned TD); without a CSV, the sparse section stations are used.
 - **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`.
 - **Wellbore corridor** image — 3D-style MD window with geo ribbon, plan path, floor L/R shadow (AA14 lateral tolerance), and reporting-day band for daily email/PNG export.
 - **Position of Wellbore** — R/L from plan, above/below plan (gauge), distance from current geo target.
@@ -84,7 +88,7 @@ Rendered sample: `docs/corridor_live.png`.
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Slide Sheet - Demo.xlsm  (GitHub)  │  Slide Sheet - 34801.xlsm │
+│  Slide Sheet - Demo.xlsm  (GitHub)  │  Slide Sheet - 35780.xlsm │
 │  mock data · same VBA               │  real data · local only   │
 │  Setup · Slidesheet · gauges · corridor · daily report PNG      │
 └─────────────────────────────────────────────────────────────────┘
@@ -128,7 +132,7 @@ Rendered sample: `docs/corridor_live.png`.
 PHX_FieldCap/
 ├── README.md
 ├── Slide Sheet - Demo.xlsm          ← GitHub workbook (sanitized)
-├── Slide Sheet - 34801.xlsm         ← local Field only (gitignored)
+├── Slide Sheet - 35780.xlsm         ← local Field only (gitignored)
 ├── index.html                       ← GitHub Pages showcase
 ├── bas/                             ← staged VBA + dual-sync scripts
 │   ├── MDL_*.bas / Module*.bas
@@ -147,6 +151,11 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### Slide Sheet — 2026-08-28
+
+- **Import Plan PDF** — Setup **Import Plan** prefers a COMPASS planning-report PDF. Parses Plan Sections / SECTION DETAILS into `_OC_PlanSec`, auto-names KOP / TANGENT / SOT / EOT / HEEL / TD (Y dropdown override). Slidesheet `T2:Y5` is a 4-row window that advances with bit MD. Dense plan surveys still come from a same-stem `.csv` beside the PDF when present; CSV-only import remains.
+- **Crew density** — Setup crew panel holds 6 people in J3:R10 (tighter rows); AC table moves to J11:R16. Overflow count in the section title. `RedrawCrewAndAc` redraws that block without a full Rebuild.
 
 ### Slide Sheet — 2026-08-10
 

@@ -497,7 +497,7 @@ Private Function WalkSurveys(ss As Worksheet, ByVal findLastOnly As Boolean) As 
     Dim r As Long
     Dim rowFirst As Long
     Dim rowLast As Long
-    Dim vMD As Variant
+    Dim vMd As Variant
     Dim vInc As Variant
     Dim vAzi As Variant
     Dim mdv As Double
@@ -542,13 +542,13 @@ Private Function WalkSurveys(ss As Worksheet, ByVal findLastOnly As Boolean) As 
 
     For r = rowFirst To rowLast
         If Not MDL_PlanGauge.PG_IsSurveySummaryRow(ss, r) Then
-            vMD = ss.Cells(r, 5).Value2
+            vMd = ss.Cells(r, 5).Value2
             vInc = ss.Cells(r, 6).Value2
             vAzi = ss.Cells(r, 7).Value2
 
-            ok = IsNumeric(vMD) And IsNumeric(vInc) And IsNumeric(vAzi)
+            ok = IsNumeric(vMd) And IsNumeric(vInc) And IsNumeric(vAzi)
             If ok Then
-                ok = Len(CStr(vMD & "")) > 0
+                ok = Len(CStr(vMd & "")) > 0
             End If
             If ok Then
                 ok = Len(CStr(vInc & "")) > 0
@@ -558,7 +558,7 @@ Private Function WalkSurveys(ss As Worksheet, ByVal findLastOnly As Boolean) As 
             End If
 
             If ok Then
-                mdv = CDbl(vMD)
+                mdv = CDbl(vMd)
                 If mdv > prevMD Then
                     incv = CDbl(vInc)
                     aziv = CDbl(vAzi)
@@ -875,7 +875,7 @@ Private Sub DrawPlanPathInRoom()
 
     Dim stepMd As Double, n As Long, i As Long, k As Long
     Dim md As Double, plot As Double
-    Dim pN As Double, pE As Double, pV As Double, pA As Double, pI As Double
+    Dim pN As Double, pE As Double, pV As Double, pA As Double, PI As Double
     Dim xs() As Double, ys() As Double
     Dim planName As String
 
@@ -892,7 +892,7 @@ Private Sub DrawPlanPathInRoom()
         md = mMD0 + CDbl(i) * stepMd
         If md > mMD1 Then md = mMD1
         MDL_PlanGauge.PG_PlanAt md, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, _
-                                pN, pE, pV, pA, pI
+                                pN, pE, pV, pA, PI
         plot = PlotY(pV)
         If plot >= mDevLo And plot <= mDevHi Then
             xs(k) = ObX(md, 0#)
@@ -1830,14 +1830,14 @@ Private Function LatTolFromCell(rg As Range) As Double
     End If
 
     On Error Resume Next
-    s = Trim$(CStr(rg.Text))
+    s = Trim$(CStr(rg.text))
     On Error GoTo 0
     If Len(s) = 0 Then Exit Function
 
     buf = ""
     started = False
     For i = 1 To Len(s)
-        ch = Mid$(s, i, 1)
+        ch = mid$(s, i, 1)
         If (ch >= "0" And ch <= "9") Or ch = "." Then
             buf = buf & ch
             started = True
@@ -1855,3 +1855,6 @@ Private Function cellText(ws As Worksheet, ByVal addr As String) As String
     ' the sheet prints its own trailing colons on labels; the panel adds its own layout
     If right$(cellText, 1) = ":" Then cellText = Left$(cellText, Len(cellText) - 1)
 End Function
+
+
+

@@ -12,8 +12,11 @@ Private Const Y_DATA_FIRST As Long = 13
 Private Const Y_LABEL As String = "RKB"
 Private Const TGT_FIRST As Long = 2
 Private Const TGT_LAST As Long = 5
+Private Const PLANSEC_SHEET As String = "_OC_PlanSec"
+Private Const TGT_NAMES As String = "NUDGE,VERTICAL,KOP,TANGENT,SOT,EOT,HEEL,TD"
 Private m_updatingY As Boolean
 Private m_hlTgtRow As Long   ' last highlighted target row (0 = none)
+Private m_syncingTgt As Boolean
 
 ' Clear Slidesheet survey/entry ranges:
 '   D,F,G,T,U rows 13:305
@@ -38,6 +41,7 @@ Public Sub ClearSlidesheetRanges()
     ss.Range("AC14:AD33").ClearContents
     ss.Range("U2:X5").ClearContents
     ss.Range("Y12:Y305").ClearContents
+    SyncPlanTargetWindowOnSheet ss
     ss.Range("Y12").Value2 = Y_LABEL
 
     Application.EnableEvents = True
@@ -169,6 +173,7 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
         End If
     Next i
 
+    SyncPlanTargetWindowOnSheet ss
     HighlightActiveTargetOnSheet ss
 
 Clean:
@@ -254,6 +259,7 @@ Public Sub HighlightActiveTarget()
     prevEvents = Application.EnableEvents
     Application.EnableEvents = False
     wasProt = SheetUnprotectForVba(ss)
+    SyncPlanTargetWindowOnSheet ss
     HighlightActiveTargetOnSheet ss
     SheetReprotectAfterVba ss, wasProt
     Application.EnableEvents = prevEvents
@@ -418,3 +424,243 @@ Public Sub ResizeSlidesheetClearButton()
     If shp Is Nothing Then EnsureSlidesheetClearButton
     On Error GoTo 0
 End Sub
+
+' Show 4 named Plan Section targets on T2:Y5. Hidden later stations slide in
+' as the bit passes the highlighted (next) target. Calcs still read U2:X5.
+Public Sub SyncPlanTargetWindow()
+    Dim ss As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+
+    On Error GoTo Fail
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ss)
+    SyncPlanTargetWindowOnSheet ss
+    HighlightActiveTargetOnSheet ss
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+    Exit Sub
+Fail:
+    On Error Resume Next
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+End Sub
+
+Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
+    Dim ps As Worksheet
+    Dim n As Long
+    Dim md() As Double, inc() As Double, azm() As Double, tvd() As Double
+    Dim nm() As String
+    Dim bitMD As Double
+    Dim aimI As Long
+    Dim startI As Long
+    Dim i As Long
+    Dim vis As Long
+    Dim r As Long
+    Dim changed As Boolean
+    Dim newMd As Variant, newInc As Variant, newAzm As Variant
+    Dim newTvd As Variant, newNm As String
+
+    If m_syncingTgt Then Exit Sub
+    m_syncingTgt = True
+    On Error GoTo Done
+
+    If Not PlanSecSheetExists() Then GoTo Done
+    Set ps = ThisWorkbook.Worksheets(PLANSEC_SHEET)
+    n = LoadNamedPlanTargets(ps, md, inc, azm, tvd, nm)
+    If n < 1 Then GoTo Done
+
+    bitMD = LastSurveyBitMd(ss)
+    aimI = 1
+    For i = 1 To n
+        If md(i) > bitMD + 0.005 Then
+            aimI = i
+            Exit For
+        End If
+        If i = n Then aimI = n
+    Next i
+
+    startI = aimI
+    If startI + 3 > n Then startI = n - 3
+    If startI < 1 Then startI = 1
+
+    changed = False
+    For vis = 0 To 3
+        r = TGT_FIRST + vis
+        If startI + vis <= n Then
+            i = startI + vis
+            newMd = md(i): newInc = inc(i): newAzm = azm(i)
+            newTvd = tvd(i): newNm = nm(i)
+        Else
+            newMd = "": newInc = "": newAzm = ""
+            newTvd = "": newNm = ""
+        End If
+        If Not SameTgtCell(ss.Cells(r, "U").Value2, newMd) Then
+            ss.Cells(r, "U").Value2 = newMd
+            changed = True
+        End If
+        If Not SameTgtCell(ss.Cells(r, "V").Value2, newInc) Then
+            ss.Cells(r, "V").Value2 = newInc
+            changed = True
+        End If
+        If Not SameTgtCell(ss.Cells(r, "W").Value2, newAzm) Then
+            ss.Cells(r, "W").Value2 = newAzm
+            changed = True
+        End If
+        If Not SameTgtCell(ss.Cells(r, "X").Value2, newTvd) Then
+            ss.Cells(r, "X").Value2 = newTvd
+            changed = True
+        End If
+        If Trim$(CStr(ss.Cells(r, "Y").Value2 & "")) <> newNm Then
+            ss.Cells(r, "Y").Value2 = newNm
+            changed = True
+        End If
+    Next vis
+
+    If changed Then ApplyTargetNameDropdown ss
+
+Done:
+    m_syncingTgt = False
+End Sub
+
+Private Function SameTgtCell(ByVal cur As Variant, ByVal neu As Variant) As Boolean
+    If IsNumeric(cur) And IsNumeric(neu) Then
+        SameTgtCell = (Abs(CDbl(cur) - CDbl(neu)) < 0.005)
+        Exit Function
+    End If
+    SameTgtCell = (Trim$(CStr(cur & "")) = Trim$(CStr(neu & "")))
+End Function
+
+Private Function LastSurveyBitMd(ByVal ss As Worksheet) As Double
+    Dim r As Long
+    Dim vF As Variant, vD As Variant
+    LastSurveyBitMd = 0#
+    For r = 12 To 305
+        vF = ss.Cells(r, "F").Value2
+        If IsNumeric(vF) Then
+            If Len(Trim$(CStr(vF & ""))) > 0 Then
+                vD = ss.Cells(r, "D").Value2
+                If IsNumeric(vD) Then LastSurveyBitMd = CDbl(vD)
+            End If
+        End If
+    Next r
+End Function
+
+Private Function LoadNamedPlanTargets(ByVal ps As Worksheet, _
+        ByRef md() As Double, ByRef inc() As Double, ByRef azm() As Double, _
+        ByRef tvd() As Double, ByRef nm() As String) As Long
+
+    Dim lastR As Long
+    Dim r As Long
+    Dim n As Long
+    Dim autoNm As String, userNm As String, showNm As String
+    Dim vMd As Variant
+
+    lastR = ps.Cells(ps.Rows.Count, 1).End(xlUp).Row
+    ReDim md(1 To 80): ReDim inc(1 To 80): ReDim azm(1 To 80)
+    ReDim tvd(1 To 80): ReDim nm(1 To 80)
+    n = 0
+    For r = 3 To lastR
+        vMd = ps.Cells(r, 1).Value2
+        If Not IsNumeric(vMd) Then GoTo NextPs
+        autoNm = UCase$(Trim$(CStr(ps.Cells(r, 11).Value2 & "")))
+        userNm = UCase$(Trim$(CStr(ps.Cells(r, 12).Value2 & "")))
+        If userNm <> "" Then
+            showNm = userNm
+        Else
+            showNm = autoNm
+        End If
+        If Not IsKnownTargetName(showNm) Then GoTo NextPs
+        n = n + 1
+        If n > 80 Then Exit For
+        md(n) = CDbl(vMd)
+        inc(n) = val(ps.Cells(r, 2).Value2 & "")
+        azm(n) = val(ps.Cells(r, 3).Value2 & "")
+        tvd(n) = val(ps.Cells(r, 4).Value2 & "")
+        nm(n) = showNm
+NextPs:
+    Next r
+    If n > 0 Then
+        ReDim Preserve md(1 To n)
+        ReDim Preserve inc(1 To n)
+        ReDim Preserve azm(1 To n)
+        ReDim Preserve tvd(1 To n)
+        ReDim Preserve nm(1 To n)
+    End If
+    LoadNamedPlanTargets = n
+End Function
+
+Private Function IsKnownTargetName(ByVal s As String) As Boolean
+    s = UCase$(Trim$(s))
+    IsKnownTargetName = (s = "KOP" Or s = "TANGENT" Or s = "HEEL" _
+                      Or s = "SOT" Or s = "EOT" Or s = "TD" _
+                      Or s = "NUDGE" Or s = "VERTICAL")
+End Function
+
+Private Function PlanSecSheetExists() As Boolean
+    On Error Resume Next
+    PlanSecSheetExists = Not (ThisWorkbook.Worksheets(PLANSEC_SHEET) Is Nothing)
+    On Error GoTo 0
+End Function
+
+Private Sub ApplyTargetNameDropdown(ByVal ss As Worksheet)
+    Dim rng As Range
+    On Error Resume Next
+    Set rng = ss.Range(ss.Cells(TGT_FIRST, "Y"), ss.Cells(TGT_LAST, "Y"))
+    With rng.Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+             Formula1:=TGT_NAMES
+        .InCellDropdown = True
+        .ShowError = False
+        .ShowInput = False
+    End With
+    rng.Locked = False
+    On Error GoTo 0
+End Sub
+
+' Persist a Y2:Y5 dropdown change onto _OC_PlanSec USERNAME (matched by MD).
+Public Sub RememberPlanTargetOverride(ByVal Target As Range)
+    Dim ss As Worksheet
+    Dim ps As Worksheet
+    Dim cell As Range
+    Dim tgtMd As Variant
+    Dim lastR As Long
+    Dim r As Long
+    Dim nm As String
+
+    On Error GoTo Fail
+    If m_syncingTgt Then Exit Sub
+    If Target Is Nothing Then Exit Sub
+    Set ss = Target.Worksheet
+    If Not PlanSecSheetExists() Then Exit Sub
+    Set ps = ThisWorkbook.Worksheets(PLANSEC_SHEET)
+    lastR = ps.Cells(ps.Rows.Count, 1).End(xlUp).Row
+
+    For Each cell In Target.Cells
+        If cell.Column = 25 And cell.Row >= TGT_FIRST And cell.Row <= TGT_LAST Then
+            tgtMd = ss.Cells(cell.Row, "U").Value2
+            nm = UCase$(Trim$(CStr(cell.Value2 & "")))
+            If Not IsNumeric(tgtMd) Then GoTo NextOv
+            For r = 3 To lastR
+                If IsNumeric(ps.Cells(r, 1).Value2) Then
+                    If Abs(CDbl(ps.Cells(r, 1).Value2) - CDbl(tgtMd)) < 0.05 Then
+                        If nm = "" Then
+                            ps.Cells(r, 12).ClearContents
+                        Else
+                            ps.Cells(r, 12).Value = nm
+                        End If
+                        Exit For
+                    End If
+                End If
+            Next r
+        End If
+NextOv:
+    Next cell
+    Exit Sub
+Fail:
+End Sub
+
+

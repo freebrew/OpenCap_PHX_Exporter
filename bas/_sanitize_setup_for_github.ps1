@@ -207,7 +207,7 @@ try {
     foreach ($r in 29..33) {
         $cell = $data.Range("I$r")
         $v = [string]$cell.Text
-        if ($v -match "Phoenix|ELMWORTH|34801|Users\\\\|Desktop") {
+        if ($v -match "Phoenix|ELMWORTH|34801|35780|Users\\\\|Desktop") {
             $cell.NumberFormat = "@"
             $cell.Value2 = ""
         }

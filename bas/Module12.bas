@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module12"
 Sub data_PDF()
-Attribute data_PDF.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' Data_PDF Macro
 '
@@ -14,7 +13,6 @@ Attribute data_PDF.VB_ProcData.VB_Invoke_Func = " \n14"
         OpenAfterPublish:=True
 End Sub
 Sub CLEAR_DATA()
-Attribute CLEAR_DATA.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' CLEAR_DATA Macro
 '
@@ -47,3 +45,4 @@ Sub CLEAR_TIMETABLE()
     Selection.ClearContents
     ActiveWindow.SmallScroll Down:=0
 End Sub
+

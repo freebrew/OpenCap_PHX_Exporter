@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $xl = [Runtime.InteropServices.Marshal]::GetActiveObject("Excel.Application")
 $wb = $null
-foreach ($w in @($xl.Workbooks)) { if ($w.Name -like "*34801*") { $wb = $w; break } }
+foreach ($w in @($xl.Workbooks)) { if ($w.Name -like "*35780*" -or $w.Name -like "Slide Sheet*") { $wb = $w; break } }
 Write-Host ("Workbook: {0}" -f $wb.Name)
 
 $res = Test-VbaCompile -Excel $xl

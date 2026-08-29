@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module9"
 Sub NEW_SS()
-Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' NEW_SS Macro
 '
@@ -95,3 +94,4 @@ Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
     Range("B11").Select
     
 End Sub
+

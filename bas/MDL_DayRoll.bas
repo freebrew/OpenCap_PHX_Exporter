@@ -4,6 +4,11 @@ Option Explicit
 ' Autofill a new day-row in Data!H4:V22 from the RAW BHA SUMMARY mirror
 ' at Data!H35:M47 (BHA totals). Meters Sliding + Time Sliding are deltas
 ' against rows already entered. Bit/Circ hours come from a Pason-totals form.
+'
+' Hours units:
+'   OpenCap / mirror K column = decimal hours (fraction = hundredths of an hour,
+'   e.g. 15.33h). Column V formulas use M + N/60 (minutes as sixtieths).
+'   When writing M:N we convert decimal hours -> hours + minutes via *60.
 
 Private Const SH_DATA As String = "Data"
 Private Const ROW_FIRST As Long = 4
@@ -57,9 +62,9 @@ Public Sub DayRoll_OnDataChange(ByVal Target As Range)
         r = cell.Row
         period = Trim$(CStr(cell.Value & ""))
         If IsValidPeriod(period) Then
-            If RowIsEmptyForFill(ws, r) Then
-                FillNewDayRow ws, r, period
-            End If
+            ' Always show the End Depth / Pason hours form when H is set.
+            ' FillSlideMetrics only writes blank L/M/N; it does not overwrite.
+            FillNewDayRow ws, r, period
         End If
     Next cell
     Exit Sub
@@ -75,6 +80,47 @@ Public Function DayRoll_FillSlideMetrics(ByVal r As Long) As Boolean
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
     DayRoll_FillSlideMetrics = FillSlideMetrics(ws, r)
 End Function
+
+' Called from RefreshData after OpenCap / DD Tools rebuild.
+' Fills blank L/M/N on daily rows for the active BHA# (H3) from the mirror
+' deltas. Never overwrites non-blank slide cells; never opens the Pason form.
+Public Sub DayRoll_BackfillSlideMetrics()
+    Dim ws As Worksheet
+    Dim r As Long
+    Dim period As String
+    Dim wasProt As Boolean
+    Dim wrote As Boolean
+
+    On Error GoTo Fail
+    Set ws = ThisWorkbook.Worksheets(SH_DATA)
+    wasProt = SheetUnprotectForVba(ws)
+
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo Fail
+
+    For r = ROW_FIRST To ROW_LAST
+        period = Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))
+        If IsValidPeriod(period) Then
+            If NeedsSlideBackfill(ws, r) Then
+                wrote = FillSlideMetrics(ws, r)
+                If wrote Then
+                    On Error Resume Next
+                    Application.Calculate
+                    On Error GoTo Fail
+                End If
+            End If
+        End If
+    Next r
+
+    SheetReprotectAfterVba ws, wasProt
+    Exit Sub
+
+Fail:
+    On Error Resume Next
+    SheetReprotectAfterVba ws, wasProt
+    On Error GoTo 0
+End Sub
 
 ' Apply Pason running totals into P/Q and End Depth into J for gDayRoll_TargetRow.
 ' Validates deltas + end depth; returns False with errMsg on failure (no write).
@@ -115,6 +161,9 @@ Public Function DayRoll_ApplyPasonHours(ByVal bitTotal As Double, _
     ws.Cells(r, COL_END).Value = endDepth
     ws.Cells(r, COL_BIT).Value = bitDelta
     ws.Cells(r, COL_CIRC).Value = circDelta
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo RestoreEvents
     gDayRoll_Applied = True
     DayRoll_ApplyPasonHours = True
 
@@ -171,15 +220,17 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long) As Boo
     FillSlideMetrics = False
     wrote = False
 
-    If Not IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).Value) Then Exit Function
-    bha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).Value)
+    bha = ResolveActiveBha(ws)
+    If bha = 0 Then Exit Function
     srcRow = FindSourceRow(ws, bha)
     If srcRow = 0 Then Exit Function
 
     mtrsSld = GetNum(ws.Cells(srcRow, SRC_MTRS_SLD))
     hrsSld = GetNum(ws.Cells(srcRow, SRC_HRS_SLD))
     priorM = SumNumeric(ws, COL_SLIDE_M, ROW_FIRST, r - 1)
-    priorH = SumNumeric(ws, COL_SLIDE_DEC, ROW_FIRST, r - 1)
+    ' Prefer H:M (min/60) so backfill works even if col V formulas are stale
+    ' under Calculation=Manual during Refresh.
+    priorH = SumSlideHoursDecimal(ws, ROW_FIRST, r - 1)
     deltaM = Round(mtrsSld - priorM, 2)
     deltaH = Round(hrsSld - priorH, 4)
 
@@ -213,6 +264,9 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long) As Boo
     End If
 
     FillSlideMetrics = wrote
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo RestoreSlide
 
 RestoreSlide:
     Application.EnableEvents = prevEvents
@@ -302,6 +356,36 @@ Private Function ValidateHourDeltas(ByVal bitDelta As Double, _
     ValidateHourDeltas = True
 End Function
 
+' H3 BHA# must exist in the H36:H47 mirror. After a new-job import the header
+' is often still the previous well's BHA (e.g. 6) while the mirror only has 1.
+Private Function ResolveActiveBha(ByVal ws As Worksheet) As Long
+    Dim headerBha As Long
+    Dim lastBha As Long
+    ResolveActiveBha = 0
+    lastBha = LastSourceBha(ws)
+    If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).Value) Then
+        headerBha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).Value)
+        If FindSourceRow(ws, headerBha) > 0 Then
+            ResolveActiveBha = headerBha
+            Exit Function
+        End If
+    End If
+    If lastBha > 0 Then
+        ws.Cells(ROW_BHA, COL_PERIOD).Value = lastBha
+        ResolveActiveBha = lastBha
+    End If
+End Function
+
+Private Function LastSourceBha(ByVal ws As Worksheet) As Long
+    Dim r As Long
+    Dim v As Variant
+    LastSourceBha = 0
+    For r = SRC_FIRST To SRC_LAST
+        v = ws.Cells(r, SRC_BHA).Value
+        If IsNumeric(v) And v <> "" Then LastSourceBha = CLng(v)
+    Next r
+End Function
+
 Private Function FindSourceRow(ByVal ws As Worksheet, ByVal bha As Long) As Long
     Dim r As Long
     Dim v As Variant
@@ -324,6 +408,12 @@ Private Function RowIsEmptyForFill(ByVal ws As Worksheet, ByVal r As Long) As Bo
                     And CellBlank(ws.Cells(r, COL_MIN)) _
                     And CellBlank(ws.Cells(r, COL_BIT)) _
                     And CellBlank(ws.Cells(r, COL_CIRC))
+End Function
+
+Private Function NeedsSlideBackfill(ByVal ws As Worksheet, ByVal r As Long) As Boolean
+    NeedsSlideBackfill = CellBlank(ws.Cells(r, COL_SLIDE_M)) _
+                     Or (CellBlank(ws.Cells(r, COL_HRS)) _
+                         And CellBlank(ws.Cells(r, COL_MIN)))
 End Function
 
 Private Function IsValidPeriod(ByVal s As String) As Boolean
@@ -381,6 +471,31 @@ Private Function SumNumeric(ByVal ws As Worksheet, ByVal col As Long, _
     SumNumeric = tot
 End Function
 
+' Decimal hours from daily rows: hours + minutes/60 (not minutes/100).
+Private Function SumSlideHoursDecimal(ByVal ws As Worksheet, _
+                                      ByVal r1 As Long, _
+                                      ByVal r2 As Long) As Double
+    Dim r As Long
+    Dim tot As Double
+    Dim dec As Double
+    tot = 0
+    If r2 < r1 Then
+        SumSlideHoursDecimal = 0
+        Exit Function
+    End If
+    For r = r1 To r2
+        dec = 0
+        If IsNumeric(ws.Cells(r, COL_SLIDE_DEC).Value) Then
+            dec = CDbl(ws.Cells(r, COL_SLIDE_DEC).Value)
+        ElseIf IsNumeric(ws.Cells(r, COL_HRS).Value) _
+            Or IsNumeric(ws.Cells(r, COL_MIN).Value) Then
+            dec = GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
+        End If
+        tot = tot + dec
+    Next r
+    SumSlideHoursDecimal = tot
+End Function
+
 Private Function GetNum(ByVal cell As Range) As Double
     If IsNumeric(cell.Value) Then
         GetNum = CDbl(cell.Value)
@@ -404,3 +519,5 @@ Private Function CellBlank(ByVal cell As Range) As Boolean
         CellBlank = False
     End If
 End Function
+
+

@@ -492,3 +492,5 @@ Private Function LastBitDepthRow(ss As Worksheet) As Long
     Next r
     LastBitDepthRow = last
 End Function
+
+
