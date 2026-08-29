@@ -108,6 +108,9 @@ Private mX0 As Double, mY0 As Double, mSV As Double
 Private mSMD() As Double, mSDev() As Double, mSLat() As Double, mSTvd() As Double
 Private mSNS() As Double, mSEW() As Double
 Private mSCount As Long
+' ---- ALL survey stations, surface to bit (3D shadow-box needs the whole hole) --
+Private mANS() As Double, mAEW() As Double, mATvd() As Double
+Private mACount As Long
 Private mSvyNS As Double, mSvyEW As Double
 Private mShOx As Double, mShOy As Double, mShS As Double
 Private mShV0 As Double, mShNMin As Double, mShNMax As Double
@@ -732,6 +735,12 @@ Private Function WalkSurveys(ss As Worksheet, ByVal findLastOnly As Boolean) As 
         ReDim mSNS(0 To 511)
         ReDim mSEW(0 To 511)
         mSCount = 0
+        ReDim mANS(0 To 1023)
+        ReDim mAEW(0 To 1023)
+        ReDim mATvd(0 To 1023)
+        ' Station 0 is surface: the drilled hole anchors at (0,0,0).
+        mANS(0) = 0#: mAEW(0) = 0#: mATvd(0) = 0#
+        mACount = 1
     End If
 
     rowFirst = MDL_PlanGauge.PG_SurvRowFirst
@@ -769,6 +778,12 @@ Private Function WalkSurveys(ss As Worksheet, ByVal findLastOnly As Boolean) As 
                     lastRow = r
 
                     If Not findLastOnly Then
+                        If mACount <= 1023 Then
+                            mANS(mACount) = curN
+                            mAEW(mACount) = curE
+                            mATvd(mACount) = curV
+                            mACount = mACount + 1
+                        End If
                         If mdv >= mMD0 And mdv <= mMD1 And mSCount <= 511 Then
                             If StationOffsets(ss, mdv, incv, curN, curE, curV, np, pMD, pInc, pAzi, pTvd, pNS, pEW, dev, lat) Then
                                 mSMD(mSCount) = mdv
@@ -1122,23 +1137,24 @@ Private Sub DrawRoom()
     End If
 End Sub
 
-' Vertical / build: traveling-cylinder bullseye at the next named target.
-' Rings sit in the N/E plane at target TVD, centred on the plan. Hole and
-' plan pierce the plane. No sail box.
+' Vertical / build: 3D shadow-box of the WHOLE well (classic wall/floor-shadow
+' well-path plot). Full plan path, all drilled surveys from surface, dashed
+' minimum-curvature correction from the last survey to the NEXT named target,
+' and a small ring marker at that target. TVD down, grid on walls and floor,
+' hole/plan shadows projected onto the left wall and the floor.
 Private Sub DrawShaftProfile()
-    Dim i As Long, k As Long
-    Dim rMax As Double, rStep As Double, r As Double
-    Dim off As Double, s As Double, tvdPad As Double
-    Dim xs() As Double, ys() As Double
+    Dim i As Long, k As Long, np As Long, nPl As Long
     Dim pMD() As Double, pInc() As Double, pAzi() As Double
     Dim pTvd() As Double, pNS() As Double, pEW() As Double
-    Dim np As Long, pN As Double, pE As Double, pV As Double, pA As Double, pI As Double
-    Dim fillA As Long, fillB As Long, ring As Long
+    Dim pN As Double, pE As Double, pV As Double, pA As Double, pI As Double
+    Dim planPN() As Double, planPE() As Double, planPV() As Double
+    Dim xs() As Double, ys() As Double
     Dim ly As Double
 
     Tx mVX, 20, mSection & " TARGET  " & mTgtName & "  " & Format$(mWpMD, "#,##0") & " mMD", _
        12.5, H("FFFFFF"), "start", True
-    Tx mVX, mVY + 14, "Traveling cylinder  ·  GN / E / S / W  ·  metres from plan", _
+    Tx mVX, mVY + 14, "3D well path " & ChrW(183) & " TVD down " & ChrW(183) & _
+       " shadows on wall / floor " & ChrW(183) & " min-curve to next target", _
        8.5, H("A8A8A8"), "start"
     Rect mVX, mVY, mVW, mVH, H("FFFFFF"), H("3A3A3A"), 0.6
 
@@ -1151,94 +1167,251 @@ Private Sub DrawShaftProfile()
     End If
     If mTgtV <= 0# Then mTgtV = mSvyTvd
 
-    ' Ring scale follows the actual miss: a 1.4 m offset gets 2 m rings, not a
-    ' 40 m disk that hides it. (Hold-projection lateral is deliberately NOT
-    ' included: at near-vertical inclinations the azimuth term makes it junk.)
-    off = Sqr((mSvyNS - mTgtN) ^ 2 + (mSvyEW - mTgtE) ^ 2)
-    rMax = 2#
-    Do While off * 1.35 > rMax And rMax < 80#
-        rMax = rMax * 2#
-        If rMax = 16# Then rMax = 20#   ' 2/4/8 then 10-step sizes
-    Loop
-    rStep = rMax / 4#
+    ' ---- sample the FULL plan and gather extents (plan + hole + target) -----
+    Dim nMin As Double, nMax As Double, eMin As Double, eMax As Double
+    Dim vMin As Double, vMax As Double
+    Dim md As Double, mdA As Double, mdB As Double, stepMd As Double
 
-    ' Disk takes ~40% of the panel width; the TVD pierce above it is
-    ' compressed so the last ~toGo metres of hole fit in the headroom.
-    s = (mVW * 0.15) / rMax
-    If s * rMax * 0.6 > mVH * 0.3 Then s = (mVH * 0.3) / (rMax * 0.6)
-    mShS = s
-    mShOx = mVX + mVW * 0.5
-    mShOy = mVY + mVH * 0.6
+    nMin = 0#: nMax = 0#: eMin = 0#: eMax = 0#
+    vMin = 0#: vMax = mTgtV          ' surface (0,0,0) is always in frame
+    If vMax < mSvyTvd Then vMax = mSvyTvd
 
-    tvdPad = mTgtV - mSvyTvd + 10#
-    If tvdPad < 15# Then tvdPad = 15#
-    If tvdPad > 400# Then tvdPad = 400#
-    mShV0 = mTgtV - tvdPad
-    mShV1 = mTgtV + tvdPad * 0.3
-    mShVS = (mVH * 0.6 - 44# - rMax * s * 0.44) / tvdPad
-    If mShVS < 0.05 Then mShVS = 0.05
-
-    fillA = H("E8EEF2")
-    fillB = H("F7F7F7")
-    ring = 0
-    For r = rMax To rStep Step -rStep
-        SampleTargetRing xs, ys, r, mTgtV, 48
-        If (ring Mod 2) = 0 Then
-            PolyFill xs, ys, 48, fillA, H("8A9AAB"), 0.7
-        Else
-            PolyFill xs, ys, 48, fillB, H("8A9AAB"), 0.7
-        End If
-        ring = ring + 1
-    Next r
-    SampleTargetRing xs, ys, rMax, mTgtV, 48
-    PolyLine xs, ys, 48, H("1A1A1A"), 2.2, msoLineSolid
-
-    ' Radial to GN for orientation. Ring pitch is stated in the legend; the
-    ' numbers on every ring were unreadable at small radii.
-    Ln ShX(0#, 0#), ShY(0#, 0#, mTgtV), ShX(rMax, 0#), ShY(rMax, 0#, mTgtV), H("5B7A99"), 0.6, msoLineSolid
-
-    LabelTargetCardinal rMax, 0#, "GN"
-    LabelTargetCardinal 0#, rMax, "E"
-    LabelTargetCardinal -rMax, 0#, "S"
-    LabelTargetCardinal 0#, -rMax, "W"
-
-    Dot ShX(0#, 0#), ShY(0#, 0#, mTgtV), 4.2, H("4A1A5C"), H("1A1A1A"), 0.9
-    DrawPlanPathOnShaft3
-    DrawMinCurveToTarget
-
-    If mSCount >= 2 Then
-        ReDim xs(0 To mSCount - 1): ReDim ys(0 To mSCount - 1)
-        k = 0
-        For i = 0 To mSCount - 1
-            If mSTvd(i) >= mShV0 - 8# And mSTvd(i) <= mShV1 + 8# Then
-                xs(k) = ShX(mSNS(i) - mTgtN, mSEW(i) - mTgtE)
-                ys(k) = ShY(mSNS(i) - mTgtN, mSEW(i) - mTgtE, mSTvd(i))
-                k = k + 1
-            End If
-        Next i
-        If k >= 2 Then PolyLine xs, ys, k, H("6B2020"), 2.4, msoLineSolid
+    nPl = 0
+    If np >= 2 Then
+        mdA = pMD(0): mdB = pMD(np - 1)
+        stepMd = (mdB - mdA) / 180#
+        If stepMd < 5# Then stepMd = 5#
+        ReDim planPN(0 To 200): ReDim planPE(0 To 200): ReDim planPV(0 To 200)
+        md = mdA
+        Do While nPl <= 200
+            MDL_PlanGauge.PG_PlanAt md, np, pMD, pInc, pAzi, pTvd, pNS, pEW, pN, pE, pV, pA, pI
+            planPN(nPl) = pN - mTgtN
+            planPE(nPl) = pE - mTgtE
+            planPV(nPl) = pV
+            ExtGrow planPN(nPl), planPE(nPl), planPV(nPl), nMin, nMax, eMin, eMax, vMin, vMax
+            nPl = nPl + 1
+            If md >= mdB Then Exit Do
+            md = md + stepMd
+            If md > mdB Then md = mdB
+        Loop
     End If
 
+    For i = 0 To mACount - 1
+        ExtGrow mANS(i) - mTgtN, mAEW(i) - mTgtE, mATvd(i), nMin, nMax, eMin, eMax, vMin, vMax
+    Next i
+    ExtGrow mSvyNS - mTgtN, mSvyEW - mTgtE, mSvyTvd, nMin, nMax, eMin, eMax, vMin, vMax
+
+    ' Pad and enforce minimum spans so a young vertical well still gets a box.
+    Dim padN As Double, padE As Double, padV As Double
+    padN = (nMax - nMin) * 0.06: If padN < 20# Then padN = 20#
+    padE = (eMax - eMin) * 0.06: If padE < 20# Then padE = 20#
+    padV = (vMax - vMin) * 0.04: If padV < 15# Then padV = 15#
+    nMin = nMin - padN: nMax = nMax + padN
+    eMin = eMin - padE: eMax = eMax + padE
+    vMin = vMin - padV: vMax = vMax + padV
+    If vMin < -padV Then vMin = -padV
+    mShV0 = vMin: mShV1 = vMax
+
+    ' ---- fit the axonometric frame into the panel ---------------------------
+    ' hx/hy are the horizontal-plane screen offsets of the (n,e) basis used by
+    ' ShX/ShY. Corners of the horizontal rect bound them (projection is linear).
+    Dim hxMin As Double, hxMax As Double, hyMin As Double, hyMax As Double
+    Dim hx As Double, hy As Double
+    Dim cn As Double, ce As Double
+    hxMin = 1E+30: hxMax = -1E+30: hyMin = 1E+30: hyMax = -1E+30
+    For i = 0 To 3
+        If i < 2 Then cn = nMin Else cn = nMax
+        If (i Mod 2) = 0 Then ce = eMin Else ce = eMax
+        hx = ce * 0.88 + cn * 0.52
+        hy = -cn * 0.4 + ce * 0.18
+        If hx < hxMin Then hxMin = hx
+        If hx > hxMax Then hxMax = hx
+        If hy < hyMin Then hyMin = hy
+        If hy > hyMax Then hyMax = hy
+    Next i
+
+    Dim usableW As Double, usableH As Double, vertRoom As Double
+    usableW = mVW - 64#              ' TVD labels live left of the box
+    usableH = mVH - 46#
+    mShS = usableW / (hxMax - hxMin)
+    If mShS * (hyMax - hyMin) > usableH * 0.5 Then
+        mShS = usableH * 0.5 / (hyMax - hyMin)
+    End If
+    vertRoom = usableH - mShS * (hyMax - hyMin)
+    mShVS = vertRoom / (vMax - vMin)
+    If mShVS < 0.01 Then mShVS = 0.01
+    mShOx = mVX + 52# - hxMin * mShS
+    mShOy = mVY + 26# - (vMin - mTgtV) * mShVS - hyMin * mShS
+
+    ' ---- box: back wall (n = nMax), left wall (e = eMin), floor (v = vMax) --
+    Dim wallFill As Long, wallEdge As Long, gridClr As Long
+    wallFill = H("FBFCFD"): wallEdge = H("B9C2C9"): gridClr = H("DDE3E8")
+
+    Quad3 nMax, eMin, vMin, nMax, eMax, vMin, nMax, eMax, vMax, nMax, eMin, vMax, wallFill, wallEdge
+    Quad3 nMin, eMin, vMin, nMax, eMin, vMin, nMax, eMin, vMax, nMin, eMin, vMax, wallFill, wallEdge
+    Quad3 nMin, eMin, vMax, nMax, eMin, vMax, nMax, eMax, vMax, nMin, eMax, vMax, H("F4F6F8"), wallEdge
+
+    ' TVD grid across left wall + back wall, labels down the front-left edge.
+    Dim stepV As Double, v As Double
+    stepV = NiceStep(vMax - vMin, 6)
+    v = stepV * Int(vMin / stepV + 0.9999)
+    Do While v <= vMax
+        If v >= 0# Then
+            Ln ShX(nMin, eMin), ShY(nMin, eMin, v), ShX(nMax, eMin), ShY(nMax, eMin, v), gridClr, 0.6, msoLineSolid
+            Ln ShX(nMax, eMin), ShY(nMax, eMin, v), ShX(nMax, eMax), ShY(nMax, eMax, v), gridClr, 0.6, msoLineSolid
+            Tx ShX(nMin, eMin) - 5, ShY(nMin, eMin, v) + 3, Format$(v, "#,##0"), 7.5, H("6B7A85"), "end"
+        End If
+        v = v + stepV
+    Loop
+
+    ' Floor grid (N and E nice steps).
+    Dim stepN As Double, stepE As Double, g As Double
+    stepN = NiceStep(nMax - nMin, 4)
+    stepE = NiceStep(eMax - eMin, 4)
+    g = stepN * Int(nMin / stepN + 0.9999)
+    Do While g <= nMax
+        Ln ShX(g, eMin), ShY(g, eMin, vMax), ShX(g, eMax), ShY(g, eMax, vMax), gridClr, 0.6, msoLineSolid
+        g = g + stepN
+    Loop
+    g = stepE * Int(eMin / stepE + 0.9999)
+    Do While g <= eMax
+        Ln ShX(nMin, g), ShY(nMin, g, vMax), ShX(nMax, g), ShY(nMax, g, vMax), gridClr, 0.6, msoLineSolid
+        g = g + stepE
+    Loop
+
+    ' ---- shadows: plan then hole, on left wall (e=eMin) and floor (v=vMax) --
+    If nPl >= 2 Then
+        ShadowPolyline planPN, planPE, planPV, nPl, eMin, vMax, H("E0E6EB"), True
+        ShadowPolyline planPN, planPE, planPV, nPl, eMin, vMax, H("E0E6EB"), False
+    End If
+    If mACount >= 2 Then
+        ReDim xs(0 To mACount - 1): ReDim ys(0 To mACount - 1)
+        Dim sn() As Double, se() As Double, sv() As Double
+        ReDim sn(0 To mACount - 1): ReDim se(0 To mACount - 1): ReDim sv(0 To mACount - 1)
+        For i = 0 To mACount - 1
+            sn(i) = mANS(i) - mTgtN: se(i) = mAEW(i) - mTgtE: sv(i) = mATvd(i)
+        Next i
+        ShadowPolyline sn, se, sv, mACount, eMin, vMax, H("C7D0D7"), True
+        ShadowPolyline sn, se, sv, mACount, eMin, vMax, H("C7D0D7"), False
+    End If
+
+    ' ---- paths: full plan (blue), full hole (maroon), min-curve (dashed) ----
+    If nPl >= 2 Then
+        ReDim xs(0 To nPl - 1): ReDim ys(0 To nPl - 1)
+        For i = 0 To nPl - 1
+            xs(i) = ShX(planPN(i), planPE(i))
+            ys(i) = ShY(planPN(i), planPE(i), planPV(i))
+        Next i
+        PolyLine xs, ys, nPl, H("5BA3D9"), 2#, msoLineSolid
+    End If
+
+    If mACount >= 2 Then
+        ReDim xs(0 To mACount - 1): ReDim ys(0 To mACount - 1)
+        For i = 0 To mACount - 1
+            xs(i) = ShX(mANS(i) - mTgtN, mAEW(i) - mTgtE)
+            ys(i) = ShY(mANS(i) - mTgtN, mAEW(i) - mTgtE, mATvd(i))
+        Next i
+        PolyLine xs, ys, mACount, H("6B2020"), 2.4, msoLineSolid
+    End If
+
+    DrawMinCurveToTarget
+
+    ' ---- target marker: small double ring + dot, sized in points not metres -
+    Dim rT As Double
+    rT = 14# / mShS
+    SampleTargetRing xs, ys, rT, mTgtV, 37
+    PolyLine xs, ys, 37, H("1B4D2E"), 1.4, msoLineSolid
+    SampleTargetRing xs, ys, rT * 0.5, mTgtV, 37
+    PolyLine xs, ys, 37, H("1B4D2E"), 0.9, msoLineSolid
+    Dot ShX(0#, 0#), ShY(0#, 0#, mTgtV), 3.4, H("4A1A5C"), H("1A1A1A"), 0.9
+    Tx ShX(0#, 0#) + 8, ShY(0#, 0#, mTgtV) + 13, _
+       mTgtName & "  " & Format$(mWpMD, "#,##0"), 9, H("1B4D2E"), "start", True
+
+    ' ---- bit ----------------------------------------------------------------
     Dot ShX(mSvyNS - mTgtN, mSvyEW - mTgtE), ShY(mSvyNS - mTgtN, mSvyEW - mTgtE, mSvyTvd), _
-       4.5, H("6B2020"), H("1A1A1A"), 0.9
-    Tx ShX(mSvyNS - mTgtN, mSvyEW - mTgtE) - 9, _
+       4#, H("6B2020"), H("1A1A1A"), 0.9
+    Tx ShX(mSvyNS - mTgtN, mSvyEW - mTgtE) - 8, _
        ShY(mSvyNS - mTgtN, mSvyEW - mTgtE, mSvyTvd) + 3, "BIT", 9, H("6B2020"), "end", True
 
-    DrawHighSideTick
-
-    Tx mShOx, mShOy + rMax * mShS * 0.5 + 14, _
-       mTgtName & "  " & Format$(mWpMD, "#,##0"), 9, H("1B4D2E"), "middle", True
+    ' ---- GN arrow, bottom-right like the classic plot ------------------------
+    Dim gx As Double, gy As Double
+    gx = mVX + mVW - 44#: gy = mVY + mVH - 14#
+    Ln gx, gy, gx + 15#, gy - 11.5, H("1A3A5C"), 1.2, msoLineSolid
+    Tx gx + 19, gy - 12, "GN", 8.5, H("1A3A5C"), "start", True
 
     ly = mVY + mVH + 15
     Ln mVX + 2, ly, mVX + 18, ly, H("6B2020"), 2.4, msoLineSolid
     Tx mVX + 22, ly + 4, "hole", 10, H("FFFFFF"), "start"
-    Ln mVX + 52, ly, mVX + 68, ly, H("5BA3D9"), 2.2, msoLineSolid
+    Ln mVX + 52, ly, mVX + 68, ly, H("5BA3D9"), 2#, msoLineSolid
     Tx mVX + 72, ly + 4, "plan", 10, H("FFFFFF"), "start"
     Ln mVX + 104, ly, mVX + 120, ly, H("C0392B"), 1.6, msoLineDash
-    Tx mVX + 124, ly + 4, "min curve " & Format$(mReqInc, "0.0") & ChrW(176), _
-       10, H("FFFFFF"), "start"
-    Tx mVX + 230, ly + 4, "rings every " & Format$(rStep, "General Number") & " m from plan", _
-       10, H("FFFFFF"), "start"
+    Tx mVX + 124, ly + 4, "min curve " & Format$(mReqInc, "0.0") & ChrW(176) & _
+       " to " & mTgtName, 10, H("FFFFFF"), "start"
+    Tx mVX + 300, ly + 4, "grey = wall / floor shadows", 10, H("FFFFFF"), "start"
+End Sub
+
+' Grow (n,e,v) extents in place.
+Private Sub ExtGrow(ByVal n As Double, ByVal e As Double, ByVal v As Double, _
+        ByRef nMin As Double, ByRef nMax As Double, ByRef eMin As Double, _
+        ByRef eMax As Double, ByRef vMin As Double, ByRef vMax As Double)
+    If n < nMin Then nMin = n
+    If n > nMax Then nMax = n
+    If e < eMin Then eMin = e
+    If e > eMax Then eMax = e
+    If v < vMin Then vMin = v
+    If v > vMax Then vMax = v
+End Sub
+
+' Round a span into a 1/2/5 grid step giving roughly the requested tick count.
+Private Function NiceStep(ByVal span As Double, ByVal ticks As Long) As Double
+    Dim raw As Double, mag As Double, m As Double
+    If span <= 0# Or ticks < 1 Then NiceStep = 1#: Exit Function
+    raw = span / CDbl(ticks)
+    mag = 10# ^ Int(Log(raw) / Log(10#))
+    m = raw / mag
+    If m < 1.5 Then
+        NiceStep = mag
+    ElseIf m < 3.5 Then
+        NiceStep = 2# * mag
+    ElseIf m < 7.5 Then
+        NiceStep = 5# * mag
+    Else
+        NiceStep = 10# * mag
+    End If
+End Function
+
+' Projection of a 3D polyline onto the left wall (e = wallE) or, when
+' onFloor is True, onto the floor (v = floorV). The grey "shadows".
+Private Sub ShadowPolyline(pn() As Double, pe() As Double, pv() As Double, _
+        ByVal cnt As Long, ByVal wallE As Double, ByVal floorV As Double, _
+        ByVal clr As Long, ByVal onFloor As Boolean)
+    Dim xs() As Double, ys() As Double, i As Long
+    If cnt < 2 Then Exit Sub
+    ReDim xs(0 To cnt - 1): ReDim ys(0 To cnt - 1)
+    For i = 0 To cnt - 1
+        If onFloor Then
+            xs(i) = ShX(pn(i), pe(i))
+            ys(i) = ShY(pn(i), pe(i), floorV)
+        Else
+            xs(i) = ShX(pn(i), wallE)
+            ys(i) = ShY(pn(i), wallE, pv(i))
+        End If
+    Next i
+    PolyLine xs, ys, cnt, clr, 1#, msoLineSolid
+End Sub
+
+' Filled quad in scene coordinates (n,e,v per corner).
+Private Sub Quad3(ByVal n1 As Double, ByVal e1 As Double, ByVal v1 As Double, _
+        ByVal n2 As Double, ByVal e2 As Double, ByVal v2 As Double, _
+        ByVal n3 As Double, ByVal e3 As Double, ByVal v3 As Double, _
+        ByVal n4 As Double, ByVal e4 As Double, ByVal v4 As Double, _
+        ByVal fillClr As Long, ByVal edgeClr As Long)
+    Dim xs(0 To 3) As Double, ys(0 To 3) As Double
+    xs(0) = ShX(n1, e1): ys(0) = ShY(n1, e1, v1)
+    xs(1) = ShX(n2, e2): ys(1) = ShY(n2, e2, v2)
+    xs(2) = ShX(n3, e3): ys(2) = ShY(n3, e3, v3)
+    xs(3) = ShX(n4, e4): ys(3) = ShY(n4, e4, v4)
+    PolyFill xs, ys, 4, fillClr, edgeClr, 0.7
 End Sub
 
 ' Minimum-curvature correction: a smooth arc leaving the bit along its current
@@ -1304,69 +1477,19 @@ Private Function ShY(ByVal n As Double, ByVal e As Double, ByVal v As Double) As
     ShY = mShOy + (v - mTgtV) * mShVS - n * mShS * 0.4 + e * mShS * 0.18
 End Function
 
+' Closed ring (last point repeats the first) around the target in the N/E
+' plane at the given TVD. Radius in metres.
 Private Sub SampleTargetRing(xs() As Double, ys() As Double, _
         ByVal radius As Double, ByVal tvd As Double, ByVal nPts As Long)
     Dim i As Long, a As Double
-    If nPts < 8 Then nPts = 8
+    If nPts < 9 Then nPts = 9
     ReDim xs(0 To nPts - 1)
     ReDim ys(0 To nPts - 1)
     For i = 0 To nPts - 1
-        a = 2# * PIE * CDbl(i) / CDbl(nPts)
+        a = 2# * PIE * CDbl(i) / CDbl(nPts - 1)
         xs(i) = ShX(radius * Cos(a), radius * Sin(a))
         ys(i) = ShY(radius * Cos(a), radius * Sin(a), tvd)
     Next i
-End Sub
-
-Private Sub LabelTargetCardinal(ByVal n As Double, ByVal e As Double, ByVal lab As String)
-    Dim x As Double, y As Double
-    x = ShX(n * 1.12, e * 1.12)
-    y = ShY(n * 1.12, e * 1.12, mTgtV)
-    Tx x, y + 4, lab, 10, H("1A3A5C"), "middle", True
-End Sub
-
-Private Sub DrawHighSideTick()
-    Dim azi As Double, dN As Double, dE As Double
-    Dim x0 As Double, y0 As Double, x1 As Double, y1 As Double
-    Dim tickM As Double
-    azi = mSvyAzi * PIE / 180#
-    tickM = 12# / mShS          ' ~12 pt on screen, whatever the ring scale
-    dN = Cos(azi) * tickM
-    dE = Sin(azi) * tickM
-    x0 = ShX(mSvyNS - mTgtN, mSvyEW - mTgtE)
-    y0 = ShY(mSvyNS - mTgtN, mSvyEW - mTgtE, mSvyTvd)
-    x1 = ShX(mSvyNS - mTgtN + dN, mSvyEW - mTgtE + dE)
-    y1 = ShY(mSvyNS - mTgtN + dN, mSvyEW - mTgtE + dE, mSvyTvd)
-    Ln x0, y0, x1, y1, H("8B0000"), 1.1, msoLineSolid
-    Tx x1 + 3, y1, "HS", 8, H("8B0000"), "start", True
-End Sub
-
-Private Sub DrawPlanPathOnShaft3()
-    Dim pMD() As Double, pInc() As Double, pAzi() As Double
-    Dim pTvd() As Double, pNS() As Double, pEW() As Double
-    Dim nPlan As Long
-    nPlan = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
-    If nPlan < 2 Then Exit Sub
-
-    Dim stepMd As Double, n As Long, i As Long, k As Long
-    Dim md As Double, pN As Double, pE As Double, pV As Double, pA As Double, PI As Double
-    Dim xs() As Double, ys() As Double
-    stepMd = 8#
-    n = Int((mMD1 - mMD0) / stepMd) + 2
-    ReDim xs(0 To n - 1): ReDim ys(0 To n - 1)
-    k = 0
-    For i = 0 To n - 1
-        md = mMD0 + CDbl(i) * stepMd
-        If md > mMD1 Then md = mMD1
-        MDL_PlanGauge.PG_PlanAt md, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, _
-                                pN, pE, pV, pA, PI
-        If pV >= mShV0 And pV <= mShV1 Then
-            xs(k) = ShX(pN - mTgtN, pE - mTgtE)
-            ys(k) = ShY(pN - mTgtN, pE - mTgtE, pV)
-            k = k + 1
-        End If
-        If md >= mMD1 Then Exit For
-    Next i
-    If k >= 2 Then PolyLine xs, ys, k, H("5BA3D9"), 2.1, msoLineSolid
 End Sub
 
 ' Plan trajectory through the room: the true P2 well plan (Plan sheet TVD at
