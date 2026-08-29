@@ -36,8 +36,9 @@ Public Sub RTP_printW_Email()
     wsData.Range("B2:F55").Calculate
     On Error GoTo CleanFail
 
-    ' Daily plot PNG: shown inline under the B2:F55 HTML table only - not
-    ' listed as a file attachment (no daily report PDF/PNG attachment).
+    ' Daily plot PNG: attach a visible file AND inline a CID copy under the
+    ' B2:F55 table. Outlook hides CID-referenced images from the paperclip
+    ' list, so the visible attach must NOT get a Content-ID. No daily PDF.
     tmpDir = Environ$("TEMP")
     reportPng = ""
     On Error Resume Next
@@ -76,7 +77,9 @@ Public Sub RTP_printW_Email()
 
         If Len(reportPng) > 0 Then
             If FileExistsFast(reportPng) Then
-                AttachDailyPng OutMail, reportPng
+                .Attachments.Add reportPng
+                attachedCount = attachedCount + 1
+                AttachDailyPngInline OutMail, reportPng
                 .HTMLBody = .HTMLBody & DailyPngHtml()
             End If
         End If
@@ -177,12 +180,23 @@ Private Function IsOutlookDesktopRegistered() As Boolean
     On Error GoTo 0
 End Function
 
-' Attach daily_report.png with a Content-ID so the HTML body can show it via
-' cid:daily_report.png, and mark it hidden so it renders inline only - it must
-' NOT appear as a separate file in the recipient's attachment list.
-Private Sub AttachDailyPng(ByVal mail As Object, ByVal pngPath As String)
+' Second copy of the PNG, Content-ID only. Outlook hides this one from the
+' attachment well because the HTML body references cid:daily_report.png.
+' The visible paperclip file is the plain .Attachments.Add above.
+Private Sub AttachDailyPngInline(ByVal mail As Object, ByVal pngPath As String)
     Dim att As Object
-    Set att = mail.Attachments.Add(pngPath)
+    Dim inlinePath As String
+    Dim fso As Object
+
+    inlinePath = Environ$("TEMP") & "\daily_report_inline.png"
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(inlinePath) Then fso.DeleteFile inlinePath, True
+    fso.CopyFile pngPath, inlinePath, True
+    On Error GoTo 0
+    If Not FileExistsFast(inlinePath) Then inlinePath = pngPath
+
+    Set att = mail.Attachments.Add(inlinePath)
     On Error Resume Next
     att.PropertyAccessor.SetProperty _
         "http://schemas.microsoft.com/mapi/proptag/0x3712001F", "daily_report.png"

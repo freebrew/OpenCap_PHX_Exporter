@@ -63,7 +63,7 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 - **Crew manifest** — six tight rows in the same Setup block (J3:R10); title shows `6+N` when OpenCap crew is longer. Role dropdown remains DD/MWD.
 - **Import Plan** — COMPASS well-plan **PDF** (Plan Sections / SECTION DETAILS). Names targets **KOP / TANGENT / SOT / EOT / HEEL / TD** (Y2:Y5 dropdown to override). All sections stay on hidden `_OC_PlanSec`; Slidesheet `T2:Y5` shows four at a time and slides as the bit passes the highlighted next target. Sibling `.csv` next to the PDF still loads the dense plan surveys into `_OC_Survey` (gauge / Planned TD); without a CSV, the sparse section stations are used.
 - **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`.
-- **Daily report PNG** (`RenderCorridorPng`) — EMAIL inlines `daily_report.png` under the Data table (hidden CID attachment — it does not appear as a separate file in the recipient's attachment list, and no daily report PDF is attached). Paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** traveling-cylinder bullseye at the next T2:Y5 target — rings auto-scale to the actual miss (2 m rings for a 1.4 m offset, not a 40 m disk), GN/E/S/W cardinals, compressed-TVD pierce, plus a dashed minimum-curvature correction path from the bit to target centre. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands. Window is last survey → next named T2:Y5 target.
+- **Daily report PNG** (`RenderCorridorPng`) — EMAIL attaches `daily_report.png` as a visible file and inlines a CID copy under the Data table. No daily report PDF is attached. Paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** traveling-cylinder bullseye at the next T2:Y5 target — rings auto-scale to the actual miss (2 m rings for a 1.4 m offset, not a 40 m disk), GN/E/S/W cardinals, compressed-TVD pierce, plus a dashed minimum-curvature correction path from the bit to target centre. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands. Window is last survey → next named T2:Y5 target.
 - **Position of Wellbore** — R/L from plan, above/below plan (gauge), distance from current geo target.
 - **Pipe tally, day roll, costs form, TD calc, sheet protect** — supporting field ops macros.
 
@@ -155,7 +155,8 @@ PHX_FieldCap/
 
 ### Slide Sheet — 2026-08-29
 
-- **Adaptive daily PNG** — EMAIL attaches `daily_report.png` and inlines it under the Data table (`cid:daily_report.png`). Vertical/build is a TVD-down cabinet plot with N/S, E/W, and floor shadows (no sail confinement). Lateral keeps the geo/AA14 room. Paper theme for print (no flooded dark panels).
+- **Daily EMAIL PNG** — EMAIL attaches a visible `daily_report.png` (plain attachment) and inlines a second CID copy under the Data table. Outlook hides CID-referenced images from the paperclip list, so the visible file is required. No daily report PDF is generated or attached. User-pinned slots (Data `I29:I33`) still attach as before.
+- **Vertical / build bullseye** — traveling-cylinder target at the next T2:Y5 waypoint. Rings auto-scale to the actual miss (2 m rings for a ~1–2 m offset, not a 40 m disk). Plan path, dashed minimum-curvature correction to the target, compressed-TVD pierce, GN/E/S/W. Lateral keeps the geo/AA14 room. Paper theme for print.
 - **Adopt live Field** — `_adopt_field_source_of_truth.ps1` accepts a rooted path so `D:\Slide Sheet - 35780.xlsm` can be code SOT without touching job cells.
 
 ### Slide Sheet — 2026-08-28
