@@ -786,7 +786,7 @@ Private Sub StyleBtn(btn As Button, caption As String, fillColor As Long, lineCo
     btn.Font.Size = 9
     btn.Font.bold = isBold
     btn.Font.Color = textColor
-    btn.ShapeRange.Fill.ForeColor.RGB = fillColor
+    btn.ShapeRange.fill.ForeColor.RGB = fillColor
     btn.ShapeRange.line.ForeColor.RGB = lineColor
     btn.ShapeRange.line.Weight = 0.75
     On Error GoTo 0
@@ -1711,6 +1711,8 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
 
 
 

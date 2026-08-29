@@ -47,7 +47,7 @@ powershell -NoProfile -File bas/_dual_diff_vba.ps1
 
 `Module11` mail headers (`.To` / `.CC` / `.Subject`) may differ (Demo mock vs Field real) until they are sheet-driven.
 
-When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
+When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Bind by full path if the open book is not the repo copy (e.g. `-FieldWorkbook "D:\Slide Sheet - 35780.xlsm"`). Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
 
 **Setup sheet warning:** `RebuildSetup` / `InitSetup` clear and redraw the entire Setup tab from `MDL_Setup.bas`. Hand-tuned layout must be encoded in that module or it will be wiped.
 
@@ -63,7 +63,7 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 - **Crew manifest** — six tight rows in the same Setup block (J3:R10); title shows `6+N` when OpenCap crew is longer. Role dropdown remains DD/MWD.
 - **Import Plan** — COMPASS well-plan **PDF** (Plan Sections / SECTION DETAILS). Names targets **KOP / TANGENT / SOT / EOT / HEEL / TD** (Y2:Y5 dropdown to override). All sections stay on hidden `_OC_PlanSec`; Slidesheet `T2:Y5` shows four at a time and slides as the bit passes the highlighted next target. Sibling `.csv` next to the PDF still loads the dense plan surveys into `_OC_Survey` (gauge / Planned TD); without a CSV, the sparse section stations are used.
 - **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`.
-- **Wellbore corridor** image — 3D-style MD window with geo ribbon, plan path, floor L/R shadow (AA14 lateral tolerance), and reporting-day band for daily email/PNG export.
+- **Daily report PNG** (`RenderCorridorPng`, attached by EMAIL) — paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** cabinet 3D with hole + three shadows (left wall N/S, back wall E/W, floor plan-view); no sail box. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands. Window is last survey → next named T2:Y5 target.
 - **Position of Wellbore** — R/L from plan, above/below plan (gauge), distance from current geo target.
 - **Pipe tally, day roll, costs form, TD calc, sheet protect** — supporting field ops macros.
 
@@ -139,6 +139,7 @@ PHX_FieldCap/
 │   ├── _dual_export_caches.ps1
 │   ├── _dual_diff_vba.ps1
 │   ├── _dual_mirror_demo_to_field.ps1
+│   ├── _adopt_field_source_of_truth.ps1
 │   └── _sanitize_setup_for_github.ps1
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
@@ -151,6 +152,11 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### Slide Sheet — 2026-08-29
+
+- **Adaptive daily PNG** — EMAIL attaches `RenderCorridorPng`. Vertical/build is a TVD-down cabinet plot with N/S, E/W, and floor shadows (no sail confinement). Lateral keeps the geo/AA14 room. Paper theme for print (no flooded dark panels).
+- **Adopt live Field** — `_adopt_field_source_of_truth.ps1` accepts a rooted path so `D:\Slide Sheet - 35780.xlsm` can be code SOT without touching job cells.
 
 ### Slide Sheet — 2026-08-28
 

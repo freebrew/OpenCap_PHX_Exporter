@@ -51,20 +51,20 @@ Public Sub GenerateMorningReport()
     ' =========================
     Dim motorSN As Variant
     Dim config As Variant
-    Dim revl As Variant
+    Dim revL As Variant
     Dim pumpRate As Variant
     Dim rotary As Variant
     
     motorSN = GetByLabelAny(ws, Array("Motor S/N", "Motor SN"))
     config = GetByLabelAny(ws, Array("Configuration", "Config"))
-    revl = GetByLabelAny(ws, Array("Rev/L", "Rev / L", "RevL"))
+    revL = GetByLabelAny(ws, Array("Rev/L", "Rev / L", "RevL"))
     pumpRate = GetByLabelAny(ws, Array("Pump Rate"))
     rotary = GetByLabelAny(ws, Array("Rotary"))
     
     Dim motorRevsText As String
     Dim totalRPMText As String
     
-    motorRevsText = BuildMotorRevsText(pumpRate, revl)
+    motorRevsText = BuildMotorRevsText(pumpRate, revL)
     totalRPMText = BuildTotalRPMText(motorRevsText, rotary, GetByLabelAny(ws, Array("Total RPM")))
     
     Dim todayBitHours As Variant
@@ -149,7 +149,7 @@ Public Sub GenerateMorningReport()
     report = report & "Motor Information" & vbCrLf
     report = report & "Motor S/N: " & CleanText(motorSN) & vbCrLf
     report = report & "Configuration " & ChrW(8211) & " " & CleanText(config) & vbCrLf
-    report = report & "Rev/L: " & FormatRevL(revl) & vbCrLf
+    report = report & "Rev/L: " & FormatRevL(revL) & vbCrLf
     report = report & "Pump Rate: " & FormatPumpRate(pumpRate) & vbCrLf
     report = report & "Motor Revs: " & motorRevsText & vbCrLf
     report = report & "Rotary: " & FormatRPMValue(rotary) & vbCrLf
@@ -927,12 +927,12 @@ Private Function FormatPumpRate(ByVal v As Variant) As String
     End If
 End Function
 
-Private Function BuildMotorRevsText(ByVal pumpRate As Variant, ByVal revl As Variant) As String
+Private Function BuildMotorRevsText(ByVal pumpRate As Variant, ByVal revL As Variant) As String
     Dim pumpM3Min As Double
     Dim revPerL As Double
     Dim motorRPM As Double
     
-    If TryFirstNumber(pumpRate, pumpM3Min) And TryFirstNumber(revl, revPerL) Then
+    If TryFirstNumber(pumpRate, pumpM3Min) And TryFirstNumber(revL, revPerL) Then
         ' Motor RPM = pump rate in m3/min * 1000 L/m3 * rev/L
         motorRPM = pumpM3Min * 1000 * revPerL
         BuildMotorRevsText = Format$(motorRPM, "0") & " rpm"

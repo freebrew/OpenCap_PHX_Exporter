@@ -71,15 +71,6 @@ Public Sub RTP_printW_Email()
             End If
         Next c
 
-        Dim reportPdf As String
-        reportPdf = ExportDataReportPdf()
-        If Len(reportPdf) > 0 Then
-            If FileExistsFast(reportPdf) Then
-                .Attachments.Add reportPdf
-                attachedCount = attachedCount + 1
-            End If
-        End If
-
         If Len(reportPng) > 0 Then
             If FileExistsFast(reportPng) Then
                 .Attachments.Add reportPng
@@ -465,7 +456,7 @@ Public Function StoredAttachPath(ByVal cell As Range) As String
     If cell.Comment Is Nothing Then
         s = ""
     Else
-        s = Trim$(cell.Comment.Text)
+        s = Trim$(cell.Comment.text)
     End If
     On Error GoTo 0
     If Len(s) > 0 Then
@@ -487,6 +478,15 @@ End Function
 
 Public Sub StoreAttachPath(ByVal cell As Range, ByVal fullPath As String)
     Dim leaf As String
+    Dim ws As Worksheet
+    Dim dest As Range
+    Dim wasProt As Boolean
+
+    If cell Is Nothing Then Exit Sub
+    Set dest = cell.MergeArea.Cells(1, 1)
+    Set ws = dest.Worksheet
+    wasProt = SheetUnprotectForVba(ws)
+
     fullPath = Trim$(fullPath)
     If InStrRev(fullPath, "\") > 0 Then
         leaf = mid$(fullPath, InStrRev(fullPath, "\") + 1)
@@ -495,28 +495,38 @@ Public Sub StoreAttachPath(ByVal cell As Range, ByVal fullPath As String)
     Else
         leaf = fullPath
     End If
+
     On Error Resume Next
-    cell.ClearComments
-    cell.Hyperlinks.Delete
+    dest.ClearComments
+    dest.Hyperlinks.Delete
     On Error GoTo 0
-    cell.Value = leaf
+
+    dest.Value = leaf
     If Len(fullPath) > 0 Then
         On Error Resume Next
-        cell.AddComment fullPath
-        cell.Comment.Visible = False
-        cell.Comment.Shape.TextFrame.AutoSize = True
-        cell.Hyperlinks.Add Anchor:=cell, Address:=fullPath, TextToDisplay:=leaf
+        dest.AddComment fullPath
+        If Not dest.Comment Is Nothing Then
+            dest.Comment.Visible = False
+            dest.Comment.Shape.TextFrame.AutoSize = True
+        End If
+        ' '#' in a filename is a hyperlink fragment and raises 1004 (e.g. BHA # 2.pdf).
+        If InStr(1, fullPath, "#", vbBinaryCompare) = 0 Then
+            dest.Hyperlinks.Add anchor:=dest, Address:=fullPath, TextToDisplay:=leaf
+        End If
         On Error GoTo 0
     End If
-    If IsKeepAttachRow(cell.row) Then
-        cell.Interior.Color = KeepAttachFill()
+
+    If IsKeepAttachRow(dest.Row) Then
+        dest.MergeArea.Interior.Color = KeepAttachFill()
     Else
-        cell.Interior.Color = RGB(255, 255, 255)
+        dest.MergeArea.Interior.Color = RGB(255, 255, 255)
     End If
-    cell.Font.Color = RGB(0, 0, 0)
-    cell.Font.Size = 8
-    cell.Font.name = "Calibri"
-    cell.HorizontalAlignment = xlLeft
+    dest.Font.Color = RGB(0, 0, 0)
+    dest.Font.Size = 8
+    dest.Font.name = "Calibri"
+    dest.HorizontalAlignment = xlLeft
+
+    SheetReprotectAfterVba ws, wasProt
 End Sub
 
 Private Function IsKeepAttachRow(ByVal r As Long) As Boolean
@@ -690,6 +700,8 @@ Private Sub SeedMailAddressesIfEmpty(ByVal ws As Worksheet)
 NextSeed:
     Next i
 End Sub
+
+
 
 
 

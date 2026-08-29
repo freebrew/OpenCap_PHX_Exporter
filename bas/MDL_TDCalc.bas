@@ -85,8 +85,8 @@ Public Function TdEstFinal(ByVal field As String, _
     Dim aMd As Double, aInc As Double, aAzm As Double
     Dim aN As Double, aE As Double, aV As Double
     Dim tMd As Double, tInc As Double, tAzm As Double
-    Dim tN As Double, tE As Double, tV As Double
-    Dim pMd As Double, pInc As Double, pAzm As Double
+    Dim tN As Double, tE As Double, tv As Double
+    Dim pMD As Double, pInc As Double, pAzm As Double
     Dim pN As Double, pE As Double, pV As Double
     Dim hasTgt As Boolean
     Dim c1 As Double, c2 As Double
@@ -103,21 +103,21 @@ Public Function TdEstFinal(ByVal field As String, _
         TdEstFinal = ""
         Exit Function
     End If
-    If Not ReadPlannedTd(pMd, pInc, pAzm, pN, pE) Then
+    If Not ReadPlannedTd(pMD, pInc, pAzm, pN, pE) Then
         TdEstFinal = ""
         Exit Function
     End If
-    pV = PlanTvdAtMd(pMd)
+    pV = PlanTvdAtMd(pMD)
     If pV = 0# And aV <> 0# Then pV = aV
 
-    hasTgt = NextNamedTarget(aMd, tMd, tInc, tAzm, tN, tE, tV)
+    hasTgt = NextNamedTarget(aMd, tMd, tInc, tAzm, tN, tE, tv)
     If hasTgt And tMd > aMd + 0.005 Then
-        If tV = 0# Then tV = PlanTvdAtMd(tMd)
-        c1 = CourseBetween(aMd, aInc, aAzm, aN, aE, aV, tMd, tInc, tAzm, tN, tE, tV)
-        c2 = CourseBetween(tMd, tInc, tAzm, tN, tE, tV, pMd, pInc, pAzm, pN, pE, pV)
+        If tv = 0# Then tv = PlanTvdAtMd(tMd)
+        c1 = CourseBetween(aMd, aInc, aAzm, aN, aE, aV, tMd, tInc, tAzm, tN, tE, tv)
+        c2 = CourseBetween(tMd, tInc, tAzm, tN, tE, tv, pMD, pInc, pAzm, pN, pE, pV)
         estMd = aMd + c1 + c2
     Else
-        c2 = CourseBetween(aMd, aInc, aAzm, aN, aE, aV, pMd, pInc, pAzm, pN, pE, pV)
+        c2 = CourseBetween(aMd, aInc, aAzm, aN, aE, aV, pMD, pInc, pAzm, pN, pE, pV)
         estMd = aMd + c2
     End If
 
@@ -313,7 +313,7 @@ End Function
 
 Private Function NextNamedTarget(ByVal bitMD As Double, _
         ByRef tMd As Double, ByRef tInc As Double, ByRef tAzm As Double, _
-        ByRef tN As Double, ByRef tE As Double, ByRef tV As Double) As Boolean
+        ByRef tN As Double, ByRef tE As Double, ByRef tv As Double) As Boolean
     Dim ss As Worksheet
     Dim r As Long
     Dim vMd As Variant, vNm As String
@@ -333,8 +333,8 @@ Private Function NextNamedTarget(ByVal bitMD As Double, _
         tMd = CDbl(vMd)
         tInc = NumOr(ss.Cells(r, "V").Value2, 0#)
         tAzm = NumOr(ss.Cells(r, "W").Value2, 0#)
-        tV = NumOr(ss.Cells(r, "X").Value2, 0#)
-        If Not TargetCoords(tMd, tN, tE, tV) Then
+        tv = NumOr(ss.Cells(r, "X").Value2, 0#)
+        If Not TargetCoords(tMd, tN, tE, tv) Then
             tN = 0#: tE = 0#
         End If
         NextNamedTarget = True
@@ -586,3 +586,6 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     dN = H * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
     dE = H * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
+
+
+

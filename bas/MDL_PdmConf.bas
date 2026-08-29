@@ -25,7 +25,7 @@ Public Sub SortPdmConfTable()
     Dim nInc As Long
     Dim i As Long, j As Long
     Dim conf() As String
-    Dim revl() As Variant
+    Dim revL() As Variant
     Dim lobe() As Long
     Dim stator() As Long
     Dim stage() As Double
@@ -45,7 +45,7 @@ Public Sub SortPdmConfTable()
     cap = PDM_LAST - PDM_FIRST + 1
 
     ReDim conf(1 To cap)
-    ReDim revl(1 To cap)
+    ReDim revL(1 To cap)
     ReDim lobe(1 To cap)
     ReDim stator(1 To cap)
     ReDim stage(1 To cap)
@@ -63,9 +63,9 @@ Public Sub SortPdmConfTable()
             n = n + 1
             conf(n) = cTxt
             If IsNumeric(vTxt) Then
-                revl(n) = CDbl(vTxt)
+                revL(n) = CDbl(vTxt)
             Else
-                revl(n) = ws.Cells(r, COL_REVL).Value
+                revL(n) = ws.Cells(r, COL_REVL).Value
             End If
             ParsePdmConf cTxt, lobe(n), stator(n), stage(n)
         Else
@@ -85,7 +85,7 @@ NextRead:
     If n = 0 And nInc = 0 Then Exit Sub
 
     For i = 2 To n
-        tConf = conf(i): tRevl = revl(i)
+        tConf = conf(i): tRevl = revL(i)
         tLobe = lobe(i): tStator = stator(i): tStage = stage(i)
         j = i - 1
         Do While j >= 1
@@ -99,14 +99,14 @@ NextRead:
             End If
             If Not swap Then Exit Do
             conf(j + 1) = conf(j)
-            revl(j + 1) = revl(j)
+            revL(j + 1) = revL(j)
             lobe(j + 1) = lobe(j)
             stator(j + 1) = stator(j)
             stage(j + 1) = stage(j)
             j = j - 1
         Loop
         conf(j + 1) = tConf
-        revl(j + 1) = tRevl
+        revL(j + 1) = tRevl
         lobe(j + 1) = tLobe
         stator(j + 1) = tStator
         stage(j + 1) = tStage
@@ -121,7 +121,7 @@ NextRead:
     For i = 1 To n
         r = PDM_FIRST + i - 1
         ws.Cells(r, COL_CONF).Value = conf(i)
-        ws.Cells(r, COL_REVL).Value = revl(i)
+        ws.Cells(r, COL_REVL).Value = revL(i)
     Next i
     For i = 1 To nInc
         r = PDM_FIRST + n + i - 1
@@ -190,7 +190,7 @@ Public Function PdmLookupRevL(ByVal confText As Variant, Optional ByVal motorOdI
     Dim v As Variant
 
     PdmLookupRevL = ""
-    If IsError(confText) Then Exit Function
+    If isError(confText) Then Exit Function
     ParsePdmConf CStr(confText & ""), lobe, stator, stage
     If lobe >= 9999 Then Exit Function
 
@@ -222,7 +222,7 @@ Private Sub FillRevLForRow(ByVal ws As Worksheet, ByVal r As Long, _
 
     v = ResolveRevL(lobe, stator, stage, odHint)
     If IsEmpty(v) Then Exit Sub
-    ws.Cells(r, COL_REVL).NumberFormat = "0.000"
+    ws.Cells(r, COL_REVL).numberFormat = "0.000"
     ws.Cells(r, COL_REVL).Value = CDbl(v)
 End Sub
 
@@ -439,11 +439,14 @@ Private Sub ParsePdmConf(ByVal confText As String, _
     End If
 
     If Not IsNumeric(leftPart) Or Not IsNumeric(rightPart) Then Exit Sub
-    lobe = CLng(Val(leftPart))
-    stator = CLng(Val(rightPart))
+    lobe = CLng(val(leftPart))
+    stator = CLng(val(rightPart))
     If Len(stageTxt) > 0 And IsNumeric(stageTxt) Then
         stage = CDbl(stageTxt)
     Else
         stage = 0#
     End If
 End Sub
+
+
+

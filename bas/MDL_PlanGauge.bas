@@ -629,7 +629,7 @@ Private Sub DrawCombinedDial(ws As Worksheet, _
 
     Set shp = ws.Shapes.AddShape(msoShapeOval, cx - r, cy - r, 2# * r, 2# * r)
     StyleGaugeShape shp, SHP_PREFIX & "Circle"
-    shp.Fill.Visible = msoFalse
+    shp.fill.Visible = msoFalse
     shp.line.ForeColor.RGB = cAxis(): shp.line.Weight = 1.75
 
     Set shp = ws.Shapes.AddLine(cx - r, cy, cx + r, cy)
@@ -653,7 +653,7 @@ Private Sub DrawCombinedDial(ws As Worksheet, _
 
     Set shp = ws.Shapes.AddShape(msoShapeOval, cx - 3, cy - 3, 6, 6)
     StyleGaugeShape shp, SHP_PREFIX & "Plan"
-    shp.Fill.ForeColor.RGB = cPlan(): shp.line.Visible = msoFalse
+    shp.fill.ForeColor.RGB = cPlan(): shp.line.Visible = msoFalse
 
     If Not live Then Exit Sub
     If scaleS <= 0# Then scaleS = 1#
@@ -735,8 +735,8 @@ Private Sub AddBandRect(ws As Worksheet, ByVal tag As String, _
     Dim shp As Shape
     Set shp = ws.Shapes.AddShape(msoShapeRectangle, x, y, w, H)
     StyleGaugeShape shp, SHP_PREFIX & tag
-    shp.Fill.ForeColor.RGB = clr
-    shp.Fill.transparency = transparency
+    shp.fill.ForeColor.RGB = clr
+    shp.fill.transparency = transparency
     shp.line.Visible = msoFalse
 End Sub
 
@@ -761,7 +761,7 @@ Private Sub DrawMarker(ws As Worksheet, ByVal tag As String, _
     If mag <= 0.005 Then
         Set shp = ws.Shapes.AddShape(msoShapeOval, cx - 6, cy - 6, 12, 12)
         StyleGaugeShape shp, SHP_PREFIX & "Dot" & tag
-        shp.Fill.Visible = msoFalse
+        shp.fill.Visible = msoFalse
         shp.line.ForeColor.RGB = clr: shp.line.Weight = 2#
         Exit Sub
     End If
@@ -791,10 +791,10 @@ Private Sub DrawMarker(ws As Worksheet, ByVal tag As String, _
     Set shp = ws.Shapes.AddShape(msoShapeOval, dx - 4.5, dy - 4.5, 9, 9)
     StyleGaugeShape shp, SHP_PREFIX & "Dot" & tag
     If hollow Then
-        shp.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        shp.fill.ForeColor.RGB = RGB(255, 255, 255)
         shp.line.ForeColor.RGB = clr: shp.line.Weight = 2#
     Else
-        shp.Fill.ForeColor.RGB = clr
+        shp.fill.ForeColor.RGB = clr
         shp.line.Visible = msoFalse
     End If
 End Sub
@@ -832,7 +832,7 @@ Private Sub AddGaugeText(ws As Worksheet, ByVal nm As String, _
     Dim shp As Shape
     Set shp = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, x, y, w, H)
     StyleGaugeShape shp, nm
-    shp.Fill.Visible = msoFalse
+    shp.fill.Visible = msoFalse
     shp.line.Visible = msoFalse
     With shp.TextFrame2
         .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
@@ -842,7 +842,7 @@ Private Sub AddGaugeText(ws As Worksheet, ByVal nm As String, _
             .Font.name = "Consolas"
             .Font.Size = sz
             .Font.bold = IIf(bold, msoTrue, msoFalse)
-            .Font.Fill.ForeColor.RGB = clr
+            .Font.fill.ForeColor.RGB = clr
         End With
     End With
 End Sub
@@ -915,5 +915,7 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
 
 
