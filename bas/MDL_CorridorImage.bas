@@ -36,8 +36,8 @@ Option Explicit
 '    RenderCorridorPng(path)              -> full report (corridor + ops), or ""
 '    RenderCorridorPng(path, "corridor")  -> light band only
 '    RenderCorridorPng(path, "ops")       -> ops band only
-'  EMAIL embeds corridor + ops as two stacked pictures so Outlook does not
-'  shrink one very tall image to fit the compose window.
+'  EMAIL attaches the full canvas as daily_report.png and inlines it under
+'  the Data table (cid:daily_report.png).
 ' ================================================================================
 
 Private Const CANVAS_W As Double = 1023
@@ -2224,6 +2224,8 @@ Private Function ExportGroup(ByVal outPath As String) As String
     Dim prevVisible As Boolean
     Dim prevSheet As Object
     Dim forcedVisible As Boolean
+    Dim exportW As Double, exportH As Double
+    Dim pic As Shape
     prevVisible = Application.Visible
     Set prevSheet = mWs.Parent.ActiveSheet
     forcedVisible = False
@@ -2233,10 +2235,16 @@ Private Function ExportGroup(ByVal outPath As String) As String
     End If
     mWs.Activate
 
+    ' Always export the paper canvas (0,0)-(CANVAS_W, mCanvasH). Off-canvas
+    ' strokes must not inflate the EMAIL PNG to sheet-sized.
+    exportW = CANVAS_W
+    exportH = mCanvasH
+    If exportH < 40# Then exportH = 40#
+
     Dim co As ChartObject
-    Set co = mWs.ChartObjects.Add(0, 0, grp.Width, grp.Height)
+    Set co = mWs.ChartObjects.Add(0, 0, exportW, exportH)
     co.name = SHP_PREFIX & "CHART"
-    Trace "  chart added"
+    Trace "  chart added " & Format$(exportW, "0") & "x" & Format$(exportH, "0") & " pt"
 
     On Error GoTo Fail
     co.Chart.ChartArea.Border.LineStyle = xlNone
@@ -2258,10 +2266,12 @@ Private Function ExportGroup(ByVal outPath As String) As String
     End If
     If co.Chart.Shapes.Count = 0 Then Err.Raise 5, , "nothing pasted into the chart"
 
-    co.Chart.Shapes(1).Left = 0
-    co.Chart.Shapes(1).Top = 0
-    co.Chart.Shapes(1).Width = co.Width
-    co.Chart.Shapes(1).Height = co.Height
+    Set pic = co.Chart.Shapes(1)
+    pic.LockAspectRatio = msoFalse
+    pic.Left = -grp.Left
+    pic.Top = -grp.Top
+    pic.Width = grp.Width
+    pic.Height = grp.Height
 
     co.Chart.Export Filename:=outPath, FilterName:="PNG"
     Trace "  exported " & outPath

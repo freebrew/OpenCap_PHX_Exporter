@@ -36,7 +36,7 @@ Public Sub RTP_printW_Email()
     wsData.Range("B2:F55").Calculate
     On Error GoTo CleanFail
 
-    ' Corridor + ops PNG is an attachment only; the mail body is the B2:F55 HTML table.
+    ' Daily plot PNG: attach it and place it under the B2:F55 HTML table.
     tmpDir = Environ$("TEMP")
     reportPng = ""
     On Error Resume Next
@@ -71,14 +71,15 @@ Public Sub RTP_printW_Email()
             End If
         Next c
 
+        .HTMLBody = RangeToHTML(wsData.Range("B2:F55"))
+
         If Len(reportPng) > 0 Then
             If FileExistsFast(reportPng) Then
-                .Attachments.Add reportPng
+                AttachDailyPng OutMail, reportPng
                 attachedCount = attachedCount + 1
+                .HTMLBody = .HTMLBody & DailyPngHtml()
             End If
         End If
-
-        .HTMLBody = RangeToHTML(wsData.Range("B2:F55"))
     End With
 
     ' I29:I31 are one-shot. Keep Attachement 4 (I32) and 5 (I33) for every email.
@@ -174,6 +175,23 @@ Private Function IsOutlookDesktopRegistered() As Boolean
     progId = CStr(wsh.RegRead("HKLM\SOFTWARE\Classes\Outlook.Application\CLSID\"))
     IsOutlookDesktopRegistered = (Len(progId) > 0)
     On Error GoTo 0
+End Function
+
+' Attach daily_report.png and stamp a Content-ID so the HTML body can
+' show it with cid:daily_report.png (Outlook then lists it as an attachment).
+Private Sub AttachDailyPng(ByVal mail As Object, ByVal pngPath As String)
+    Dim att As Object
+    Set att = mail.Attachments.Add(pngPath)
+    On Error Resume Next
+    att.PropertyAccessor.SetProperty _
+        "http://schemas.microsoft.com/mapi/proptag/0x3712001F", "daily_report.png"
+    On Error GoTo 0
+End Sub
+
+Private Function DailyPngHtml() As String
+    DailyPngHtml = "<div style='margin-top:14px;background:#ffffff;'>" & _
+        "<img src='cid:daily_report.png' width='1023' alt='Daily wellbore plot' " & _
+        "style='display:block;max-width:100%;height:auto;border:0;'></div>"
 End Function
 
 Private Function FileExistsFast(ByVal filePath As String) As Boolean
