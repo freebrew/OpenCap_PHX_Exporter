@@ -36,7 +36,8 @@ Public Sub RTP_printW_Email()
     wsData.Range("B2:F55").Calculate
     On Error GoTo CleanFail
 
-    ' Daily plot PNG: attach it and place it under the B2:F55 HTML table.
+    ' Daily plot PNG: shown inline under the B2:F55 HTML table only - not
+    ' listed as a file attachment (no daily report PDF/PNG attachment).
     tmpDir = Environ$("TEMP")
     reportPng = ""
     On Error Resume Next
@@ -76,7 +77,6 @@ Public Sub RTP_printW_Email()
         If Len(reportPng) > 0 Then
             If FileExistsFast(reportPng) Then
                 AttachDailyPng OutMail, reportPng
-                attachedCount = attachedCount + 1
                 .HTMLBody = .HTMLBody & DailyPngHtml()
             End If
         End If
@@ -177,14 +177,17 @@ Private Function IsOutlookDesktopRegistered() As Boolean
     On Error GoTo 0
 End Function
 
-' Attach daily_report.png and stamp a Content-ID so the HTML body can
-' show it with cid:daily_report.png (Outlook then lists it as an attachment).
+' Attach daily_report.png with a Content-ID so the HTML body can show it via
+' cid:daily_report.png, and mark it hidden so it renders inline only - it must
+' NOT appear as a separate file in the recipient's attachment list.
 Private Sub AttachDailyPng(ByVal mail As Object, ByVal pngPath As String)
     Dim att As Object
     Set att = mail.Attachments.Add(pngPath)
     On Error Resume Next
     att.PropertyAccessor.SetProperty _
         "http://schemas.microsoft.com/mapi/proptag/0x3712001F", "daily_report.png"
+    att.PropertyAccessor.SetProperty _
+        "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B", True   ' PR_ATTACHMENT_HIDDEN
     On Error GoTo 0
 End Sub
 
@@ -582,24 +585,6 @@ Fail:
     SheetReprotectAfterVba ws, wasProt
     Application.ScreenUpdating = True
 End Sub
-
-Private Function ExportDataReportPdf() As String
-    Dim ws As Worksheet
-    Dim fName As String
-    Dim code As String
-    ExportDataReportPdf = ""
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets("Data")
-    code = Trim$(MDL_Setup.OcJobField("Job Code", "Job ID"))
-    If code = "" Then code = "Daily"
-    fName = Environ$("TEMP") & "\" & code & " Daily Report.pdf"
-    If Dir(fName) <> "" Then Kill fName
-    ws.ExportAsFixedFormat Type:=xlTypePDF, Filename:=fName, _
-        Quality:=xlQualityStandard, IncludeDocProperties:=True, _
-        IgnorePrintAreas:=False, OpenAfterPublish:=False
-    If Dir(fName) <> "" Then ExportDataReportPdf = fName
-    On Error GoTo 0
-End Function
 
 ' Unmerge I28:M33, show filenames, hold full paths in comments, add To/CC emails.
 ' Print-friendly: light gray headers, white body, no dark fills.
