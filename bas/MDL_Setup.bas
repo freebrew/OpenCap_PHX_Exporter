@@ -114,6 +114,9 @@ Private mBusy As Boolean
 Private mNewJob As Boolean
 Private mCsvExtraRoots As Collection
 
+' Poppler self-bootstrap: offer the download at most once per Excel session
+Private mPopplerPrompted As Boolean
+
 ' ================================================================================
 '  COLOR PALETTE  (Slidesheet: grey table headers, green tab / status only)
 ' ================================================================================
@@ -2410,7 +2413,9 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
     If pdfText = "" Then
         Application.StatusBar = "PDF extraction unavailable. Install Poppler or Adobe Acrobat."
         MsgBox "Could not read the well-plan PDF automatically." & Chr(10) & Chr(10) & _
-               "To enable automatic extraction, install one of:" & Chr(10) & _
+               "For best results, re-run the import and choose Yes when " & _
+               "offered the automatic Poppler download (one-time, ~16 MB)." & Chr(10) & Chr(10) & _
+               "Manual alternatives:" & Chr(10) & _
                "  - Poppler for Windows (adds pdftotext.exe to PATH)" & Chr(10) & _
                "  - Adobe Acrobat (full version, not Reader)", _
                vbExclamation, "PDF Reader Not Available"
@@ -3110,9 +3115,11 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
     If pdfText = "" Then
         Application.StatusBar = "PDF extraction unavailable. Install Poppler or Adobe Acrobat."
         MsgBox "Could not read the PDF automatically." & Chr(10) & Chr(10) & _
-               "To enable automatic extraction, install one of:" & Chr(10) & _
+               "For best results, re-run the import and choose Yes when " & _
+               "offered the automatic Poppler download (one-time, ~16 MB)." & Chr(10) & Chr(10) & _
+               "Manual alternatives:" & Chr(10) & _
                "  - Poppler for Windows (adds pdftotext.exe to PATH)" & Chr(10) & _
-               "    https://github.com/oschwartz10612/poppler-windows/releases" & Chr(10) & Chr(10) & _
+               "    https://github.com/oschwartz10612/poppler-windows/releases" & Chr(10) & _
                "  - Adobe Acrobat (full version, not Reader)" & Chr(10) & Chr(10) & _
                "Path stored. Try again after installing.", vbExclamation, "PDF Reader Not Available"
         UpdateImportPathDisplay SH_AC
@@ -3332,6 +3339,132 @@ ReprotectFail:
     SheetReprotectAfterVba ws, wasProt
 End Sub
 
+' ---- Poppler (pdftotext) resolve + optional self-install ----------------------
+' Finds pdftotext on PATH or in the per-user self-installed copy under
+' %LOCALAPPDATA%\Poppler (pointer file written by the bootstrap).
+' Returns "pdftotext" (PATH), a full exe path, or "" when unavailable.
+Private Function ResolvePdftotext(sH As Object) As String
+    ResolvePdftotext = ""
+
+    On Error Resume Next
+    If sH.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
+        ResolvePdftotext = "pdftotext"
+    End If
+    On Error GoTo 0
+    If ResolvePdftotext <> "" Then Exit Function
+
+    Dim ptr As String: ptr = Environ("LOCALAPPDATA") & "\Poppler\pdftotext_path.txt"
+    If Dir(ptr) = "" Then Exit Function
+
+    Dim fNum As Integer, exePath As String
+    fNum = FreeFile
+    On Error Resume Next
+    Open ptr For Input As #fNum
+    Line Input #fNum, exePath
+    Close #fNum
+    On Error GoTo 0
+
+    exePath = Trim$(exePath)
+    If exePath <> "" Then
+        If Dir(exePath) <> "" Then ResolvePdftotext = exePath
+    End If
+End Function
+
+' Offers a one-time automatic Poppler download (~16 MB) into %LOCALAPPDATA%\Poppler.
+' Per-user install, no admin rights required. Asks first (never downloads silently)
+' and asks at most once per Excel session. Returns the pdftotext path on success,
+' "" if declined or failed - callers fall back to the built-in PowerShell parser.
+Private Function OfferPopplerBootstrap(sH As Object) As String
+    OfferPopplerBootstrap = ""
+    If mPopplerPrompted Then Exit Function
+    mPopplerPrompted = True
+
+    Dim ans As VbMsgBoxResult
+    ans = MsgBox("For the most reliable PDF table import, this workbook can " & _
+                 "download the free Poppler PDF tool (pdftotext)." & Chr(10) & Chr(10) & _
+                 "One-time download, about 16 MB. Installs to your Windows " & _
+                 "user folder only - no admin rights needed." & Chr(10) & Chr(10) & _
+                 "Download now?" & Chr(10) & _
+                 "(Choosing No continues with the built-in parser.)", _
+                 vbYesNo + vbQuestion, "Improve PDF Import")
+    If ans <> vbYes Then Exit Function
+
+    Dim tmpScript As String: tmpScript = Environ("TEMP") & "\oc_poppler_install.ps1"
+    Dim tmpResult As String: tmpResult = Environ("TEMP") & "\oc_poppler_path.txt"
+    On Error Resume Next: Kill tmpScript: Kill tmpResult: On Error GoTo 0
+
+    Dim fNum As Integer
+    fNum = FreeFile
+    Open tmpScript For Output As #fNum
+    Print #fNum, BuildPopplerInstallScript()
+    Close #fNum
+
+    Application.StatusBar = "Downloading Poppler (one-time, ~16 MB)..."
+    On Error Resume Next
+    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
+    On Error GoTo 0
+    Application.StatusBar = False
+    On Error Resume Next: Kill tmpScript: On Error GoTo 0
+
+    Dim exePath As String: exePath = ""
+    If Dir(tmpResult) <> "" Then
+        fNum = FreeFile
+        On Error Resume Next
+        Open tmpResult For Input As #fNum
+        Line Input #fNum, exePath
+        Close #fNum
+        Kill tmpResult
+        On Error GoTo 0
+        exePath = Trim$(exePath)
+    End If
+
+    Dim ok As Boolean: ok = False
+    If exePath <> "" Then
+        If Dir(exePath) <> "" Then ok = True
+    End If
+
+    If ok Then
+        OfferPopplerBootstrap = exePath
+        MsgBox "Poppler installed. PDF imports now use the highest-fidelity " & _
+               "extractor automatically.", vbInformation, "Poppler Installed"
+    Else
+        MsgBox "The Poppler download did not complete (no internet access, or " & _
+               "blocked by security policy)." & Chr(10) & Chr(10) & _
+               "Continuing with the built-in parser instead.", _
+               vbInformation, "Poppler Not Installed"
+    End If
+End Function
+
+' ---- Returns a self-contained PowerShell Poppler installer --------------------
+' Downloads the latest poppler-windows release zip (pinned fallback if the
+' GitHub API is unreachable) into %LOCALAPPDATA%\Poppler, locates pdftotext.exe,
+' and records its path in a pointer file plus the result file for the caller.
+Private Function BuildPopplerInstallScript() As String
+    Dim s As String
+    s = "param([string]$resultFile)" & vbLf
+    s = s & "$ErrorActionPreference = 'Stop'" & vbLf
+    s = s & "try {" & vbLf
+    s = s & "    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072" & vbLf
+    s = s & "    $dest = Join-Path $env:LOCALAPPDATA 'Poppler'" & vbLf
+    s = s & "    New-Item -ItemType Directory -Force -Path $dest | Out-Null" & vbLf
+    s = s & "    $url = 'https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip'" & vbLf
+    s = s & "    try {" & vbLf
+    s = s & "        $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/oschwartz10612/poppler-windows/releases/latest' -TimeoutSec 15" & vbLf
+    s = s & "        $a = @($rel.assets | Where-Object { $_.name -like '*.zip' })" & vbLf
+    s = s & "        if ($a.Count -gt 0) { $url = $a[0].browser_download_url }" & vbLf
+    s = s & "    } catch { }" & vbLf
+    s = s & "    $zip = Join-Path $env:TEMP 'oc_poppler.zip'" & vbLf
+    s = s & "    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip -TimeoutSec 600" & vbLf
+    s = s & "    Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force" & vbLf
+    s = s & "    Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue" & vbLf
+    s = s & "    $exe = Get-ChildItem -LiteralPath $dest -Recurse -Filter 'pdftotext.exe' | Select-Object -First 1" & vbLf
+    s = s & "    if (-not $exe) { exit 1 }" & vbLf
+    s = s & "    Set-Content -LiteralPath (Join-Path $dest 'pdftotext_path.txt') -Value $exe.FullName -Encoding ASCII" & vbLf
+    s = s & "    Set-Content -LiteralPath $resultFile -Value $exe.FullName -Encoding ASCII" & vbLf
+    s = s & "} catch { exit 1 }" & vbLf
+    BuildPopplerInstallScript = s
+End Function
+
 ' ---- PDF text extraction (three strategies, zero required installs) ----
 Private Function ExtractPdfText(pdfPath As String) As String
     ExtractPdfText = ""
@@ -3340,13 +3473,24 @@ Private Function ExtractPdfText(pdfPath As String) As String
     Dim content As String, Ln As String
 
     ' ----------------------------------------------------------------
-    ' Strategy 1: pdftotext (Poppler) - optional, best layout fidelity
-    '   Checks PATH only; no bundled DLLs needed
+    ' Strategy 1: pdftotext (Poppler) - best layout fidelity
+    '   Found on PATH or in the self-installed per-user copy; when
+    '   absent, offers a one-time automatic download (prompted, no
+    '   admin rights). Declining falls through to Strategy 2.
     ' ----------------------------------------------------------------
     On Error Resume Next: Kill tmpOut: On Error GoTo 0
-    Dim sh As Object
-    Set sh = CreateObject("WScript.Shell")
-    sh.Run "cmd /c pdftotext -layout """ & pdfPath & """ """ & tmpOut & """ 2>nul", 0, True
+    Dim sH As Object
+    Set sH = CreateObject("WScript.Shell")
+
+    Dim p2tPath As String
+    p2tPath = ResolvePdftotext(sH)
+    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(sH)
+
+    If p2tPath <> "" Then
+        On Error Resume Next
+        sH.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
+        On Error GoTo 0
+    End If
 
     If Dir(tmpOut) <> "" Then
         fNum = FreeFile: content = ""
@@ -3372,7 +3516,7 @@ Private Function ExtractPdfText(pdfPath As String) As String
     Print #fNum, BuildPdfExtractScript()
     Close #fNum
 
-    sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
+    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
 
     If Dir(tmpOut) <> "" Then
         fNum = FreeFile: content = ""
