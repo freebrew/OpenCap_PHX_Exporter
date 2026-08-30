@@ -63,11 +63,92 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 - **Crew manifest** — six tight rows in the same Setup block (J3:R10); title shows `6+N` when OpenCap crew is longer. Role dropdown remains DD/MWD.
 - **Import Plan** — COMPASS well-plan **PDF** (Plan Sections / SECTION DETAILS). Names targets **KOP / TANGENT / SOT / EOT / HEEL / TD** (Y2:Y5 dropdown to override). All sections stay on hidden `_OC_PlanSec`; Slidesheet `T2:Y5` shows four at a time and slides as the bit passes the highlighted next target. Sibling `.csv` next to the PDF still loads the dense plan surveys into `_OC_Survey` (gauge / Planned TD); without a CSV, the sparse section stations are used.
 - **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`.
-- **Daily report PNG** (`RenderCorridorPng`) — EMAIL attaches `daily_report.png` as a visible file and inlines a CID copy under the Data table. No daily report PDF is attached. Paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** 3D shadow-box of the whole well (classic wall/floor-shadow well-path plot) — full planned path, all drilled surveys from surface, dashed minimum-curvature projection from the last survey to the next T2:Y5 target, small ring marker at the target, TVD/N/E grids, hole and plan shadows on the left wall and floor, GN arrow. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands. Window is last survey → next named T2:Y5 target.
+- **Daily report PNG** (`RenderCorridorPng`) — EMAIL attaches `daily_report.png` as a visible file and inlines a CID copy under the Data table. No daily report PDF is attached. Paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** three-wall shadow box (back, left, floor) — **plan** in the window, **as-drilled last 24 h** (tight camera on the report day; a long/stale 00:00 day zooms to the last ~150 m + look-ahead), named targets on the plan with a ring **perpendicular to the wellbore**, shadows on all three walls, GN arrow. No min-curve and no surface-to-TD. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands.
 - **Position of Wellbore** — R/L from plan, above/below plan (gauge), distance from current geo target.
 - **Pipe tally, day roll, costs form, TD calc, sheet protect** — supporting field ops macros.
 
-Rendered sample: `docs/corridor_live.png`.
+Rendered sample: `docs/corridor_24h.png` (24 h shadow box). Older full-well still: `docs/corridor_live.png`.
+
+---
+
+## Slide advisor math (BURR, slide, toolface, rotate)
+
+Columns (data rows 13:305):
+
+| Col | Meaning |
+|-----|---------|
+| **C** | Course length of **this stand** (m). Hard cap for any slide instruction. |
+| **D** | Bit MD |
+| **E** | Survey MD |
+| **Q** | Seen motor yield (`C×J/M`) |
+| **T** | Metres **already slid** (history). Not used for Y or Z. |
+| **U** | User toolface (what they ran) |
+| **V / W / X** | TVD / INC / AZM @ bit |
+| **AO** | Active target MD |
+| **AR** | BURR (°/30 m) |
+| **AS** | Metres to slide (along-motor, before TF cosine) |
+| **AT** | Required toolface to the aim |
+| **Y** | Comment: `Sliding <m> @ <TF>` … `BURR n.nn` |
+| **Z** | Leftover rotate: `C − instructed slide` |
+
+`T2:Y5` is a **display window** only. BURR / AS / AT read the **full** named list on `_OC_PlanSec` (`ProjTargets_MD/INC/AZM/TVD`). First KOP / TANGENT MD is `ProjBuildStartMd` — that is the gate for AR/AS/AT. **Do not use `$U$2` as a build-start gate.** U2 is whatever target the four-row window currently shows (often SOT after the window has slid).
+
+### Aim
+
+Stay on a build station (e.g. TANGENT) while `inc_bit + 0.5° < target INC`. Do not jump to SOT because leftover MD to TANGENT is small. Tiny leftover MD is not a reason to skip — use **this stand’s C** as the BURR distance instead of a made-up floor (never invent 10 m).
+
+### BURR (AR)
+
+Same rate as a working build stand:
+
+```
+BURR = (I_target − I_bit) × 30 / dMD
+```
+
+`dMD` = target MD − bit MD. If that is shorter than this stand’s **C** and inclination is still short of the target, **dMD = C**.
+
+When bit TVD is present and remaining TVD ≥ 5 m, use the TVD-arc rate instead (avoids a tiny-dTVD spike):
+
+```
+BURR = (sin I_target − sin I_bit) / dTVD × 30     (°/30 m)
+```
+
+BURR is what the **next aim demands**, even if the motor cannot deliver it this stand. No BURR above `ProjBuildStartMd` (vertical / nudge).
+
+### Metres to slide (AS) and the comment (Y)
+
+```
+AS = min( |BURR| / Q × C , C )
+```
+
+AS is along-motor. A toolface off highside delivers less build per metre of hole. The **comment** metres are:
+
+```
+instructed = min( AS / |cos(TF)| , C )
+```
+
+`TF` is **AT** (required toolface to the target), not user column U. Display is **this row’s C at 2 decimals** — never snap to 0.25 m (that turned 19.20 / 19.16 into a fake 19.25).
+
+**You cannot slide more than this stand.** `/|cos(TF)|` can ask for more hole than **C** (e.g. R42 ≈ 1.35×). That is why a full-stand instruction appears. The instruction is then **hard-capped at C**. If the cap binds: Y = `Sliding <C>m @ TF` and Z = `0.00m ROT`.
+
+### Remaining rotate (Z)
+
+```
+Z = C − instructed     (0 if we slide the whole course)
+```
+
+Y slide + Z rotate **always equals C**. Z does **not** use column T (what they already slid). T is history; Y/Z is the instruction for this stand. No BURR → instructed = 0 → Z = C (all rotate).
+
+### Toolface (AT)
+
+Required TF is the gravity toolface from bit attitude to the aim (`Atan2` of inc-rate vs azm-rate). Comments show that TF (`R10`, `L9`, …). Magnetic vs gravity mode follows bit inc (default 5°).
+
+### What we do not do
+
+- Gate V/W/X/Y on `$U$2` (window MD), or compute BURR on the whole vertical aimed at SOT.
+- Invent a 10 m BURR floor, next-row C, or quarter-metre slide lengths.
+- Put leftover `m ROT` in Y — rotate lives in **Z**.
+- Paint comment cells neon yellow (`65535`). Y comments and Z use faded `RGB(255,255,204)`; blank Y stays the sheet’s pale green.
 
 ---
 
@@ -152,6 +233,12 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### Slide Sheet — 2026-08-30
+
+- **BURR / slide / ROT** — Aim stays on TANGENT while inc is still short (do not skip to SOT on leftover MD). BURR uses real dMD or **this stand’s C**, never a 10 m floor. Comment slide = `AS/|cos(TF)|` hard-capped at C (2 dp, no 0.25 snap). Z = C − instructed slide (0 if full-course). Gate AR/AS/AT on `ProjBuildStartMd`, not `$U$2`.
+- **24 h shadow box** — Corridor VERTICAL/BUILD shows plan + last 24 h hole, three-wall shadows, targets on the plan with a ring perpendicular to the wellbore, camera on the report footage (not surface-to-TD). Sample: `docs/corridor_24h.png`.
+- **Comment yellow** — Y/Z use one faded yellow (`RGB(255,255,204)`).
 
 ### Slide Sheet — 2026-08-29
 

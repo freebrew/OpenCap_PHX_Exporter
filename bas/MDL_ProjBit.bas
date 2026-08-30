@@ -306,27 +306,27 @@ Private Function LoadTargets(ByVal mdR As Range, ByVal incR As Range, ByVal azmR
     LoadTargets = n
 End Function
 
-' Skip a plan station that is still ahead in MD but no longer a usable aim:
-' tiny remaining MD/TVD with meaningful INC still to go → BURR singularity.
-' Never applied to the last plan station (caller keeps that as the final aim).
+' A station is used up only when its inclination is already made.
+' Tiny leftover MD is not a reason to jump to the next (hold) station —
+' ComputeAim then uses the current stand length as the BURR distance.
 Private Function TargetIsExhausted(ByVal bitMD As Double, ByVal incBit As Double, _
                                    ByVal tgtMd As Double, ByVal tgtInc As Double, _
                                    ByVal tgtTvd As Double, ByVal tvdBit As Variant) As Boolean
     Dim dist As Double, dTvd As Double
     TargetIsExhausted = False
-    dist = tgtMd - bitMD
-    If dist <= EPS Then
-        TargetIsExhausted = True
-        Exit Function
-    End If
-    If dist < MIN_AIM_MD And Abs(tgtInc - incBit) > MIN_AIM_DINC Then
-        TargetIsExhausted = True
-        Exit Function
-    End If
-    If HasNum(tvdBit) Then
-        dTvd = tgtTvd - CDbl(tvdBit)
-        If dTvd > 0# And dTvd < MIN_AIM_TVD And Abs(tgtInc - incBit) > MIN_AIM_DINC Then
+    If incBit + MIN_AIM_DINC >= tgtInc Then
+        dist = tgtMd - bitMD
+        If dist <= EPS Then
             TargetIsExhausted = True
+            Exit Function
+        End If
+        If dist < MIN_AIM_MD Then
+            TargetIsExhausted = True
+            Exit Function
+        End If
+        If HasNum(tvdBit) Then
+            dTvd = tgtTvd - CDbl(tvdBit)
+            If dTvd > 0# And dTvd < MIN_AIM_TVD Then TargetIsExhausted = True
         End If
     End If
 End Function
@@ -357,6 +357,7 @@ Private Function FirstAimIndex(ByRef m() As Double, ByRef i() As Double, _
     Dim k As Long
     k = 1
     Do While k <= n And m(k) <= bitMD
+        If incBit + MIN_AIM_DINC < i(k) Then Exit Do
         k = k + 1
     Loop
     Do While k <= n
@@ -465,6 +466,12 @@ Private Function ComputeAim(ByVal bitMD As Double, ByVal incBit As Double, _
     ti = i(k)
     ta = a(k)
     dist = q - bitMD
+    ' Same BURR formula as a normal stand: ΔI×30/dMD.
+    ' When dMD is shorter than this stand (or the bit has passed the
+    ' station MD) use course length from the sheet — not a made-up floor.
+    If dist < course And incBit + MIN_AIM_DINC < ti Then
+        If course > EPS Then dist = course
+    End If
     If dist <= EPS Then Exit Function
     beta = DoglegAngleDeg(incBit, azmBit, ti, ta)
     reqDls = beta * 30# / dist
@@ -547,7 +554,9 @@ Public Function ProjMetersToSlide(ByVal bitMD As Variant, ByVal incBit As Varian
         Exit Function
     End If
 
+    ' Cannot slide more than this stand.
     ProjMetersToSlide = Abs(burr) / mo * co
+    If ProjMetersToSlide > co Then ProjMetersToSlide = co
     Exit Function
 Fail:
     ProjMetersToSlide = CVErr(xlErrNum)
@@ -633,8 +642,48 @@ Fail:
     ProjBurr = CVErr(xlErrNum)
 End Function
 
-Private Function RoundQuarterM(ByVal m As Double) As Double
-    RoundQuarterM = Application.WorksheetFunction.Round(m / 0.25, 0) * 0.25
+' Hole metres to put in the Y comment: AS after required-TF cosine, then hard
+' cap at this stand's C. Two-decimal sheet precision — never 0.25 rounding.
+Public Function ProjInstructedSlideM(ByVal metersToSlide As Variant, ByVal tfText As Variant, _
+                                     Optional ByVal maxSlide As Variant) As Double
+    Dim m As Double, cap As Double
+    Dim tfShow As String
+    Dim tfParsed As Variant
+    Dim c As Double
+
+    m = 0#
+    If HasNum(metersToSlide) Then
+        m = CDbl(metersToSlide)
+        If m < 0# Then m = 0#
+    End If
+
+    cap = 0#
+    If HasNum(maxSlide) Then
+        cap = CDbl(maxSlide)
+        If cap < 0# Then cap = 0#
+    End If
+
+    If cap > 0# And m > cap Then m = cap
+
+    tfShow = Trim$(CStr(tfText & ""))
+    If m > 0# And Len(tfShow) > 0 And tfShow <> "-" Then
+        tfParsed = ProjParseTF(tfShow)
+        If HasNum(tfParsed) Then
+            c = Abs(Cos(Deg2Rad(CDbl(tfParsed))))
+            If c >= 0.05 Then
+                m = m / c
+            End If
+        End If
+    End If
+
+    If cap > 0# And m > cap Then m = cap
+
+    m = Application.WorksheetFunction.Round(m, 2)
+    If cap > 0# Then
+        cap = Application.WorksheetFunction.Round(cap, 2)
+        If m > cap Then m = cap
+    End If
+    ProjInstructedSlideM = m
 End Function
 
 ' Bit Northing = survey CumN + min-curve ΔN (surv → bit)
@@ -723,12 +772,19 @@ Public Function ProjRequiredTf(ByVal bitMD As Variant, _
     End If
 
     dMd = m(k) - bm
-    If dMd <= EPS Then
-        ProjRequiredTf = "": Exit Function
-    End If
-
     dInc = i(k) - ib
     dAzm = Wrap180(a(k) - aB)
+    ' TF is Atan2(ΔI, ΔA); sign of remaining MD must not flip it.
+    If dMd <= EPS Then
+        If Abs(dInc) < EPS And Abs(dAzm) < EPS Then
+            reqTf = 0#
+        Else
+            reqTf = Rad2Deg(Application.WorksheetFunction.Atan2(dInc, dAzm))
+        End If
+        ProjRequiredTf = FormatRequiredTfDisplay(reqTf, ib, thresholdDeg)
+        Exit Function
+    End If
+
     incPerM = dInc / dMd
     azmPerM = dAzm / dMd
 
@@ -812,48 +868,27 @@ Fail:
     ProjTfMode = CVErr(xlErrValue)
 End Function
 
-' Comments: returns left & Chr(1) & right for the caller to pad into the Y cell.
-'   left  = "Sliding <m rounded to 0.25> @ <TF>"  (0.00m when tangent / no slide)
-'   right = "BURR 0.00"   (always two decimals, no pipe)
-' Displayed slide metres = geometric metersToSlide / |cos(required TF)| so off-HS
-' toolface asks for more slide. Blank/zero meters still emit TF+BURR (tangent hold).
-' Plan-distance / Bit N-E coords intentionally omitted
+' Comments: left & Chr(1) & BURR for the Y cell.
+'   left  = "Sliding <this stand C, 2 dp> @ <TF>"
+'   right = "BURR 0.00"
+' Slide metres = ProjInstructedSlideM (capped at C). Leftover rotate is column Z = C − slide.
 Public Function ProjSlideComment(ByVal metersToSlide As Variant, ByVal tfText As Variant, _
                                  ByVal burr As Variant, _
-                                 Optional ByVal widthChars As Double = 0#) As Variant
+                                 Optional ByVal widthChars As Double = 0#, _
+                                 Optional ByVal maxSlide As Variant) As Variant
     Dim m As Double, tfShow As String, b As Double
     Dim leftPart As String, rightPart As String
-    Dim tfParsed As Variant
-    Dim c As Double
     On Error GoTo Fail
 
-    ' Blank/zero meters = tangent hold: still show TF + BURR from current bit projection.
-    If HasNum(metersToSlide) Then
-        m = CDbl(metersToSlide)
-        If m < 0# Then m = 0#
-    Else
-        m = 0#
-    End If
     If Not HasNum(burr) Then ProjSlideComment = "": Exit Function
     b = CDbl(burr)
+    m = ProjInstructedSlideM(metersToSlide, tfText, maxSlide)
 
     tfShow = Trim$(CStr(tfText & ""))
     If Len(tfShow) = 0 Then tfShow = "-"
 
-    ' Effective slide = geometric / |cos(TF)| using required TF text (AT).
-    If m > 0# And Len(tfShow) > 0 And tfShow <> "-" Then
-        tfParsed = ProjParseTF(tfShow)
-        If HasNum(tfParsed) Then
-            c = Abs(Cos(Deg2Rad(CDbl(tfParsed))))
-            If c >= 0.05 Then
-                m = m / c
-            End If
-        End If
-    End If
-
-    leftPart = "Sliding " & Format$(RoundQuarterM(m), "0.00") & "m @ " & tfShow
+    leftPart = "Sliding " & Format$(m, "0.00") & "m @ " & tfShow
     rightPart = "BURR " & Format$(b, "0.00")
-    ' Chr(1) delimiter — RefreshSlideComments pads to the Y cell width in points.
     ProjSlideComment = leftPart & Chr$(1) & rightPart
     Exit Function
 Fail:
@@ -899,6 +934,8 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
 Fail:
     ProjSlideMetersBetween = CVErr(xlErrNum)
 End Function
+
+
 
 
 

@@ -315,7 +315,7 @@ End Function
 
 Private Function ActualAtLastSurvey(ws As Worksheet, _
         ByRef sMD As Double, ByRef sInc As Double, ByRef sAzi As Double, _
-        ByRef sn As Double, ByRef sE As Double, ByRef sV As Double, _
+        ByRef sn As Double, ByRef se As Double, ByRef sv As Double, _
         ByRef lastRow As Long) As Long
     Dim n As Long: n = 0
     Dim prevMD As Double, prevInc As Double, prevAzi As Double
@@ -351,7 +351,7 @@ NextSurveyRow:
     Next r
 
     sMD = prevMD: sInc = prevInc: sAzi = prevAzi
-    sn = curN: sE = curE: sV = curV
+    sn = curN: se = curE: sv = curV
     ActualAtLastSurvey = n
 End Function
 
@@ -403,9 +403,9 @@ Private Sub RenderPlanGaugeCore()
     Dim nPlan As Long
     nPlan = LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
     Dim sMD As Double, sInc As Double, sAzi As Double
-    Dim sn As Double, sE As Double, sV As Double
+    Dim sn As Double, se As Double, sv As Double
     Dim lastRow As Long, nSurv As Long
-    nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sn, sE, sV, lastRow)
+    nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sn, se, sv, lastRow)
 
     If nPlan < 2 Or nSurv < 1 Then
         DrawGauge ws, False, 0, 0, "", False, 0, 0, _
@@ -413,7 +413,7 @@ Private Sub RenderPlanGaugeCore()
         Exit Sub
     End If
     Dim actTvd As Double
-    actTvd = ActualTvdForGauge(ws, lastRow, sV)
+    actTvd = ActualTvdForGauge(ws, lastRow, sv)
 
     Dim gravityMode As Boolean: gravityMode = (sInc >= CROSSOVER_INC)
 
@@ -426,7 +426,7 @@ Private Sub RenderPlanGaugeCore()
 
     Dim dN As Double, dE As Double, dTvdUp As Double
     dN = sn - plN
-    dE = sE - plE
+    dE = se - plE
     dTvdUp = plV - actTvd
 
     Dim ax As Double, ay As Double
@@ -456,7 +456,7 @@ Private Sub RenderPlanGaugeCore()
 
             Dim bDN As Double, bDE As Double, bUp As Double
             bDN = (sn + stepN) - pbN
-            bDE = (sE + stepE) - pbE
+            bDE = (se + stepE) - pbE
             bUp = pbV - bitTvd
             FrameComponents gravityMode, pbAzi, bDN, bDE, bUp, bx, by
             showPtb = True

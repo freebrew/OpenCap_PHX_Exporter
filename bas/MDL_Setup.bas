@@ -1671,7 +1671,7 @@ Private Function GetNamedText(ByVal nm As String) As String
     Dim rf As String
     GetNamedText = ""
     On Error Resume Next
-    rf = CStr(ThisWorkbook.names(nm).RefersTo)
+    rf = CStr(ThisWorkbook.names(nm).refersTo)
     On Error GoTo 0
     If Len(rf) >= 3 Then
         If Left$(rf, 2) = "=""" And right$(rf, 1) = """" Then
@@ -1689,7 +1689,7 @@ Private Sub SetNamedText(ByVal nm As String, ByVal v As String)
     ThisWorkbook.names(nm).Delete
     On Error GoTo 0
     If Len(safe) = 0 Then Exit Sub
-    ThisWorkbook.names.Add name:=nm, RefersTo:="=""" & safe & """"
+    ThisWorkbook.names.Add name:=nm, refersTo:="=""" & safe & """"
 End Sub
 
 Private Function FindCsvByTokenInFolder(folder As String, token As String) As String

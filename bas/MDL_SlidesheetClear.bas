@@ -10,10 +10,16 @@ Private Const Y_FIRST As Long = 12
 Private Const Y_LAST As Long = 305
 Private Const Y_DATA_FIRST As Long = 13
 Private Const Y_LABEL As String = "RKB"
+' Sheet comment yellow (same as Module16 pale yellow). Not Excel idx-6 65535.
+Private Const COMMENT_YELLOW As Long = 13434879  ' RGB(255,255,204)
 Private Const TGT_FIRST As Long = 2
 Private Const TGT_LAST As Long = 5
 Private Const PLANSEC_SHEET As String = "_OC_PlanSec"
 Private Const TGT_NAMES As String = "NUDGE,VERTICAL,KOP,TANGENT,SOT,EOT,HEEL,TD"
+' Full named-target list for BURR / slide UDFs (T2:Y5 is display-only).
+Private Const FULL_TGT_MD_COL As Long = 14
+Private Const FULL_TGT_FIRST As Long = 3
+Private Const FULL_TGT_ROWS As Long = 80
 Private m_updatingY As Boolean
 Private m_hlTgtRow As Long   ' last highlighted target row (0 = none)
 Private m_syncingTgt As Boolean
@@ -41,6 +47,7 @@ Public Sub ClearSlidesheetRanges()
     ss.Range("AC14:AD33").ClearContents
     ss.Range("U2:X5").ClearContents
     ss.Range("Y12:Y305").ClearContents
+    ss.Range("Z13:Z305").ClearContents
     SyncPlanTargetWindowOnSheet ss
     ss.Range("Y12").Value2 = Y_LABEL
 
@@ -54,7 +61,7 @@ Public Sub ClearSlidesheetRanges()
            "  D/F/G/T/U 13:305" & vbCrLf & _
            "  Sail waypoints AC14:AD33" & vbCrLf & _
            "  Targets U2:X5" & vbCrLf & _
-           "  Comments Y12:Y305 (auto slide text restored where inputs exist)", _
+           "  Comments Y12:Y305 / ROT Z13:Z305 (auto text restored where inputs exist)", _
            vbInformation
     Exit Sub
 
@@ -78,6 +85,13 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     Dim uArr As Variant
     Dim arArr As Variant
     Dim yArr As Variant
+    Dim cArr As Variant
+    Dim slideCap As Double
+    Dim rotTxt As String
+    Dim courseLen As Double
+    Dim instructedM As Double
+    Dim remainM As Double
+    Dim asVal As Variant
     Dim anyFormula As Boolean
     Dim writeIt As Boolean
     Dim wasProt As Boolean
@@ -113,6 +127,7 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     uArr = ss.Range(ss.Cells(Y_DATA_FIRST, "AT"), ss.Cells(Y_LAST, "AT")).Value2
     arArr = ss.Range(ss.Cells(Y_DATA_FIRST, "AR"), ss.Cells(Y_LAST, "AR")).Value2
     yArr = ss.Range(ss.Cells(Y_DATA_FIRST, "Y"), ss.Cells(Y_LAST, "Y")).Value2
+    cArr = ss.Range(ss.Cells(Y_DATA_FIRST, "C"), ss.Cells(Y_LAST, "C")).Value2
 
     ' Only pay for per-cell HasFormula checks if the column still holds formulas.
     anyFormula = True
@@ -128,22 +143,50 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
         r = Y_DATA_FIRST + i - 1
 
         autoTxt = ""
-        ' BURR alone is enough: blank/zero AS (tangent hold) still gets a comment.
+        slideCap = 0#
+        instructedM = 0#
+        If IsNumberValue(cArr(i, 1)) Then slideCap = CDbl(cArr(i, 1))
+
         If IsNumberValue(arArr(i, 1)) Then
-            ' uArr is required TF text from AT (may be "", R12, L20, 40M, …).
             If IsNumberValue(xArr(i, 1)) Then
-                result = ProjSlideComment(xArr(i, 1), uArr(i, 1), arArr(i, 1))
+                asVal = xArr(i, 1)
             Else
-                result = ProjSlideComment(0#, uArr(i, 1), arArr(i, 1))
+                asVal = 0#
             End If
-            If Not isError(result) Then
-                autoTxt = CStr(result & "")
-                p = InStr(1, autoTxt, Chr$(1), vbBinaryCompare)
-                If p > 0 Then
-                    leftPart = Left$(autoTxt, p - 1)
-                    rightPart = mid$(autoTxt, p + 1)
-                    autoTxt = FitLeftRightInCell(leftPart, rightPart, ss.Cells(r, "Y"), spacePts)
-                End If
+            result = ProjSlideComment(asVal, uArr(i, 1), arArr(i, 1), 0#, slideCap)
+            instructedM = ProjInstructedSlideM(asVal, uArr(i, 1), slideCap)
+        Else
+            result = ""
+        End If
+
+        If Not isError(result) Then
+            autoTxt = CStr(result & "")
+            p = InStr(1, autoTxt, Chr$(1), vbBinaryCompare)
+            If p > 0 Then
+                leftPart = Left$(autoTxt, p - 1)
+                rightPart = mid$(autoTxt, p + 1)
+                autoTxt = FitLeftRightInCell(leftPart, rightPart, ss.Cells(r, "Y"), spacePts)
+            End If
+        End If
+
+        ' Z: leftover rotate = this stand's C minus the slide metres in Y.
+        ' Full-course slide → 0.00m ROT. No BURR → all of C is rotate.
+        rotTxt = ""
+        If slideCap > 0# Then
+            courseLen = Application.WorksheetFunction.Round(slideCap, 2)
+            remainM = courseLen - instructedM
+            If remainM < 0# Then remainM = 0#
+            rotTxt = Format$(remainM, "0.00") & "m ROT"
+        End If
+        If IsAutoRotText(Trim$(CStr(ss.Cells(r, "Z").Value2 & ""))) Then
+            If Len(rotTxt) = 0 Then
+                ss.Cells(r, "Z").ClearContents
+            ElseIf CStr(ss.Cells(r, "Z").Value2 & "") <> rotTxt Then
+                With ss.Cells(r, "Z")
+                    .WrapText = False
+                    .HorizontalAlignment = xlRight
+                    .Value2 = rotTxt
+                End With
             End If
         End If
 
@@ -166,12 +209,21 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
                         .WrapText = False
                         .IndentLevel = 0
                         .HorizontalAlignment = xlLeft
+                        .Interior.Pattern = xlSolid
+                        .Interior.Color = COMMENT_YELLOW
                         .Value2 = autoTxt
                     End With
                 End If
             End If
         End If
     Next i
+
+    ' Y + Z data rows: one faded comment yellow. Blank Y still shows
+    ' the sheet CF green (ISBLANK / ISFORMULA).
+    With ss.Range(ss.Cells(Y_DATA_FIRST, "Y"), ss.Cells(Y_LAST, "Z")).Interior
+        .Pattern = xlSolid
+        .Color = COMMENT_YELLOW
+    End With
 
     SyncPlanTargetWindowOnSheet ss
     HighlightActiveTargetOnSheet ss
@@ -202,6 +254,40 @@ Private Function FitLeftRightInCell(ByVal leftPart As String, ByVal rightPart As
     PAD = CLng(Application.WorksheetFunction.Round((avail - leftPts - rightPts) / spacePts, 0))
     If PAD < 2 Then PAD = 2
     FitLeftRightInCell = leftPart & Space$(PAD) & rightPart
+End Function
+
+' Sliding left, BURR, then leftover-rotate flush to the right grid.
+Private Function FitCommentParts(ByVal leftPart As String, ByVal midPart As String, _
+                                 ByVal rotPart As String, ByVal cell As Range, _
+                                 ByVal spacePts As Double) As String
+    Dim avail As Double
+    Dim leftPts As Double, midPts As Double, rotPts As Double
+    Dim gapPts As Double
+    Dim PAD As Long
+    Const CELL_MARGIN_PTS As Double = 2#
+
+    If spacePts <= 0# Then spacePts = 1#
+    leftPts = MeasureTextWidthPts(leftPart, cell)
+    midPts = MeasureTextWidthPts(midPart, cell)
+    rotPts = MeasureTextWidthPts(rotPart, cell)
+    avail = cell.Width - CELL_MARGIN_PTS
+    gapPts = spacePts * 2#
+
+    If Len(leftPart) = 0 And Len(midPart) = 0 Then
+        PAD = CLng(Application.WorksheetFunction.Round((avail - rotPts) / spacePts, 0))
+        If PAD < 0 Then PAD = 0
+        FitCommentParts = Space$(PAD) & rotPart
+        Exit Function
+    End If
+
+    PAD = CLng(Application.WorksheetFunction.Round( _
+        (avail - leftPts - midPts - rotPts - gapPts) / spacePts, 0))
+    If PAD < 2 Then PAD = 2
+    If Len(midPart) = 0 Then
+        FitCommentParts = leftPart & Space$(PAD) & rotPart
+    Else
+        FitCommentParts = leftPart & Space$(PAD) & midPart & Space$(2) & rotPart
+    End If
 End Function
 
 ' Measure rendered text width in points via a temporary autosized textbox.
@@ -380,7 +466,22 @@ Private Function IsAutoSlideCommentText(ByVal t As String) As Boolean
         IsAutoSlideCommentText = True
         Exit Function
     End If
-    IsAutoSlideCommentText = (Left$(s, 8) = "Sliding ") And (InStr(1, s, "BURR ", vbTextCompare) > 0)
+    If (Left$(s, 8) = "Sliding ") And (InStr(1, s, "BURR ", vbTextCompare) > 0) Then
+        IsAutoSlideCommentText = True
+        Exit Function
+    End If
+    ' Leftover "Nm rot" that used to live in Y — clear those back to slide/BURR only.
+    IsAutoSlideCommentText = (InStr(1, s, "m rot", vbTextCompare) > 0)
+End Function
+
+Private Function IsAutoRotText(ByVal t As String) As Boolean
+    Dim s As String
+    s = Trim$(t)
+    If Len(s) = 0 Then
+        IsAutoRotText = True
+        Exit Function
+    End If
+    IsAutoRotText = (right$(s, 5) = "m ROT") Or (right$(s, 5) = "m rot")
 End Function
 
 Public Sub EnsureSlidesheetClearButton()
@@ -426,7 +527,8 @@ Public Sub ResizeSlidesheetClearButton()
 End Sub
 
 ' Show 4 named Plan Section targets on T2:Y5. Hidden later stations slide in
-' as the bit passes the highlighted (next) target. Calcs still read U2:X5.
+' as the bit passes the highlighted (next) target. BURR / slide UDFs read the
+' full named list on _OC_PlanSec N:Q (ProjTargets_*), not the 4-row window.
 Public Sub SyncPlanTargetWindow()
     Dim ss As Worksheet
     Dim wasProt As Boolean
@@ -471,6 +573,9 @@ Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
     Set ps = ThisWorkbook.Worksheets(PLANSEC_SHEET)
     n = LoadNamedPlanTargets(ps, md, inc, azm, tvd, nm)
     If n < 1 Then GoTo Done
+
+    EnsureProjTargetNames
+    WriteFullProjTargetTable ps, md, inc, azm, tvd, nm, n
 
     bitMD = LastSurveyBitMd(ss)
     aimI = 1
@@ -523,6 +628,66 @@ Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
 
 Done:
     m_syncingTgt = False
+End Sub
+
+' Workbook names the V/W/X/AO/AR/AS/AT formulas already call.
+Private Sub EnsureProjTargetNames()
+    Dim mdRef As String, incRef As String, azmRef As String, tvdRef As String
+    Dim startRef As String
+    Dim lastR As Long
+
+    lastR = FULL_TGT_FIRST + FULL_TGT_ROWS - 1
+    mdRef = "='" & PLANSEC_SHEET & "'!$N$" & FULL_TGT_FIRST & ":$N$" & lastR
+    incRef = "='" & PLANSEC_SHEET & "'!$O$" & FULL_TGT_FIRST & ":$O$" & lastR
+    azmRef = "='" & PLANSEC_SHEET & "'!$P$" & FULL_TGT_FIRST & ":$P$" & lastR
+    tvdRef = "='" & PLANSEC_SHEET & "'!$Q$" & FULL_TGT_FIRST & ":$Q$" & lastR
+    startRef = "='" & PLANSEC_SHEET & "'!$N$1"
+
+    SetWbName "ProjTargets_MD", mdRef
+    SetWbName "ProjTargets_INC", incRef
+    SetWbName "ProjTargets_AZM", azmRef
+    SetWbName "ProjTargets_TVD", tvdRef
+    SetWbName "ProjBuildStartMd", startRef
+End Sub
+
+Private Sub SetWbName(ByVal nm As String, ByVal refersTo As String)
+    On Error Resume Next
+    ThisWorkbook.names(nm).Delete
+    On Error GoTo 0
+    ThisWorkbook.names.Add name:=nm, refersTo:=refersTo
+End Sub
+
+' N1 = first KOP/TANGENT MD (BURR start). N3:Q = every named plan station.
+Private Sub WriteFullProjTargetTable(ByVal ps As Worksheet, _
+        ByRef md() As Double, ByRef inc() As Double, ByRef azm() As Double, _
+        ByRef tvd() As Double, ByRef nm() As String, ByVal n As Long)
+    Dim i As Long
+    Dim startMd As Double
+    Dim lastR As Long
+    Dim wasProt As Boolean
+
+    wasProt = SheetUnprotectForVba(ps)
+
+    startMd = 0#
+    For i = 1 To n
+        If nm(i) = "KOP" Or nm(i) = "TANGENT" Then
+            startMd = md(i)
+            Exit For
+        End If
+    Next i
+    ps.Cells(1, FULL_TGT_MD_COL).Value2 = startMd
+
+    lastR = FULL_TGT_FIRST + FULL_TGT_ROWS - 1
+    ps.Range(ps.Cells(FULL_TGT_FIRST, 14), ps.Cells(lastR, 17)).ClearContents
+    For i = 1 To n
+        If i > FULL_TGT_ROWS Then Exit For
+        ps.Cells(FULL_TGT_FIRST + i - 1, 14).Value2 = md(i)
+        ps.Cells(FULL_TGT_FIRST + i - 1, 15).Value2 = inc(i)
+        ps.Cells(FULL_TGT_FIRST + i - 1, 16).Value2 = azm(i)
+        ps.Cells(FULL_TGT_FIRST + i - 1, 17).Value2 = tvd(i)
+    Next i
+
+    SheetReprotectAfterVba ps, wasProt
 End Sub
 
 Private Function SameTgtCell(ByVal cur As Variant, ByVal neu As Variant) As Boolean
@@ -662,6 +827,8 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
+
 
 
 
