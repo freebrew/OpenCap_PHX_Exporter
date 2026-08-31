@@ -83,7 +83,7 @@ Columns (data rows 13:305):
 | **Q** | Seen motor yield (`C×J/M`) |
 | **T** | Metres **already slid** (history). Not used for Y or Z. |
 | **U** | User toolface (what they ran) |
-| **V / W / X** | TVD / INC / AZM @ bit |
+| **V / W / X** | TVD / INC / AZM @ bit. INC and AZM use the same seen-yield dogleg (`DoglegBelow`). |
 | **AO** | Active target MD |
 | **AR** | BURR (°/30 m) |
 | **AS** | Metres to slide (along-motor, before TF cosine) |
@@ -138,6 +138,17 @@ Z = C − instructed     (0 if we slide the whole course)
 ```
 
 Y slide + Z rotate **always equals C**. Z does **not** use column T (what they already slid). T is history; Y/Z is the instruction for this stand. No BURR → instructed = 0 → Z = C (all rotate).
+
+### INC / AZM at bit (W / X)
+
+Same dogleg-below as each other: seen DLS scaled by this stand’s course, metres already seen, and metres below the survey (`DoglegBelow`). Constant-toolface fill-in is ISCWSA §8.2:
+
+```
+ΔInc = dB × cos(TF)
+ΔAzm = dB × sin(TF) / sin(Inc)     (Inc ≥ 5°)
+```
+
+TF is column **U** (what they ran this stand). If U is blank or 0, AZM walk uses the last surveyed course TF (**N**, left/right from **O**) — previous performance. Near-vertical (Inc < 5°) skips `/sin(I)` so walk does not blow up.
 
 ### Toolface (AT)
 
