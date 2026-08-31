@@ -17,7 +17,14 @@ Private Sub Worksheet_Activate()
 End Sub
 
 Private Sub Worksheet_Change(ByVal Target As Range)
+    ' Events off for the whole handler: RefreshSlideComments / RenderPlanGauge
+    ' write cells, and with events on each write cascaded fresh Change /
+    ' Calculate events - one survey entry re-ran the 300-row comment refresh
+    ' ~8 times (minutes per keystroke on field laptops).
+    Dim prevEvents As Boolean
+    prevEvents = Application.EnableEvents
     On Error Resume Next
+    Application.EnableEvents = False
     If Not Intersect(Target, Me.Range("AA:AB")) Is Nothing Then
         ResizeSlidesheetClearButton
     End If
@@ -36,6 +43,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     If Not Intersect(Target, Me.Range("D13:G320,U2:X5,AB14,AC14:AD33")) Is Nothing Then
         MDL_PlanGauge.RenderPlanGauge
     End If
+    Application.EnableEvents = prevEvents
     On Error GoTo 0
 End Sub
 

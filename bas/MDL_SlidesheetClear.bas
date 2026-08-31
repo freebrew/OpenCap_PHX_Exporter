@@ -24,6 +24,17 @@ Private m_updatingY As Boolean
 Private m_hlTgtRow As Long   ' last highlighted target row (0 = none)
 Private m_syncingTgt As Boolean
 
+' -- Fast text measurement (RefreshSlideComments) -------------------------------
+' The old MeasureTextWidthPts created and deleted a textbox shape per string
+' (~25 ms each). One refresh measures ~600 strings (~16 s), and a survey entry
+' fires the refresh from both Worksheet_Change and Worksheet_Calculate, which
+' is how one Inc/Azm keystroke cost about two minutes in the field.
+' Fix: one reusable hidden textbox per pass plus a width cache, and a short
+' debounce so the Change/Calculate pair of a single edit refreshes once.
+Private m_measureShape As Shape     ' live only between Begin/EndTextMeasure
+Private m_measureCache As Object    ' Scripting.Dictionary: text|font|size|bold -> pts
+Private m_lastRefreshAt As Double   ' Timer stamp of last completed auto refresh
+
 ' Clear Slidesheet survey/entry ranges:
 '   D,F,G,T,U rows 13:305
 '   Sail waypoints AC14:AD33 (display AA=Inc Next, AB=Geo Window; helper AE)
@@ -100,19 +111,35 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     Dim p As Long
     Dim protoY As Range
     Dim spacePts As Double
+    Dim prevEvents As Boolean
+    Dim prevCalc As XlCalculation
 
     If m_updatingY Then Exit Sub
+    ' One user edit fires Worksheet_Change AND Worksheet_Calculate, each asking
+    ' for a full refresh. The second (and any cascaded) request within the same
+    ' editing gesture recomputes identical data - skip it. forceAll always runs.
+    If Not forceAll Then
+        If m_lastRefreshAt > 0# And Abs(Timer - m_lastRefreshAt) < 0.5 Then Exit Sub
+    End If
     m_updatingY = True
+
+    ' Restore the caller's state on exit — automation runs with events off
+    ' (Field Workbook_Open guard) and must stay that way after this sub.
+    prevEvents = Application.EnableEvents
+    prevCalc = Application.Calculation
 
     On Error GoTo Clean
 
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
     Application.EnableEvents = False
 
-    ' AS (Meters To Slide) and AR are formulas. Under automatic calc Excel has
-    ' already refreshed them before Worksheet_Calculate fires, so only force a
-    ' pass in manual mode.
-    If Application.Calculation = xlCalculationManual Then ss.Calculate
+    ' Manual calc for the whole pass: under automatic calc every Y/Z write in
+    ' the loop below triggers an incremental recalc — measured ~15-35 s per
+    ' refresh on a full sheet vs ~0.4 s under manual. One sheet calc up front
+    ' keeps the AS/AR/AT formula inputs fresh; Clean restores the caller's
+    ' mode, which recalcs the written cells once.
+    Application.Calculation = xlCalculationManual
+    ss.Calculate
 
     wasProt = SheetUnprotectForVba(ss)
 
@@ -136,6 +163,7 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     End If
 
     Set protoY = ss.Cells(Y_DATA_FIRST, "Y")
+    BeginTextMeasure protoY          ' one reusable textbox for the whole pass
     spacePts = MeasureTextWidthPts(" ", protoY)
     If spacePts < 0.25 Then spacePts = 0.25
 
@@ -170,22 +198,24 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
         End If
 
         ' Z: leftover rotate = this stand's C minus the slide metres in Y.
-        ' Full-course slide → 0.00m ROT. No BURR → all of C is rotate.
+        ' Full-course slide → 0.00. No BURR → all of C is rotate.
+        ' Number only — header already says rotate.
         rotTxt = ""
         If slideCap > 0# Then
             courseLen = Application.WorksheetFunction.Round(slideCap, 2)
             remainM = courseLen - instructedM
             If remainM < 0# Then remainM = 0#
-            rotTxt = Format$(remainM, "0.00") & "m ROT"
+            rotTxt = Format$(remainM, "0.00")
         End If
         If IsAutoRotText(Trim$(CStr(ss.Cells(r, "Z").Value2 & ""))) Then
             If Len(rotTxt) = 0 Then
                 ss.Cells(r, "Z").ClearContents
-            ElseIf CStr(ss.Cells(r, "Z").Value2 & "") <> rotTxt Then
+            Else
                 With ss.Cells(r, "Z")
+                    If CStr(.Value2 & "") <> rotTxt Then .Value2 = rotTxt
                     .WrapText = False
-                    .HorizontalAlignment = xlRight
-                    .Value2 = rotTxt
+                    .numberFormat = "0.00"
+                    .HorizontalAlignment = xlCenter
                 End With
             End If
         End If
@@ -228,10 +258,16 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     SyncPlanTargetWindowOnSheet ss
     HighlightActiveTargetOnSheet ss
 
+    m_lastRefreshAt = Timer          ' stamp only on a completed refresh
+
 Clean:
     On Error Resume Next
+    EndTextMeasure                   ' delete the reusable textbox (needs sheet still unprotected)
     SheetReprotectAfterVba ss, wasProt
-    Application.EnableEvents = True
+    ' Restore calc while events are still off so the settle recalc cannot
+    ' re-enter via Worksheet_Calculate.
+    Application.Calculation = prevCalc
+    Application.EnableEvents = prevEvents
     m_updatingY = False
 End Sub
 
@@ -290,26 +326,14 @@ Private Function FitCommentParts(ByVal leftPart As String, ByVal midPart As Stri
     End If
 End Function
 
-' Measure rendered text width in points via a temporary autosized textbox.
-Private Function MeasureTextWidthPts(ByVal txt As String, ByVal proto As Range) As Double
-    Dim ws As Worksheet
-    Dim shp As Shape
-    Dim nm As String
-    Dim sz As Double
-
-    On Error GoTo Fail
-    If Len(txt) = 0 Then
-        MeasureTextWidthPts = 0#
-        Exit Function
-    End If
-
-    Set ws = proto.Worksheet
-    nm = proto.Font.name
-    sz = proto.Font.Size
-    If sz <= 0# Then sz = 11#
-
-    Set shp = ws.Shapes.AddTextbox(1, -2000, -2000, 20, 20) ' msoTextOrientationHorizontal
-    With shp
+' Open a measuring pass: one hidden autosized textbox reused for every
+' MeasureTextWidthPts call until EndTextMeasure, plus a width cache.
+Private Sub BeginTextMeasure(ByVal proto As Range)
+    On Error Resume Next
+    EndTextMeasure
+    Set m_measureCache = CreateObject("Scripting.Dictionary")
+    Set m_measureShape = proto.Worksheet.Shapes.AddTextbox(1, -2000, -2000, 20, 20)
+    With m_measureShape
         .Visible = False
         With .TextFrame
             .AutoSize = True
@@ -317,18 +341,82 @@ Private Function MeasureTextWidthPts(ByVal txt As String, ByVal proto As Range) 
             .MarginRight = 0
             .MarginTop = 0
             .MarginBottom = 0
-            .Characters.text = txt
-            .Characters.Font.name = nm
-            .Characters.Font.Size = sz
-            If proto.Font.bold Then .Characters.Font.bold = True
         End With
-        MeasureTextWidthPts = .Width
-        .Delete
     End With
+    On Error GoTo 0
+End Sub
+
+Private Sub EndTextMeasure()
+    On Error Resume Next
+    If Not m_measureShape Is Nothing Then m_measureShape.Delete
+    Set m_measureShape = Nothing
+    Set m_measureCache = Nothing
+    On Error GoTo 0
+End Sub
+
+' Measure rendered text width in points via a hidden autosized textbox.
+' Inside a Begin/EndTextMeasure pass the shape is reused and widths cached;
+' standalone calls keep the original create/measure/delete behavior.
+Private Function MeasureTextWidthPts(ByVal txt As String, ByVal proto As Range) As Double
+    Dim shp As Shape
+    Dim nm As String
+    Dim sz As Double
+    Dim bld As Boolean
+    Dim ownShape As Boolean
+    Dim key As String
+
+    If Len(txt) = 0 Then
+        MeasureTextWidthPts = 0#
+        Exit Function
+    End If
+
+    On Error Resume Next
+    bld = CBool(proto.Font.bold)
+    On Error GoTo Fail
+
+    nm = proto.Font.name
+    sz = proto.Font.Size
+    If sz <= 0# Then sz = 11#
+
+    If Not m_measureCache Is Nothing Then
+        key = txt & "|" & nm & "|" & sz & "|" & bld
+        If m_measureCache.Exists(key) Then
+            MeasureTextWidthPts = m_measureCache(key)
+            Exit Function
+        End If
+    End If
+
+    If m_measureShape Is Nothing Then
+        Set shp = proto.Worksheet.Shapes.AddTextbox(1, -2000, -2000, 20, 20) ' msoTextOrientationHorizontal
+        ownShape = True
+        With shp
+            .Visible = False
+            With .TextFrame
+                .AutoSize = True
+                .MarginLeft = 0
+                .MarginRight = 0
+                .MarginTop = 0
+                .MarginBottom = 0
+            End With
+        End With
+    Else
+        Set shp = m_measureShape
+    End If
+
+    With shp.TextFrame.Characters
+        .text = txt
+        .Font.name = nm
+        .Font.Size = sz
+        .Font.bold = bld
+    End With
+    MeasureTextWidthPts = shp.Width
+    If ownShape Then shp.Delete
+
+    If Not m_measureCache Is Nothing Then m_measureCache(key) = MeasureTextWidthPts
     Exit Function
 Fail:
     On Error Resume Next
-    If Not shp Is Nothing Then shp.Delete
+    If ownShape And Not shp Is Nothing Then shp.Delete
     ' Fallback: ~half font-size points per character
     MeasureTextWidthPts = Len(txt) * sz * 0.5
 End Function
@@ -481,7 +569,11 @@ Private Function IsAutoRotText(ByVal t As String) As Boolean
         IsAutoRotText = True
         Exit Function
     End If
-    IsAutoRotText = (right$(s, 5) = "m ROT") Or (right$(s, 5) = "m rot")
+    If (right$(s, 5) = "m ROT") Or (right$(s, 5) = "m rot") Then
+        IsAutoRotText = True
+        Exit Function
+    End If
+    IsAutoRotText = IsNumeric(s)
 End Function
 
 Public Sub EnsureSlidesheetClearButton()
@@ -827,6 +919,7 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
 
 
 
