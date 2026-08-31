@@ -47,4 +47,3 @@ Sub CLEAR_TIMETABLE()
 End Sub
 
 
-

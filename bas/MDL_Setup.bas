@@ -2424,10 +2424,10 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
 
     Dim nSec As Long
     Dim aMd() As Double, aInc() As Double, aAzm() As Double
-    Dim aTvd() As Double, aNS() As Double, aEW() As Double
+    Dim aTvd() As Double, ans() As Double, aEW() As Double
     Dim aDls() As Double, aBld() As Double, aTrn() As Double
     Dim aAnn() As String
-    nSec = ParsePlanSections(pdfText, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+    nSec = ParsePlanSections(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     If nSec < 1 Then
         MsgBox "No Plan Sections / SECTION DETAILS / Plan Annotations table found in that PDF.", _
                vbExclamation, "Import Plan"
@@ -2437,7 +2437,7 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
     Dim aAuto() As String
     ReDim aAuto(0 To nSec - 1)
     NamePlanSectionTargets nSec, aMd, aInc, aAzm, aDls, aBld, aTrn, aAnn, aAuto
-    WritePlanSecSheet fPath, nSec, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn, aAuto
+    WritePlanSecSheet fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn, aAuto
 
     Dim sibCsv As String
     sibCsv = Left$(fPath, InStrRev(fPath, ".") - 1) & ".csv"
@@ -2445,7 +2445,7 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
         ImportSurveyPlanCsv sibCsv
         Worksheets(SH_SURVEY).Cells(1, 1).Value = fPath
     Else
-        WriteSurveyFromSections fPath, nSec, aMd, aInc, aAzm, aTvd, aNS, aEW
+        WriteSurveyFromSections fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW
     End If
 End Sub
 
@@ -2456,22 +2456,22 @@ End Sub
 ' Overlay annotation comments onto (2) by matching MD.
 Private Function ParsePlanSections(ByVal pdfText As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
     ReDim aMd(0 To 80): ReDim aInc(0 To 80): ReDim aAzm(0 To 80)
-    ReDim aTvd(0 To 80): ReDim aNS(0 To 80): ReDim aEW(0 To 80)
+    ReDim aTvd(0 To 80): ReDim ans(0 To 80): ReDim aEW(0 To 80)
     ReDim aDls(0 To 80): ReDim aBld(0 To 80): ReDim aTrn(0 To 80)
     ReDim aAnn(0 To 80)
 
     Dim n As Long
-    n = ParseSectionDetailsBlock(pdfText, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+    n = ParseSectionDetailsBlock(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     If n < 2 Then
-        n = ParsePlanSectionsTable(pdfText, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+        n = ParsePlanSectionsTable(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     End If
     If n < 2 Then
-        n = ParsePlanAnnotationsBlock(pdfText, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+        n = ParsePlanAnnotationsBlock(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     End If
     If n >= 2 Then OverlayPlanAnnotations pdfText, n, aMd, aAnn
     ParsePlanSections = n
@@ -2479,7 +2479,7 @@ End Function
 
 Private Function ParseSectionDetailsBlock(ByVal pdfText As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
@@ -2521,7 +2521,7 @@ Private Function ParseSectionDetailsBlock(ByVal pdfText As String, _
         aInc(n) = CDbl(m.SubMatches(1))
         aAzm(n) = CDbl(m.SubMatches(2))
         aTvd(n) = CDbl(m.SubMatches(3))
-        aNS(n) = CDbl(m.SubMatches(4))
+        ans(n) = CDbl(m.SubMatches(4))
         aEW(n) = CDbl(m.SubMatches(5))
         aDls(n) = CDbl(m.SubMatches(6))
         aBld(n) = 0#
@@ -2542,7 +2542,7 @@ Private Function ParseSectionDetailsBlock(ByVal pdfText As String, _
     Next i
     ParseSectionDetailsBlock = n
     If n < 2 Then
-        n = ParseSectionDetailsSpaced(region, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+        n = ParseSectionDetailsSpaced(region, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
         ParseSectionDetailsBlock = n
     End If
 End Function
@@ -2550,7 +2550,7 @@ End Function
 ' Spaced SECTION DETAILS (some extracts put a gap between the 9 packed fields).
 Private Function ParseSectionDetailsSpaced(ByVal region As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
@@ -2572,7 +2572,7 @@ Private Function ParseSectionDetailsSpaced(ByVal region As String, _
         aInc(n) = CDbl(m.SubMatches(1))
         aAzm(n) = CDbl(m.SubMatches(2))
         aTvd(n) = CDbl(m.SubMatches(3))
-        aNS(n) = CDbl(m.SubMatches(4))
+        ans(n) = CDbl(m.SubMatches(4))
         aEW(n) = CDbl(m.SubMatches(5))
         aDls(n) = CDbl(m.SubMatches(6))
         aBld(n) = 0#
@@ -2589,7 +2589,7 @@ End Function
 ' Layout-preserved extracts (pdftotext -layout) are MD Inc Azi TVD NS EW DLS BR TR.
 Private Function ParsePlanSectionsTable(ByVal pdfText As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
@@ -2615,16 +2615,16 @@ Private Function ParsePlanSectionsTable(ByVal pdfText As String, _
     Loop
 
     Dim n As Long
-    n = ParsePlanSectionsYGrouped(region, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+    n = ParsePlanSectionsYGrouped(region, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     If n < 2 Then
-        n = ParsePlanSectionsLayout(region, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn)
+        n = ParsePlanSectionsLayout(region, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     End If
     ParsePlanSectionsTable = n
 End Function
 
 Private Function ParsePlanSectionsYGrouped(ByVal region As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
@@ -2648,7 +2648,7 @@ Private Function ParsePlanSectionsYGrouped(ByVal region As String, _
         If n > 0 And md + 0.05 < aMd(n - 1) Then GoTo NextY
         If n > 0 And Abs(md - aMd(n - 1)) < 0.05 Then GoTo NextY
         aEW(n) = CDbl(m.SubMatches(0))
-        aNS(n) = CDbl(m.SubMatches(1))
+        ans(n) = CDbl(m.SubMatches(1))
         aTvd(n) = CDbl(m.SubMatches(2))
         aAzm(n) = azi
         aInc(n) = inc
@@ -2663,7 +2663,7 @@ End Function
 
 Private Function ParsePlanSectionsLayout(ByVal region As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
@@ -2691,7 +2691,7 @@ Private Function ParsePlanSectionsLayout(ByVal region As String, _
         aInc(n) = inc
         aAzm(n) = azi
         aTvd(n) = CDbl(m.SubMatches(3))
-        aNS(n) = CDbl(m.SubMatches(4))
+        ans(n) = CDbl(m.SubMatches(4))
         aEW(n) = CDbl(m.SubMatches(5))
         aDls(n) = CDbl(m.SubMatches(6))
         aBld(n) = CDbl(m.SubMatches(7))
@@ -2753,7 +2753,7 @@ End Function
 
 Private Function ParsePlanAnnotationsBlock(ByVal pdfText As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String) As Long
 
@@ -2783,7 +2783,7 @@ Private Function ParsePlanAnnotationsBlock(ByVal pdfText As String, _
         aMd(n) = CleanNum(CStr(m.SubMatches(0)))
         aTvd(n) = CleanNum(CStr(m.SubMatches(1)))
         aEW(n) = CleanNum(CStr(m.SubMatches(2)))
-        aNS(n) = CleanNum(CStr(m.SubMatches(3)))
+        ans(n) = CleanNum(CStr(m.SubMatches(3)))
         aInc(n) = 0#: aAzm(n) = 0#: aDls(n) = 0#: aBld(n) = 0#: aTrn(n) = 0#
         aAnn(n) = Trim$(CStr(m.SubMatches(4)))
         n = n + 1
@@ -2935,7 +2935,7 @@ End Function
 
 Private Sub WritePlanSecSheet(ByVal fPath As String, ByVal n As Long, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double, _
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
         ByRef aDls() As Double, ByRef aBld() As Double, ByRef aTrn() As Double, _
         ByRef aAnn() As String, ByRef aAuto() As String)
 
@@ -2960,7 +2960,7 @@ Private Sub WritePlanSecSheet(ByVal fPath As String, ByVal n As Long, _
         ws.Cells(i + 3, 2).Value = aInc(i)
         ws.Cells(i + 3, 3).Value = aAzm(i)
         ws.Cells(i + 3, 4).Value = aTvd(i)
-        ws.Cells(i + 3, 5).Value = aNS(i)
+        ws.Cells(i + 3, 5).Value = ans(i)
         ws.Cells(i + 3, 6).Value = aEW(i)
         ws.Cells(i + 3, 7).Value = aDls(i)
         ws.Cells(i + 3, 8).Value = aBld(i)
@@ -2972,7 +2972,7 @@ End Sub
 
 Private Sub WriteSurveyFromSections(ByVal fPath As String, ByVal n As Long, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
-        ByRef aTvd() As Double, ByRef aNS() As Double, ByRef aEW() As Double)
+        ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double)
     Dim ws As Worksheet
     Set ws = EnsureHiddenSheet(SH_SURVEY)
     ws.Cells(1, 1).Value = fPath
@@ -2988,7 +2988,7 @@ Private Sub WriteSurveyFromSections(ByVal fPath As String, ByVal n As Long, _
         ws.Cells(i + 3, 2).Value = aInc(i)
         ws.Cells(i + 3, 3).Value = aAzm(i)
         ws.Cells(i + 3, 4).Value = aTvd(i)
-        ws.Cells(i + 3, 5).Value = aNS(i)
+        ws.Cells(i + 3, 5).Value = ans(i)
         ws.Cells(i + 3, 6).Value = aEW(i)
     Next i
 End Sub
@@ -3018,11 +3018,11 @@ Private Sub BuildPlanSectionsFromSurveyComments()
     If lastR < 3 Then Exit Sub
 
     Dim aMd() As Double, aInc() As Double, aAzm() As Double
-    Dim aTvd() As Double, aNS() As Double, aEW() As Double
+    Dim aTvd() As Double, ans() As Double, aEW() As Double
     Dim aDls() As Double, aBld() As Double, aTrn() As Double
     Dim aAnn() As String
     ReDim aMd(0 To 80): ReDim aInc(0 To 80): ReDim aAzm(0 To 80)
-    ReDim aTvd(0 To 80): ReDim aNS(0 To 80): ReDim aEW(0 To 80)
+    ReDim aTvd(0 To 80): ReDim ans(0 To 80): ReDim aEW(0 To 80)
     ReDim aDls(0 To 80): ReDim aBld(0 To 80): ReDim aTrn(0 To 80)
     ReDim aAnn(0 To 80)
 
@@ -3048,7 +3048,7 @@ Private Sub BuildPlanSectionsFromSurveyComments()
         If cInc > 0 Then aInc(n) = val(surv.Cells(r, cInc).Value2 & "")
         If cAzi > 0 Then aAzm(n) = val(surv.Cells(r, cAzi).Value2 & "")
         If cTvd > 0 Then aTvd(n) = val(surv.Cells(r, cTvd).Value2 & "")
-        If cNS > 0 Then aNS(n) = val(surv.Cells(r, cNS).Value2 & "")
+        If cNS > 0 Then ans(n) = val(surv.Cells(r, cNS).Value2 & "")
         If cEW > 0 Then aEW(n) = val(surv.Cells(r, cEW).Value2 & "")
         If cDls > 0 Then aDls(n) = val(surv.Cells(r, cDls).Value2 & "")
         aAnn(n) = ann
@@ -3060,7 +3060,7 @@ NextCom:
     Dim aAuto() As String
     ReDim aAuto(0 To n - 1)
     NamePlanSectionTargets n, aMd, aInc, aAzm, aDls, aBld, aTrn, aAnn, aAuto
-    WritePlanSecSheet CStr(surv.Cells(1, 1).Value), n, aMd, aInc, aAzm, aTvd, aNS, aEW, aDls, aBld, aTrn, aAnn, aAuto
+    WritePlanSecSheet CStr(surv.Cells(1, 1).Value), n, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn, aAuto
 End Sub
 
 ' ================================================================================
@@ -4054,6 +4054,7 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
 
 
 

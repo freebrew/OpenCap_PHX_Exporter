@@ -141,6 +141,57 @@ Private Function DoglegBelow(ByVal dls As Double, ByVal course As Double, _
     End If
 End Function
 
+' ISCWSA constant-TF fill-in (ebook §8.2):
+'   ΔInc = dB · cos(TF)
+'   ΔAzm = dB · sin(TF) / sin(Inc)
+' dB is the same DoglegBelow (seen yield) used by INC@BIT.
+' Inc < 5° (magnetic): /sin(I) is unstable — planar walk dB·sin(TF) only.
+Private Function AzmWalkDeg(ByVal survInc As Double, ByVal dB As Double, ByVal tf As Double) As Double
+    Dim sI As Double
+    If Abs(dB) < EPS Then
+        AzmWalkDeg = 0#
+        Exit Function
+    End If
+    sI = Sin(Deg2Rad(survInc))
+    If survInc >= 5# And Abs(sI) > EPS Then
+        AzmWalkDeg = dB * Sin(Deg2Rad(tf)) / sI
+    Else
+        AzmWalkDeg = dB * Sin(Deg2Rad(tf))
+    End If
+End Function
+
+' Last surveyed course TF: N = degrees, O = L / R (HS / Mag → no walk).
+Private Function SignedSeenTf(ByVal seenTf As Variant, ByVal seenLR As Variant) As Double
+    Dim n As Double, lr As String
+    If Not HasNum(seenTf) Then
+        SignedSeenTf = 0#
+        Exit Function
+    End If
+    n = Abs(CDbl(seenTf))
+    lr = UCase$(Trim$(CStr(seenLR & "")))
+    If lr = "L" Then
+        SignedSeenTf = -n
+    ElseIf lr = "R" Then
+        SignedSeenTf = n
+    Else
+        SignedSeenTf = 0#
+    End If
+End Function
+
+' User TF (U/AK) when it is a real walk angle; otherwise last-course N/O.
+' N/O arrive as arguments so Excel owns the recalc dependency — never read
+' via Application.Caller (no dependency edge → stale AZM on recalc).
+Private Function ResolveWalkTf(ByVal tfDeg As Variant, _
+                               ByVal seenTf As Variant, ByVal seenLR As Variant) As Double
+    Dim tf As Double
+    tf = SafeNum(tfDeg)
+    If Abs(tf) >= 0.05 Then
+        ResolveWalkTf = tf
+    Else
+        ResolveWalkTf = SignedSeenTf(seenTf, seenLR)
+    End If
+End Function
+
 Public Function ProjIncAtBit(ByVal survInc As Variant, ByVal dls As Variant, _
                              ByVal course As Variant, ByVal mSeen As Variant, _
                              ByVal mBelow As Variant, ByVal tfDeg As Variant) As Variant
@@ -161,25 +212,20 @@ End Function
 Public Function ProjAzmAtBit(ByVal survInc As Variant, ByVal survAzm As Variant, _
                              ByVal dls As Variant, ByVal course As Variant, _
                              ByVal mSeen As Variant, ByVal mBelow As Variant, _
-                             ByVal tfDeg As Variant) As Variant
-    Dim ca As Double, dg As Double, mb As Double, tf As Double
-    Dim dbWalk As Double, aB As Double
+                             ByVal tfDeg As Variant, _
+                             Optional ByVal seenTf As Variant, _
+                             Optional ByVal seenLR As Variant) As Variant
+    Dim ci As Double, ca As Double, dg As Double, co As Double, ms As Double, mb As Double, tf As Double
+    Dim dB As Double
     On Error GoTo Fail
     If Not HasNum(survInc) Or Not HasNum(survAzm) Then ProjAzmAtBit = "": Exit Function
+    ci = CDbl(survInc)
     ca = CDbl(survAzm)
-    dg = SafeNum(dls)
-    mb = SafeNum(mBelow): tf = SafeNum(tfDeg)
-
-    ' Walk/AZM: slide MD below the survey at DLS/30m × sin(user TF).
-    ' (INC@BIT still uses DoglegBelow / motor-yield scaling separately.)
-    If mb > EPS And dg > EPS Then
-        dbWalk = dg * mb / 30#
-    Else
-        dbWalk = 0#
-    End If
-    ' No /sin(I) on walk — matches field ΔAzm (e.g. ~33°) for required TF.
-    aB = Wrap360(ca + dbWalk * Sin(Deg2Rad(tf)))
-    ProjAzmAtBit = aB
+    dg = SafeNum(dls): co = SafeNum(course): ms = SafeNum(mSeen)
+    mb = SafeNum(mBelow)
+    tf = ResolveWalkTf(tfDeg, seenTf, seenLR)
+    dB = DoglegBelow(dg, co, ms, mb)
+    ProjAzmAtBit = Wrap360(ca + AzmWalkDeg(ci, dB, tf))
     Exit Function
 Fail:
     ProjAzmAtBit = CVErr(xlErrNum)
@@ -934,6 +980,7 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
 Fail:
     ProjSlideMetersBetween = CVErr(xlErrNum)
 End Function
+
 
 
 

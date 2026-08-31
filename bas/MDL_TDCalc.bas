@@ -588,4 +588,3 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
 End Sub
 
 
-
