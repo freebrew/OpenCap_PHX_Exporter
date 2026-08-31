@@ -148,7 +148,7 @@ Same dogleg-below as each other: seen DLS scaled by this stand’s course, metre
 ΔAzm = dB × sin(TF) / sin(Inc)     (Inc ≥ 5°)
 ```
 
-TF is column **U** (what they ran this stand). If U is blank or 0, AZM walk uses the last surveyed course TF (**N**, left/right from **O**) — previous performance. Near-vertical (Inc < 5°) skips `/sin(I)` so walk does not blow up.
+INC uses column **U** (what they ran this stand). The AZM walk is **calibrated by demonstrated results**: N/O (effective TF back-computed from the last surveyed course) caps the dial TF when both agree in direction — the hole delivers less turn than the dial says (reactive torque / rotary dilution; a stated 30R has measured 5–27R effective on this well), and projecting the dial literally overshot the walk up to 10°/stand at low inc, flipping AT to the wrong side of the target. Dial blank/0 → N/O alone (rotary stand); N/O opposite sign or blank → dial (demonstrated TF is noise). Near-vertical (Inc < 5°) skips `/sin(I)` so walk does not blow up.
 
 ### Toolface (AT)
 
@@ -255,6 +255,7 @@ PHX_FieldCap/
 
 ### Slide Sheet — 2026-08-30
 
+- **AZM-at-bit walk calibrated by results** — X projects the walk with the smaller of dial TF (U) vs demonstrated effective TF (N/O, same sign) instead of trusting the dial literally. Measured on this well: mean walk error 2.48° → 2.05°/stand, worst-case 9.9° → 5.4°, and the AT recommendation at MD 1670.49 lands on the correct side of the target (R13, was L26 from a bit-azm projection 10° hot).
 - **Required toolface (AT) matches Well Seeker** — spherical toolface (`Atan2(sinI2·cosI1·cosΔA − sinI1·cosI2, sinI2·sinΔA)`) instead of the flat inc-rate/azm-rate `Atan2`, aimed at the nearest full-plan station 15–45 m ahead of the bit instead of the distant named target. In the 1600–1806 build this turns useless single-digit calls (R8) into the R27–R28 the driller actually had to slide. Magnetic mode now shows the push bearing (`azm_bit + TF`).
 - **Proximity gauge frame** — GRAVITY UP/DN·LT/RT now use Well Seeker's perpendicular high-side/right decomposition (matches office "distance from plan" exactly; verified UP 2.25 / LT 1.48 vs WS 2.25 / 1.51). With the sail waypoint corridor active, UP/DN stays true TVD so dial and green band agree with the geo window.
 - **Corridor E-axis scale** — floor numbers moved from the back-wall joint to the open front edge.

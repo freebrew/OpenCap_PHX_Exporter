@@ -181,17 +181,31 @@ Private Function SignedSeenTf(ByVal seenTf As Variant, ByVal seenLR As Variant) 
     End If
 End Function
 
-' User TF (U/AK) when it is a real walk angle; otherwise last-course N/O.
+' Walk TF for the azm-at-bit projection, calibrated by demonstrated results.
+' The dial TF (U/AK) is what the DD set; N/O is the effective TF the hole
+' actually carved last course (reactive torque + rotary dilution eat the
+' difference — a stated 30R has delivered ~5-27R effective on this well).
+' Projecting the dial literally overshot the walk up to 10 deg/stand at low
+' inc (/sin(I) magnifies), flipping the AT recommendation to the wrong side.
+'   dial blank/0  -> demonstrated N/O (rotary stand, old behavior)
+'   same sign     -> smaller magnitude of dial vs demonstrated (never project
+'                    more turn than the hole has shown it delivers)
+'   opposite sign / no N -> dial (demonstrated TF is rotary noise; trust intent)
 ' N/O arrive as arguments so Excel owns the recalc dependency — never read
 ' via Application.Caller (no dependency edge → stale AZM on recalc).
 Private Function ResolveWalkTf(ByVal tfDeg As Variant, _
                                ByVal seenTf As Variant, ByVal seenLR As Variant) As Double
-    Dim tf As Double
-    tf = SafeNum(tfDeg)
-    If Abs(tf) >= 0.05 Then
-        ResolveWalkTf = tf
+    Dim tfD As Double, tfE As Double
+    tfD = SafeNum(tfDeg)
+    tfE = SignedSeenTf(seenTf, seenLR)
+    If Abs(tfD) < 0.05 Then
+        ResolveWalkTf = tfE
+    ElseIf Abs(tfE) < 0.05 Then
+        ResolveWalkTf = tfD
+    ElseIf tfD * tfE > 0# And Abs(tfE) < Abs(tfD) Then
+        ResolveWalkTf = tfE
     Else
-        ResolveWalkTf = SignedSeenTf(seenTf, seenLR)
+        ResolveWalkTf = tfD
     End If
 End Function
 
