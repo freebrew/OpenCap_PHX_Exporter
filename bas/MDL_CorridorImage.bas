@@ -1275,13 +1275,13 @@ Private Sub DrawShaftProfile()
 
     Dim hxMin As Double, hxMax As Double, hyMin As Double, hyMax As Double
     Dim hx As Double, hy As Double
-    Dim cn As Double, ce As Double
+    Dim cN As Double, cE As Double
     hxMin = 1E+30: hxMax = -1E+30: hyMin = 1E+30: hyMax = -1E+30
     For i = 0 To 3
-        If i < 2 Then cn = nMin Else cn = nMax
-        If (i Mod 2) = 0 Then ce = eMin Else ce = eMax
-        hx = ce * 0.88 + cn * 0.52
-        hy = -cn * 0.4 + ce * 0.18
+        If i < 2 Then cN = nMin Else cN = nMax
+        If (i Mod 2) = 0 Then cE = eMin Else cE = eMax
+        hx = cE * 0.88 + cN * 0.52
+        hy = -cN * 0.4 + cE * 0.18
         If hx < hxMin Then hxMin = hx
         If hx > hxMax Then hxMax = hx
         If hy < hyMin Then hyMin = hy
@@ -1330,7 +1330,9 @@ Private Sub DrawShaftProfile()
     If g < eMin Then g = g + stepE
     Do While g <= eMax + 0.01
         Ln ShX(nMin, g), ShY(nMin, g, vMax), ShX(nMax, g), ShY(nMax, g, vMax), gridClr, 0.5, msoLineSolid
-        Tx ShX(nMax, g) + 3, ShY(nMax, g, vMax) + 4, Format$(g + frmE, "0"), 6.5, H("5C6770"), "start"
+        ' E-axis numbers on the open FRONT edge of the floor (n = nMin), not at
+        ' the back-wall joint where they read as part of the back scale.
+        Tx ShX(nMin, g) - 3, ShY(nMin, g, vMax) + 5, Format$(g + frmE, "0"), 6.5, H("5C6770"), "end"
         g = g + stepE
     Loop
 
@@ -1458,15 +1460,15 @@ Private Sub CollectDayHole(ByVal day0 As Double, ByVal day1 As Double, _
         ByRef hN() As Double, ByRef hE() As Double, ByRef hV() As Double, _
         ByRef nH As Long)
     Dim i As Long, mdLo As Double, mdHi As Double
-    Dim tN As Double, tE As Double, tV As Double
+    Dim tN As Double, tE As Double, tv As Double
     nH = 0
     If mACount < 2 Then Exit Sub
     mdLo = day0: mdHi = day1
     If mdHi < mSvyMD Then mdHi = mSvyMD
     ReDim hN(0 To mACount + 1): ReDim hE(0 To mACount + 1): ReDim hV(0 To mACount + 1)
 
-    If HoleXyzAtMd(mdLo, tN, tE, tV) Then
-        hN(0) = tN: hE(0) = tE: hV(0) = tV
+    If HoleXyzAtMd(mdLo, tN, tE, tv) Then
+        hN(0) = tN: hE(0) = tE: hV(0) = tv
         nH = 1
     End If
     For i = 0 To mACount - 1
@@ -1630,7 +1632,7 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
         ByVal nPts As Long)
     Dim i As Long, a As Double
     Dim incR As Double, aziR As Double
-    Dim tN As Double, tE As Double, tV As Double
+    Dim tN As Double, tE As Double, tv As Double
     Dim hN As Double, hE As Double, hV As Double
     Dim uN As Double, uE As Double, uV As Double
     Dim wN As Double, wE As Double, wV As Double
@@ -1650,22 +1652,22 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
     sV = mShVS: If sV < 0.001 Then sV = 0.001
     tN = Cos(aziR) * Sin(incR) * sH
     tE = Sin(aziR) * Sin(incR) * sH
-    tV = Cos(incR) * sV
-    mag = Sqr(tN * tN + tE * tE + tV * tV)
+    tv = Cos(incR) * sV
+    mag = Sqr(tN * tN + tE * tE + tv * tv)
     If mag < 0.0001 Then
-        tN = 0#: tE = 0#: tV = 1#
+        tN = 0#: tE = 0#: tv = 1#
     Else
-        tN = tN / mag: tE = tE / mag: tV = tV / mag
+        tN = tN / mag: tE = tE / mag: tv = tv / mag
     End If
 
     ' Helper not parallel to the tangent: vertical unless the hole is near vertical.
-    If Abs(tV) < 0.95 Then
+    If Abs(tv) < 0.95 Then
         hN = 0#: hE = 0#: hV = 1#
     Else
         hN = 1#: hE = 0#: hV = 0#
     End If
-    uN = tE * hV - tV * hE
-    uE = tV * hN - tN * hV
+    uN = tE * hV - tv * hE
+    uE = tv * hN - tN * hV
     uV = tN * hE - tE * hN
     mag = Sqr(uN * uN + uE * uE + uV * uV)
     If mag < 0.0001 Then
@@ -1673,8 +1675,8 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
     Else
         uN = uN / mag: uE = uE / mag: uV = uV / mag
     End If
-    wN = tE * uV - tV * uE
-    wE = tV * uN - tN * uV
+    wN = tE * uV - tv * uE
+    wE = tv * uN - tN * uV
     wV = tN * uE - tE * uN
 
     For i = 0 To nPts - 1
@@ -2860,6 +2862,7 @@ Private Function cellText(ws As Worksheet, ByVal addr As String) As String
     ' the sheet prints its own trailing colons on labels; the panel adds its own layout
     If right$(cellText, 1) = ":" Then cellText = Left$(cellText, Len(cellText) - 1)
 End Function
+
 
 
 
