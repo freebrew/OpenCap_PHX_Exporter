@@ -12,6 +12,9 @@ Private Const EPS As Double = 0.0000001
 Private Const MIN_AIM_MD As Double = 10#
 Private Const MIN_AIM_TVD As Double = 5#
 Private Const MIN_AIM_DINC As Double = 0.5
+' Required-TF aim: nearest full-plan station at least this far past the bit
+' (half the 30 m plan grid, so the aim lands 15-45 m ahead).
+Private Const TF_LOOKAHEAD_MIN As Double = 15#
 
 ' --- angle helpers -------------------------------------------------------------
 
@@ -778,14 +781,23 @@ End Function
 '
 ' 1) Project INC/AZM at bit from the survey using the USER toolface (tfText),
 '    so the bit attitude reflects the slide already drilled below the survey.
-' 2) From that bit attitude to the next target:
-'       dMD     = targetMD - bitMD
-'       incPerM = (targetINC - bitINC) / dMD
-'       azmPerM = Wrap180(targetAZM - bitAZM) / dMD
-'       TF      = Atan2(incPerM, azmPerM)   ' Excel Atan2(x,y); 0=HS, ±90=walk
+' 2) Aim at the NEAR-TERM PLAN ATTITUDE: the nearest _OC_Survey plan station
+'    at least TF_LOOKAHEAD_MIN past the bit. Tracking the plan means matching
+'    its attitude station by station — azimuth gets corrected now, where
+'    turning is cheap — NOT the lazy great-circle to a distant named target
+'    (that let azimuth converge only at the end and recommended R8 in a build
+'    the driller had to slide at 30R). Named targets are only the fallback
+'    when the plan sheet is empty.
+' 3) From bit attitude to aim attitude, use the industry-standard
+'    (Well Seeker) spherical toolface — the angle from high side to the
+'    dogleg plane that carries (incBit, azmBit) onto (aimInc, aimAzm):
+'       TF = Atan2( sinI2·cosI1·cosΔA − sinI1·cosI2 ,  sinI2·sinΔA )
+'    (ToolfaceBetweenDeg). A degree of azimuth walk only moves the bit
+'    sin(Inc) as far as a degree of build, so raw Atan2(ΔInc, ΔAzm) is wrong —
+'    it over-weights the turn (~2.4x at Inc 25°) and disagreed with the office.
 '
 ' Display: Gravity → R## / L## / 0 ; Magnetic (low inc) → ###M
-' Required TF from bit → next target, using projected Inc@Bit / Azm@Bit
+' Required TF from bit → aim, using projected Inc@Bit / Azm@Bit
 ' (those already embed the user toolface via ProjIncAtBit / ProjAzmAtBit).
 Public Function ProjRequiredTf(ByVal bitMD As Variant, _
                                ByVal incAtBit As Variant, ByVal azmAtBit As Variant, _
@@ -796,8 +808,7 @@ Public Function ProjRequiredTf(ByVal bitMD As Variant, _
     Dim bm As Double, ib As Double, aB As Double
     Dim m() As Double, i() As Double, a() As Double, tv() As Double
     Dim n As Long, k As Long
-    Dim dMd As Double, dInc As Double, dAzm As Double
-    Dim incPerM As Double, azmPerM As Double, reqTf As Double
+    Dim reqTf As Double
     On Error GoTo Fail
 
     If Not HasNum(bitMD) Or Not HasNum(incAtBit) Or Not HasNum(azmAtBit) Then
@@ -807,48 +818,56 @@ Public Function ProjRequiredTf(ByVal bitMD As Variant, _
     ib = CDbl(incAtBit)
     aB = CDbl(azmAtBit)
 
-    n = LoadTargets(tgtMd, tgtInc, tgtAzm, tgtTvd, m, i, a, tv)
-    If n < 1 Then
-        ProjRequiredTf = "": Exit Function
+    ' Preferred aim: nearest full-plan station past bit + lookahead.
+    Dim pMD() As Double, pInc() As Double, pAzi() As Double
+    Dim pTvd() As Double, pNS() As Double, pEW() As Double
+    Dim np As Long, idx As Long
+    Dim ti As Double, ta As Double, haveAim As Boolean
+    haveAim = False
+    np = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
+    If np >= 2 Then
+        idx = 0
+        Do While idx < np - 1 And pMD(idx) < bm + TF_LOOKAHEAD_MIN
+            idx = idx + 1
+        Loop
+        ti = pInc(idx)
+        ta = pAzi(idx)
+        haveAim = True
     End If
 
-    k = FirstAimIndex(m, i, tv, n, bm, ib, tvdBit)
-    If k > n Then
-        ProjRequiredTf = "": Exit Function
-    End If
-
-    dMd = m(k) - bm
-    dInc = i(k) - ib
-    dAzm = Wrap180(a(k) - aB)
-    ' TF is Atan2(ΔI, ΔA); sign of remaining MD must not flip it.
-    If dMd <= EPS Then
-        If Abs(dInc) < EPS And Abs(dAzm) < EPS Then
-            reqTf = 0#
-        Else
-            reqTf = Rad2Deg(Application.WorksheetFunction.Atan2(dInc, dAzm))
+    ' Fallback: next named plan target (old behavior) if no plan is loaded.
+    If Not haveAim Then
+        n = LoadTargets(tgtMd, tgtInc, tgtAzm, tgtTvd, m, i, a, tv)
+        If n < 1 Then
+            ProjRequiredTf = "": Exit Function
         End If
-        ProjRequiredTf = FormatRequiredTfDisplay(reqTf, ib, thresholdDeg)
-        Exit Function
+        k = FirstAimIndex(m, i, tv, n, bm, ib, tvdBit)
+        If k > n Then
+            ProjRequiredTf = "": Exit Function
+        End If
+        ti = i(k)
+        ta = a(k)
     End If
 
-    incPerM = dInc / dMd
-    azmPerM = dAzm / dMd
-
-    If Abs(incPerM) < EPS And Abs(azmPerM) < EPS Then
-        reqTf = 0#
+    ' Spherical TF needs no MD: it is the direction of the dogleg plane from
+    ' bit attitude to aim attitude, exactly what Well Seeker tabulates.
+    If DoglegAngleDeg(ib, aB, ti, ta) < 0.000001 Then
+        reqTf = 0#   ' already pointed at the aim attitude
     Else
-        ' Excel Atan2(x, y): x = build rate, y = walk rate → 0° highside when pure build
-        reqTf = Rad2Deg(Application.WorksheetFunction.Atan2(incPerM, azmPerM))
+        reqTf = ToolfaceBetweenDeg(ib, aB, ti, ta)
     End If
 
-    ProjRequiredTf = FormatRequiredTfDisplay(reqTf, ib, thresholdDeg)
+    ProjRequiredTf = FormatRequiredTfDisplay(reqTf, ib, aB, thresholdDeg)
     Exit Function
 Fail:
     ProjRequiredTf = CVErr(xlErrNum)
 End Function
 
 ' Gravity highside: R/L/0. Magnetic: 0-359M (Wrap360 — left of north is e.g. 348M, not "Left").
+' Magnetic TF = bearing of the push: high side's horizontal projection points
+' along the hole azimuth, so bearing = azmBit + highside TF.
 Private Function FormatRequiredTfDisplay(ByVal tfDeg As Double, ByVal incBit As Double, _
+                                         ByVal azmBit As Double, _
                                          ByVal thresholdDeg As Variant) As String
     Dim mode As Variant
     Dim a As Double
@@ -856,7 +875,7 @@ Private Function FormatRequiredTfDisplay(ByVal tfDeg As Double, ByVal incBit As 
     If isError(mode) Then mode = "Gravity"
 
     If CStr(mode) = "Magnetic" Then
-        a = Wrap360(tfDeg)
+        a = Wrap360(azmBit + tfDeg)
         FormatRequiredTfDisplay = Format$(Application.WorksheetFunction.Round(a, 0), "0") & "M"
     Else
         a = Application.WorksheetFunction.Round(Wrap180(tfDeg), 0)

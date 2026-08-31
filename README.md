@@ -62,7 +62,7 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 - **OpenCap Setup** — import FieldCap CSVs from `OpenCap/`, job/crew/contacts dashboard, plan & anti-collision import.
 - **Crew manifest** — six tight rows in the same Setup block (J3:R10); title shows `6+N` when OpenCap crew is longer. Role dropdown remains DD/MWD.
 - **Import Plan** — COMPASS well-plan **PDF** (Plan Sections / SECTION DETAILS). Names targets **KOP / TANGENT / SOT / EOT / HEEL / TD** (Y2:Y5 dropdown to override). All sections stay on hidden `_OC_PlanSec`; Slidesheet `T2:Y5` shows four at a time and slides as the bit passes the highlighted next target. Sibling `.csv` next to the PDF still loads the dense plan surveys into `_OC_Survey` (gauge / Planned TD); without a CSV, the sparse section stations are used.
-- **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`.
+- **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`. GRAVITY frame uses the **Well Seeker convention** (perpendicular offset from the plan line, high-side/right decomposition) so UP/DN·LT/RT match office software; when the sail waypoint corridor is active, UP/DN switches to true TVD so the dial agrees with the geo window.
 - **Daily report PNG** (`RenderCorridorPng`) — EMAIL attaches `daily_report.png` as a visible file and inlines a CID copy under the Data table. No daily report PDF is attached. Paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** three-wall shadow box (back, left, floor) — **plan** in the window, **as-drilled last 24 h** (tight camera on the report day; a long/stale 00:00 day zooms to the last ~150 m + look-ahead), named targets on the plan with a ring **perpendicular to the wellbore**, shadows on all three walls, GN arrow. No min-curve and no surface-to-TD. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands.
 - **Position of Wellbore** — R/L from plan, above/below plan (gauge), distance from current geo target.
 - **Pipe tally, day roll, costs form, TD calc, sheet protect** — supporting field ops macros.
@@ -91,7 +91,7 @@ Columns (data rows 13:305):
 | **Y** | Comment: `Sliding <m> @ <TF>` … `BURR n.nn` |
 | **Z** | Leftover rotate: `C − instructed slide` |
 
-`T2:Y5` is a **display window** only. BURR / AS / AT read the **full** named list on `_OC_PlanSec` (`ProjTargets_MD/INC/AZM/TVD`). First KOP / TANGENT MD is `ProjBuildStartMd` — that is the gate for AR/AS/AT. **Do not use `$U$2` as a build-start gate.** U2 is whatever target the four-row window currently shows (often SOT after the window has slid).
+`T2:Y5` is a **display window** only. BURR / AS read the **full** named list on `_OC_PlanSec` (`ProjTargets_MD/INC/AZM/TVD`); AT aims at the **full plan** on `_OC_Survey` (named list is only the fallback). First KOP / TANGENT MD is `ProjBuildStartMd` — that is the gate for AR/AS/AT. **Do not use `$U$2` as a build-start gate.** U2 is whatever target the four-row window currently shows (often SOT after the window has slid).
 
 ### Aim
 
@@ -152,7 +152,15 @@ TF is column **U** (what they ran this stand). If U is blank or 0, AZM walk uses
 
 ### Toolface (AT)
 
-Required TF is the gravity toolface from bit attitude to the aim (`Atan2` of inc-rate vs azm-rate). Comments show that TF (`R10`, `L9`, …). Magnetic vs gravity mode follows bit inc (default 5°).
+Required TF aims at the **nearest full-plan station** at least 15 m past the bit (`_OC_Survey`, 30 m grid → aim lands 15–45 m ahead) — tracking the plan means matching its attitude station by station, correcting azimuth **now** where turning is cheap. Never the great-circle to a distant named target: that let azimuth converge lazily at the end and said R8 in a build the driller had to slide at 30R. Named targets are only the fallback when no plan is imported.
+
+From bit attitude to aim attitude, the TF is the industry-standard (Well Seeker) spherical toolface:
+
+```
+TF = Atan2( sinI2·cosI1·cosΔA − sinI1·cosI2 ,  sinI2·sinΔA )
+```
+
+A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of build, so a raw `Atan2(ΔInc, ΔAzm)` over-weights the turn (~2.4× at Inc 25°) — verified against the Well Seeker plan TF column to ±0.1°. Comments show that TF (`R10`, `L9`, …; ±90 = pure turn). Magnetic vs gravity mode follows bit inc (default 5°); magnetic shows the **bearing of the push** (`azm_bit + TF`, e.g. `20M`).
 
 ### What we do not do
 
@@ -247,6 +255,10 @@ PHX_FieldCap/
 
 ### Slide Sheet — 2026-08-30
 
+- **Required toolface (AT) matches Well Seeker** — spherical toolface (`Atan2(sinI2·cosI1·cosΔA − sinI1·cosI2, sinI2·sinΔA)`) instead of the flat inc-rate/azm-rate `Atan2`, aimed at the nearest full-plan station 15–45 m ahead of the bit instead of the distant named target. In the 1600–1806 build this turns useless single-digit calls (R8) into the R27–R28 the driller actually had to slide. Magnetic mode now shows the push bearing (`azm_bit + TF`).
+- **Proximity gauge frame** — GRAVITY UP/DN·LT/RT now use Well Seeker's perpendicular high-side/right decomposition (matches office "distance from plan" exactly; verified UP 2.25 / LT 1.48 vs WS 2.25 / 1.51). With the sail waypoint corridor active, UP/DN stays true TVD so dial and green band agree with the geo window.
+- **Corridor E-axis scale** — floor numbers moved from the back-wall joint to the open front edge.
+- **Mirror guard** — `_dual_mirror_demo_to_field.ps1` fails loudly when Field opens read-only (open workbook) instead of silently not saving.
 - **BURR / slide / ROT** — Aim stays on TANGENT while inc is still short (do not skip to SOT on leftover MD). BURR uses real dMD or **this stand’s C**, never a 10 m floor. Comment slide = `AS/|cos(TF)|` hard-capped at C (2 dp, no 0.25 snap). Z = C − instructed slide (0 if full-course). Gate AR/AS/AT on `ProjBuildStartMd`, not `$U$2`.
 - **24 h shadow box** — Corridor VERTICAL/BUILD shows plan + last 24 h hole, three-wall shadows, targets on the plan with a ring perpendicular to the wellbore, camera on the report footage (not surface-to-TD). Sample: `docs/corridor_24h.png`.
 - **Comment yellow** — Y/Z use one faded yellow (`RGB(255,255,204)`).

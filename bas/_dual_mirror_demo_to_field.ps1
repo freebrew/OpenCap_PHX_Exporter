@@ -114,6 +114,9 @@ function Open-WithRetry([object]$Excel, [string]$Path, [bool]$ReadOnly) {
 try {
     $wbDemo = Open-WithRetry $xl $tmpDemo $true
     $wbField = Open-WithRetry $xl $fieldPath $false
+    # If Field is open in the user's Excel it opens read-only here and Save is
+    # a silent no-op that looks like a successful mirror. Fail loudly instead.
+    if ($wbField.ReadOnly) { throw "Field opened READ-ONLY (close it in Excel and re-run the mirror)" }
     $demoProj = $wbDemo.VBProject
     $fieldProj = $wbField.VBProject
 

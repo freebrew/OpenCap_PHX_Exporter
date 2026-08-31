@@ -12,8 +12,15 @@ Option Explicit
 '  to the rim) so outside-circle markers can still sit in green. MAG: no band.
 '
 '  Frames (plan = origin):
-'    GRAVITY  (Inc >= 5 deg)
-'      Plan at same MD. Y = planTVD - actualTVD (+ = UP). X = LT/RT of plan Azm.
+'    GRAVITY  (Inc >= 5 deg), no sail corridor active
+'      Well Seeker convention: perpendicular offset from the plan line,
+'      decomposed in the plan borehole frame at the same MD.
+'      Y = high-side component (+ = UP), X = right-side component (+ = RT).
+'      (Along-tangent lead/lag is projected out, so numbers match the office
+'      software's "distance from plan" exactly.)
+'    GRAVITY, sail-calculator mode (waypoint corridor active at this MD)
+'      Y = planTVD - actualTVD (+ = UP): the geo window is TVD-defined, so the
+'      dial and green band speak true TVD while steering the corridor.
 '    MAGNETIC (Inc <  5 deg)
 '      Plan foot at actual TVD. Y = ahead/back, X = right/left; PRP = hypot.
 '
@@ -357,13 +364,17 @@ End Function
 
 Private Sub FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Double, _
         ByVal dN As Double, ByVal dE As Double, ByVal dTvdUp As Double, _
-        ByRef x As Double, ByRef y As Double)
+        ByRef x As Double, ByRef y As Double, _
+        Optional ByVal planInc As Double = 90#)
     Dim right As Double, along As Double
     right = dE * Cos(Deg2Rad(planAzi)) - dN * Sin(Deg2Rad(planAzi))
     along = dN * Cos(Deg2Rad(planAzi)) + dE * Sin(Deg2Rad(planAzi))
     If gravityMode Then
+        ' Perpendicular high-side component (Well Seeker "distance from plan"):
+        ' project the offset onto the plan high-side axis at plan inclination.
+        ' planInc = 90 (default) degenerates to y = dTvdUp, the old TVD delta.
         x = right
-        y = dTvdUp
+        y = along * Cos(Deg2Rad(planInc)) + dTvdUp * Sin(Deg2Rad(planInc))
     Else
         x = right
         y = along
@@ -429,8 +440,21 @@ Private Sub RenderPlanGaugeCore()
     dE = se - plE
     dTvdUp = plV - actTvd
 
+    ' Sail-calculator mode: the waypoint geo corridor is active. The window is
+    ' TVD-defined, so UP/DN stays a true TVD delta there (frameInc 90 makes the
+    ' perpendicular frame degenerate to it). Outside the corridor, use the
+    ' Well Seeker perpendicular high-side frame so numbers match the office.
+    Dim halfW As Double: halfW = WaypointHalfWidth(ws)
+    Dim wpTvd As Double
+    Dim sailMode As Boolean: sailMode = False
+    If gravityMode And halfW > 0# Then
+        If WaypointTvdAtMd(ws, sMD, wpTvd) Then sailMode = True
+    End If
+    Dim frameInc As Double
+    If sailMode Then frameInc = 90# Else frameInc = plInc
+
     Dim ax As Double, ay As Double
-    FrameComponents gravityMode, plAzi, dN, dE, dTvdUp, ax, ay
+    FrameComponents gravityMode, plAzi, dN, dE, dTvdUp, ax, ay, frameInc
     Dim showPtb As Boolean: showPtb = False
     Dim bx As Double, by As Double
     Dim tarStart As Variant: tarStart = ws.Range("U2").Value2
@@ -458,33 +482,34 @@ Private Sub RenderPlanGaugeCore()
             bDN = (sn + stepN) - pbN
             bDE = (se + stepE) - pbE
             bUp = pbV - bitTvd
-            FrameComponents gravityMode, pbAzi, bDN, bDE, bUp, bx, by
+            ' PTB rides the same frame as the survey marker (sail = TVD).
+            Dim frameIncB As Double
+            If sailMode Then frameIncB = 90# Else frameIncB = pbInc
+            FrameComponents gravityMode, pbAzi, bDN, bDE, bUp, bx, by, frameIncB
             showPtb = True
         End If
     End If
-    Dim halfW As Double: halfW = WaypointHalfWidth(ws)
     Dim hasBand As Boolean: hasBand = False
     Dim yTop As Double, yBot As Double
     Dim scaleS As Double: scaleS = 0#
-    Dim wpTvd As Double
 
-    If gravityMode And halfW > 0# Then
-        If WaypointTvdAtMd(ws, sMD, wpTvd) Then
-            Dim yWp As Double
-            yWp = plV - wpTvd
-            yTop = yWp + halfW
-            yBot = yWp - halfW
-            hasBand = True
-            ' Fit corridor in the circle (band may sit off plan centre).
-            scaleS = halfW
-            If Abs(yTop) > scaleS Then scaleS = Abs(yTop)
-            If Abs(yBot) > scaleS Then scaleS = Abs(yBot)
-            ' Do NOT pin band edges to the rim — that erased the red OUT caps and
-            ' made a top-of-window breach look green. Leave margin so green is
-            ' always surrounded by red (above + below) inside the dial.
-            scaleS = scaleS * 1.35
-            If scaleS < 0.5 Then scaleS = 0.5
-        End If
+    If sailMode Then
+        ' Band only exists in sail mode, where the frame is pure TVD, so the
+        ' corridor edges are plain TVD offsets from plan.
+        Dim yWp As Double
+        yWp = plV - wpTvd
+        yTop = yWp + halfW
+        yBot = yWp - halfW
+        hasBand = True
+        ' Fit corridor in the circle (band may sit off plan centre).
+        scaleS = halfW
+        If Abs(yTop) > scaleS Then scaleS = Abs(yTop)
+        If Abs(yBot) > scaleS Then scaleS = Abs(yBot)
+        ' Do NOT pin band edges to the rim — that erased the red OUT caps and
+        ' made a top-of-window breach look green. Leave margin so green is
+        ' always surrounded by red (above + below) inside the dial.
+        scaleS = scaleS * 1.35
+        If scaleS < 0.5 Then scaleS = 0.5
     End If
 
     If Not hasBand Then
@@ -899,8 +924,9 @@ End Sub
 
 Public Sub PG_FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Double, _
                               ByVal dN As Double, ByVal dE As Double, ByVal dTvdUp As Double, _
-                              ByRef x As Double, ByRef y As Double)
-    FrameComponents gravityMode, planAzi, dN, dE, dTvdUp, x, y
+                              ByRef x As Double, ByRef y As Double, _
+                              Optional ByVal planInc As Double = 90#)
+    FrameComponents gravityMode, planAzi, dN, dE, dTvdUp, x, y, planInc
 End Sub
 
 Public Function PG_WaypointTvdAtMd(ws As Worksheet, ByVal md As Double, _
