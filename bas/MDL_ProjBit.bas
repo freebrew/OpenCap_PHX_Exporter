@@ -189,12 +189,18 @@ End Function
 
 ' --- public UDFs ---------------------------------------------------------------
 
-' Parse toolface text: 190M (magnetic deg), R/L highside, -30 left, 30 right
+' Parse toolface text from column U (and AK).
+'   140R / R140  → +140   (right)
+'   140L / L140  → -140   (left)
+'   -140 / 140   → signed degrees (minus = left)
+'   190M         → magnetic degrees
+'   R / HS       → 0      L / LS → 180
 Public Function ProjParseTF(ByVal tfText As Variant) As Variant
-    Dim s As String, n As Double
+    Dim s As String, n As Double, tail As String, head As String
     On Error GoTo Fail
     If isError(tfText) Then ProjParseTF = CVErr(xlErrValue): Exit Function
     s = UCase$(Trim$(Replace(CStr(tfText & ""), Chr$(160), " ")))
+    s = Replace(s, " ", "")
     If Len(s) = 0 Then ProjParseTF = "": Exit Function
 
     If right$(s, 1) = "M" Then
@@ -215,6 +221,20 @@ Public Function ProjParseTF(ByVal tfText As Variant) As Variant
     If Left$(s, 1) = "L" And IsNumeric(mid$(s, 2)) Then
         ProjParseTF = -Abs(CDbl(mid$(s, 2)))
         Exit Function
+    End If
+
+    ' Suffix: 140R / 140L (same signs as R140 / L140)
+    tail = right$(s, 1)
+    If tail = "R" Or tail = "L" Then
+        head = Left$(s, Len(s) - 1)
+        If IsNumeric(head) Then
+            If tail = "R" Then
+                ProjParseTF = Abs(CDbl(head))
+            Else
+                ProjParseTF = -Abs(CDbl(head))
+            End If
+            Exit Function
+        End If
     End If
 
     If IsNumeric(s) Then
