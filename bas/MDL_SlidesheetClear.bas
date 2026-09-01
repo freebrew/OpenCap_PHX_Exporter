@@ -82,6 +82,147 @@ Fail:
     MsgBox "ClearSlidesheetRanges failed: " & Err.Description, vbCritical
 End Sub
 
+' True when a Slidesheet edit should rewrite Y. Other sheets never qualify.
+' Y only exists when AR (BURR) or AO (active target MD) is numeric — most
+' surveys (vertical / hold / past TD) never get a comment.
+' Target-window edits (U2:X5) always refresh: they change BURR for aiming rows.
+' Existing auto Y text also qualifies so a row that just left the window clears.
+Public Function SlideCommentsNeedRefresh(ByVal Target As Range) As Boolean
+    Dim ss As Worksheet
+    Dim area As Range
+    Dim cell As Range
+    Dim r As Long
+    Dim seen As Object
+    Dim yTxt As String
+
+    SlideCommentsNeedRefresh = False
+    If Target Is Nothing Then Exit Function
+    On Error GoTo Fail
+    Set ss = Target.Worksheet
+    If StrComp(ss.name, SS_SHEET, vbTextCompare) <> 0 Then Exit Function
+
+    If Not Intersect(Target, ss.Range("U2:X5")) Is Nothing Then
+        SlideCommentsNeedRefresh = True
+        Exit Function
+    End If
+
+    Set area = Intersect(Target, ss.Range("D13:G305,T13:U305"))
+    If area Is Nothing Then Exit Function
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    For Each cell In area.Cells
+        r = cell.Row
+        If Not seen.Exists(r) Then
+            seen.Add r, True
+            If RowHasSlideAim(ss, r) Then
+                SlideCommentsNeedRefresh = True
+                Exit Function
+            End If
+            yTxt = Trim$(CStr(ss.Cells(r, "Y").Value2 & ""))
+            If Len(yTxt) > 0 Then
+                If IsAutoSlideCommentText(yTxt) Then
+                    SlideCommentsNeedRefresh = True
+                    Exit Function
+                End If
+            End If
+        End If
+    Next cell
+    Exit Function
+Fail:
+    SlideCommentsNeedRefresh = False
+End Function
+
+Private Function RowHasSlideAim(ByVal ss As Worksheet, ByVal r As Long) As Boolean
+    RowHasSlideAim = IsNumberValue(ss.Cells(r, "AO").Value2) _
+                  Or IsNumberValue(ss.Cells(r, "AR").Value2)
+End Function
+
+' Rewrite Z on every stand row (C − T). Used after the formula change so
+' existing leftover-rotate values catch up without a survey keystroke.
+Public Sub RefreshAllRotateMetres()
+    Dim ss As Worksheet
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    RefreshRotateMetres ss.Range("C13:C305")
+End Sub
+
+' Z = C − T on the same row. C/D/T edits call this without a full Y rebuild.
+Public Sub RefreshRotateMetres(ByVal Target As Range)
+    Dim ss As Worksheet
+    Dim area As Range
+    Dim cell As Range
+    Dim r As Long
+    Dim seen As Object
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+
+    If Target Is Nothing Then Exit Sub
+    On Error GoTo Clean
+    Set ss = Target.Worksheet
+    If StrComp(ss.name, SS_SHEET, vbTextCompare) <> 0 Then Exit Sub
+    Set area = Intersect(Target, ss.Range("C13:D305,T13:T305"))
+    If area Is Nothing Then Exit Sub
+
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ss)
+    Set seen = CreateObject("Scripting.Dictionary")
+    For Each cell In area.Cells
+        r = cell.Row
+        If r >= Y_DATA_FIRST And r <= Y_LAST Then
+            If Not seen.Exists(r) Then
+                seen.Add r, True
+                WriteRotateMetresOnSheet ss, r
+            End If
+        End If
+    Next cell
+
+Clean:
+    On Error Resume Next
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+End Sub
+
+' Same-row leftover rotate: course (C) minus already-slid (T). Blank T = 0.
+' Leaves a hand-typed Z alone. Clamps at 0 when T > C.
+Private Sub WriteRotateMetresOnSheet(ByVal ss As Worksheet, ByVal r As Long)
+    Dim course As Double
+    Dim slid As Double
+    Dim remain As Double
+    Dim rotTxt As String
+    Dim zCell As Range
+    Dim hasC As Boolean
+
+    Set zCell = ss.Cells(r, "Z")
+    If Not IsAutoRotText(Trim$(CStr(zCell.Value2 & ""))) Then Exit Sub
+
+    On Error Resume Next
+    ss.Cells(r, "C").Calculate
+    On Error GoTo 0
+
+    hasC = IsNumberValue(ss.Cells(r, "C").Value2)
+    If Not hasC Then
+        If Len(Trim$(CStr(zCell.Value2 & ""))) > 0 Then zCell.ClearContents
+        Exit Sub
+    End If
+
+    course = CDbl(ss.Cells(r, "C").Value2)
+    slid = 0#
+    If IsNumberValue(ss.Cells(r, "T").Value2) Then slid = CDbl(ss.Cells(r, "T").Value2)
+
+    remain = Application.WorksheetFunction.Round(course, 2) - _
+             Application.WorksheetFunction.Round(slid, 2)
+    If remain < 0# Then remain = 0#
+    rotTxt = Format$(remain, "0.00")
+    If CStr(zCell.Value2 & "") <> rotTxt Then
+        With zCell
+            .Value2 = rotTxt
+            .WrapText = False
+            .numberFormat = "0.00"
+            .HorizontalAlignment = xlCenter
+        End With
+    End If
+End Sub
+
 ' Write ProjSlideComment results into Y as values.
 ' forceAll:=True overwrites every data row (used on clear / initial convert).
 ' forceAll:=False only updates blank cells or prior auto "Sliding ... | BURR ..." notes.
@@ -98,10 +239,6 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     Dim yArr As Variant
     Dim cArr As Variant
     Dim slideCap As Double
-    Dim rotTxt As String
-    Dim courseLen As Double
-    Dim instructedM As Double
-    Dim remainM As Double
     Dim asVal As Variant
     Dim anyFormula As Boolean
     Dim writeIt As Boolean
@@ -115,9 +252,9 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     Dim prevCalc As XlCalculation
 
     If m_updatingY Then Exit Sub
-    ' One user edit fires Worksheet_Change AND Worksheet_Calculate, each asking
-    ' for a full refresh. The second (and any cascaded) request within the same
-    ' editing gesture recomputes identical data - skip it. forceAll always runs.
+    ' Debounce leftover from when Change + Calculate both asked for a refresh.
+    ' Calculate no longer calls this; keep the window so a Change that writes
+    ' Y/Z cannot re-enter via a cascaded handler. forceAll always runs.
     If Not forceAll Then
         If m_lastRefreshAt > 0# And Abs(Timer - m_lastRefreshAt) < 0.5 Then Exit Sub
     End If
@@ -172,7 +309,6 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
 
         autoTxt = ""
         slideCap = 0#
-        instructedM = 0#
         If IsNumberValue(cArr(i, 1)) Then slideCap = CDbl(cArr(i, 1))
 
         If IsNumberValue(arArr(i, 1)) Then
@@ -182,7 +318,6 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
                 asVal = 0#
             End If
             result = ProjSlideComment(asVal, uArr(i, 1), arArr(i, 1), 0#, slideCap)
-            instructedM = ProjInstructedSlideM(asVal, uArr(i, 1), slideCap)
         Else
             result = ""
         End If
@@ -197,28 +332,8 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
             End If
         End If
 
-        ' Z: leftover rotate = this stand's C minus the slide metres in Y.
-        ' Full-course slide → 0.00. No BURR → all of C is rotate.
-        ' Number only — header already says rotate.
-        rotTxt = ""
-        If slideCap > 0# Then
-            courseLen = Application.WorksheetFunction.Round(slideCap, 2)
-            remainM = courseLen - instructedM
-            If remainM < 0# Then remainM = 0#
-            rotTxt = Format$(remainM, "0.00")
-        End If
-        If IsAutoRotText(Trim$(CStr(ss.Cells(r, "Z").Value2 & ""))) Then
-            If Len(rotTxt) = 0 Then
-                ss.Cells(r, "Z").ClearContents
-            Else
-                With ss.Cells(r, "Z")
-                    If CStr(.Value2 & "") <> rotTxt Then .Value2 = rotTxt
-                    .WrapText = False
-                    .numberFormat = "0.00"
-                    .HorizontalAlignment = xlCenter
-                End With
-            End If
-        End If
+        ' Z: leftover rotate = this stand's C minus T (already slid).
+        WriteRotateMetresOnSheet ss, r
 
         curTxt = Trim$(CStr(yArr(i, 1) & ""))
 
@@ -919,6 +1034,8 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
+
 
 
 

@@ -31,11 +31,16 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     If Not Intersect(Target, Me.Range("Y2:Y5")) Is Nothing Then
         RememberPlanTargetOverride Target
     End If
-    ' Survey / slide / target edits change Meters To Slide (X) and BURR (AR),
-    ' which drive the auto slide notes in Y. Survey depth also slides the
-    ' 4-row plan-target window when hidden Plan Sections exist.
+    ' Y comments only when this Slidesheet edit has AR/AO (or leftover auto Y).
+    ' Other workbook tabs never reach here — Calculate used to, and that is
+    ' what flashed the sheet black on every Data / Setup keystroke.
     If Not Intersect(Target, Me.Range("D13:G305,T13:U305,U2:X5")) Is Nothing Then
-        RefreshSlideComments
+        If SlideCommentsNeedRefresh(Target) Then RefreshSlideComments
+    End If
+    ' Z = C − T on this row. Independent of Y / BURR so a T edit on a
+    ' vertical stand still updates leftover rotate.
+    If Not Intersect(Target, Me.Range("C13:D305,T13:T305")) Is Nothing Then
+        RefreshRotateMetres Target
     End If
     ' Plan proximity gauge: surveys, targets, geo half-width (AB14), and
     ' sail waypoints (AC14:AD33). Without waypoints/AB14 here the red/green
@@ -44,11 +49,5 @@ Private Sub Worksheet_Change(ByVal Target As Range)
         MDL_PlanGauge.RenderPlanGauge
     End If
     Application.EnableEvents = prevEvents
-    On Error GoTo 0
-End Sub
-
-Private Sub Worksheet_Calculate()
-    On Error Resume Next
-    RefreshSlideComments
     On Error GoTo 0
 End Sub
