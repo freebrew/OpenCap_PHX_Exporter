@@ -560,7 +560,7 @@ Private Function LoadWaypoints(ss As Worksheet) As Boolean
 End Function
 
 ' Named stations in the T2:Y5 window (U=MD, V=INC, X=TVD, Y=name).
-Private Function NextPlanTarget(ss As Worksheet, ByVal bitMD As Double, _
+Private Function NextPlanTarget(ss As Worksheet, ByVal bitMd As Double, _
         ByRef tMd As Double, ByRef tTvd As Double, ByRef tInc As Double, _
         ByRef tName As String) As Boolean
     Dim r As Long, vMd As Variant, nm As String
@@ -570,7 +570,7 @@ Private Function NextPlanTarget(ss As Worksheet, ByVal bitMD As Double, _
         vMd = ss.Cells(r, 21).Value2
         If Len(nm) = 0 Then GoTo NextTgt
         If Not IsNumeric(vMd) Then GoTo NextTgt
-        If CDbl(vMd) <= bitMD + 0.005 Then GoTo NextTgt
+        If CDbl(vMd) <= bitMd + 0.005 Then GoTo NextTgt
         tMd = CDbl(vMd)
         tInc = NumCell(ss.Cells(r, 22))
         tTvd = NumCell(ss.Cells(r, 24))
@@ -906,7 +906,7 @@ End Function
 Private Sub DrawCanvas()
     If mCanvasH < 40# Then mCanvasH = 40#
     ' Full report is one continuous paper canvas (corridor + ops).
-    Rect 0, 0, CANVAS_W, mCanvasH, H("FFFFFF"), -1, 0#
+    Rect 0, 0, CANVAS_W, mCanvasH, h("FFFFFF"), -1, 0#
 End Sub
 
 Private Sub DrawRoom()
@@ -920,16 +920,16 @@ Private Sub DrawRoom()
 
     Tx mVX, 20, "WELLBORE CORRIDOR " & ChrW(8212) & " " & mSection & " to " & mTgtName & _
        "  " & Format$(mMD0, "#,##0") & " to " & Format$(mMD1, "#,##0") & " mMD", _
-       12.5, H("FFFFFF"), "start", True
-    Rect mVX, mVY, mVW, mVH, H("222222"), H("3A3A3A"), 0.75
+       12.5, h("FFFFFF"), "start", True
+    Rect mVX, mVY, mVW, mVH, h("222222"), h("3A3A3A"), 0.75
 
     ' ---- back wall, at lat = +mLatBox -----------------------------------------
     Quad mMD0, mDevHi, mLatBox, mMD1, mDevHi, mLatBox, _
-         mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, -1, H("4A4A4A"), 0.75
+         mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, -1, h("4A4A4A"), 0.75
 
     ' ---- left wall, at lat = -mLatBox : looking down the hole -----------------
     Quad mMD0, mDevHi, -mLatBox, mMD1, mDevHi, -mLatBox, _
-         mMD1, mDevLo, -mLatBox, mMD0, mDevLo, -mLatBox, -1, H("4A4A4A"), 0.75
+         mMD1, mDevLo, -mLatBox, mMD0, mDevLo, -mLatBox, -1, h("4A4A4A"), 0.75
 
     Dim dv As Double, tick As Double, dvStep As Double
     If mShaft Then
@@ -943,55 +943,55 @@ Private Sub DrawRoom()
     For dv = Int(mDevHi / tick) * tick To mDevLo Step dvStep
         Dim isZero As Boolean: isZero = (Abs(dv) < 0.001)
         Ln ObX(mMD0, mLatBox), ObY(dv, mLatBox), ObX(mMD1, mLatBox), ObY(dv, mLatBox), _
-           IIf(isZero, H("555555"), H("3A3A3A")), 0.7, IIf(isZero, msoLineDash, msoLineSysDot)
+           IIf(isZero, h("555555"), h("3A3A3A")), 0.7, IIf(isZero, msoLineDash, msoLineSysDot)
         Ln ObX(mMD0, -mLatBox), ObY(dv, -mLatBox), ObX(mMD1, -mLatBox), ObY(dv, -mLatBox), _
-           IIf(isZero, H("444444"), H("333333")), 0.6, IIf(isZero, msoLineDash, msoLineSysDot)
+           IIf(isZero, h("444444"), h("333333")), 0.6, IIf(isZero, msoLineDash, msoLineSysDot)
         Ln ObX(mMD0, -mLatBox), ObY(dv, -mLatBox), ObX(mMD0, mLatBox), ObY(dv, mLatBox), _
-           H("3A3A3A"), 0.6, msoLineSolid
+           h("3A3A3A"), 0.6, msoLineSolid
         Tx ObX(mMD0, -mLatBox) - 5, ObY(dv, -mLatBox) + 3, _
-           IIf(mShaft, Format$(dv, "#,##0"), SignedM(dv)), 8.5, H("A8A8A8"), "end"
+           IIf(mShaft, Format$(dv, "#,##0"), SignedM(dv)), 8.5, h("A8A8A8"), "end"
     Next dv
 
     If mUseSailBands Then
-        DrawGeoCorridorRibbon mLatBox, H("1E3A2F"), H("4CAF7A"), 1.15
-        DrawGeoCorridorRibbon -mLatBox, H("1A3328"), H("3D6B54"), 1#
+        DrawGeoCorridorRibbon mLatBox, h("1E3A2F"), h("4CAF7A"), 1.15
+        DrawGeoCorridorRibbon -mLatBox, h("1A3328"), h("3D6B54"), 1#
         If Not MDL_PlanGauge.PG_WaypointTvdAtMd(mWs, mMD1, endGeo) Then endGeo = mWpTvd
         endHi = PlotY(endGeo - mGeoHalf)
         Tx ObX(mMD1, mLatBox) - 4, ObY(endHi, mLatBox) - 4, _
-           "geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", 8, H("4CAF7A"), "end"
+           "geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", 8, h("4CAF7A"), "end"
     End If
 
     Quad mMD0, mDevLo, -mLatBox, mMD1, mDevLo, -mLatBox, _
-         mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, -1, H("4A4A4A"), 0.75
+         mMD1, mDevLo, mLatBox, mMD0, mDevLo, mLatBox, -1, h("4A4A4A"), 0.75
     If mUseSailBands Then
         Quad mMD0, mDevLo, -mLatTol, mMD1, mDevLo, -mLatTol, _
-             mMD1, mDevLo, mLatTol, mMD0, mDevLo, mLatTol, H("1E3A2F"), H("4CAF7A"), 1#
+             mMD1, mDevLo, mLatTol, mMD0, mDevLo, mLatTol, h("1E3A2F"), h("4CAF7A"), 1#
     End If
-    Ln ObX(mMD0, 0), ObY(mDevLo, 0), ObX(mMD1, 0), ObY(mDevLo, 0), H("4CAF7A"), 0.7, msoLineDash
+    Ln ObX(mMD0, 0), ObY(mDevLo, 0), ObX(mMD1, 0), ObY(mDevLo, 0), h("4CAF7A"), 0.7, msoLineDash
 
     If mUseSailBands Then
         Dim latLbl As String: latLbl = Format$(mLatTol, "0.00")
         Tx ObX(mMD1, -mLatTol) + 4, ObY(mDevLo, -mLatTol) + 3, _
-           latLbl & " R", 8, H("4CAF7A"), "start"
-        Tx ObX(mMD1, 0) + 4, ObY(mDevLo, 0) + 3, "plan", 8, H("4CAF7A"), "start"
+           latLbl & " R", 8, h("4CAF7A"), "start"
+        Tx ObX(mMD1, 0) + 4, ObY(mDevLo, 0) + 3, "plan", 8, h("4CAF7A"), "start"
         Tx ObX(mMD1, mLatTol) + 4, ObY(mDevLo, mLatTol) + 3, _
-           latLbl & " L", 8, H("4CAF7A"), "start"
+           latLbl & " L", 8, h("4CAF7A"), "start"
     Else
-        Tx ObX(mMD1, 0) + 4, ObY(mDevLo, 0) + 3, "plan", 8, H("A8A8A8"), "start"
+        Tx ObX(mMD1, 0) + 4, ObY(mDevLo, 0) + 3, "plan", 8, h("A8A8A8"), "start"
     End If
 
     Quad mMD0, mDevHi, -mLatBox, mMD0, mDevHi, mLatBox, _
-         mMD0, mDevLo, mLatBox, mMD0, mDevLo, -mLatBox, -1, H("4A4A4A"), 0.75
+         mMD0, mDevLo, mLatBox, mMD0, mDevLo, -mLatBox, -1, h("4A4A4A"), 0.75
     If mUseSailBands Then
         Quad mMD0, mGeoHalf, -mLatTol, mMD0, mGeoHalf, mLatTol, _
-             mMD0, -mGeoHalf, mLatTol, mMD0, -mGeoHalf, -mLatTol, H("1E3A2F"), H("4CAF7A"), 1.2
+             mMD0, -mGeoHalf, mLatTol, mMD0, -mGeoHalf, -mLatTol, h("1E3A2F"), h("4CAF7A"), 1.2
     End If
 
     ' ---- room wireframe: ceiling and the open front edges ----------------------
-    Ln ObX(mMD0, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
-    Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, mLatBox), ObY(mDevHi, mLatBox), H("4A4A4A"), 0.75, msoLineSolid
-    Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
-    Ln ObX(mMD0, -mLatBox), ObY(mDevLo, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), H("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD0, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), h("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, mLatBox), ObY(mDevHi, mLatBox), h("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD1, -mLatBox), ObY(mDevHi, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), h("4A4A4A"), 0.75, msoLineSolid
+    Ln ObX(mMD0, -mLatBox), ObY(mDevLo, -mLatBox), ObX(mMD1, -mLatBox), ObY(mDevLo, -mLatBox), h("4A4A4A"), 0.75, msoLineSolid
 
     ' ---- shadows --------------------------------------------------------------
     ' Back wall (+lat) = the only TVD path shadow. The near/front wall keeps its
@@ -1003,21 +1003,21 @@ Private Sub DrawRoom()
         plot = PlotY(mSTvd(i))
         xs(i) = ObX(mSMD(i), mLatBox): ys(i) = ObY(plot, mLatBox)
     Next i
-    PolyLine xs, ys, mSCount, H("A8CBB8"), 2.4, msoLineDash
+    PolyLine xs, ys, mSCount, h("A8CBB8"), 2.4, msoLineDash
 
     ' Floor shadow: left/right from plan (data sign: + = Right of plan).
     For i = 0 To mSCount - 1
         xs(i) = ObX(mSMD(i), LatScr(mSLat(i))): ys(i) = ObY(mDevLo, LatScr(mSLat(i)))
     Next i
-    PolyLine xs, ys, mSCount, H("B6DBC8"), 3#, msoLineSolid
+    PolyLine xs, ys, mSCount, h("B6DBC8"), 3#, msoLineSolid
 
     If mSCount >= 1 Then
         Dim iLast As Long: iLast = mSCount - 1
         Dot ObX(mSMD(iLast), LatScr(mSLat(iLast))), ObY(mDevLo, LatScr(mSLat(iLast))), _
-            3.4, H("B6DBC8"), H("1A1A1A"), 1
+            3.4, h("B6DBC8"), h("1A1A1A"), 1
         Tx ObX(mSMD(iLast), LatScr(mSLat(iLast))), ObY(mDevLo, LatScr(mSLat(iLast))) + 12, _
            Format$(Abs(mSLat(iLast)), "0.0") & " m " & IIf(mSLat(iLast) < 0#, "L", "R"), _
-           8.5, H("B6DBC8"), "middle"
+           8.5, h("B6DBC8"), "middle"
     End If
 
     ' ---- the hole itself, floating in the middle of the room -------------------
@@ -1025,7 +1025,7 @@ Private Sub DrawRoom()
         plot = PlotY(mSTvd(i))
         xs(i) = ObX(mSMD(i), LatScr(mSLat(i))): ys(i) = ObY(plot, LatScr(mSLat(i)))
     Next i
-    PolyLine xs, ys, mSCount, H("FFFFFF"), 2.8, msoLineSolid
+    PolyLine xs, ys, mSCount, h("FFFFFF"), 2.8, msoLineSolid
 
     ' Plan path on top of the hole so P2 reads clearly through the room.
     DrawPlanPathInRoom
@@ -1042,7 +1042,7 @@ Private Sub DrawRoom()
         Else
             bust = False
         End If
-        Dot xs(i), ys(i), 2.2, IIf(bust, H("FF5555"), H("111111")), -1, 0
+        Dot xs(i), ys(i), 2.2, IIf(bust, h("FF5555"), h("111111")), -1, 0
         If Abs(mSDev(i)) > Abs(mSDev(iWorstDev)) Then iWorstDev = i
         If Abs(mSLat(i)) > Abs(mSLat(iWorstLat)) Then iWorstLat = i
     Next i
@@ -1050,12 +1050,12 @@ Private Sub DrawRoom()
     If mUseSailBands Then
         Dim wx As Double, wy As Double
         wx = ObX(mSMD(iWorstDev), mLatBox): wy = ObY(PlotY(mSTvd(iWorstDev)), mLatBox)
-        Ln wx, wy - 5, wx + 14, wy - 18, H("FF5555"), 0.8, msoLineSolid
+        Ln wx, wy - 5, wx + 14, wy - 18, h("FF5555"), 0.8, msoLineSolid
         Tx wx + 17, wy - 16, Format$(mSDev(iWorstDev), "0.00") & " m high at " & _
-           Format$(mSMD(iWorstDev), "#,##0"), 8.5, H("FF5555"), "start"
+           Format$(mSMD(iWorstDev), "#,##0"), 8.5, h("FF5555"), "start"
         Tx ObX(mSMD(iWorstLat), LatScr(mSLat(iWorstLat))), ObY(mDevLo, LatScr(mSLat(iWorstLat))) + 11, _
            Format$(Abs(mSLat(iWorstLat)), "0.0") & " m " & IIf(mSLat(iWorstLat) < 0, "L", "R"), _
-           8, H("8AAB9A"), "middle"
+           8, h("8AAB9A"), "middle"
     End If
 
     ' ---- forward projections from the last survey ------------------------------
@@ -1076,23 +1076,23 @@ Private Sub DrawRoom()
         hx(k) = ObX(md, LatScr(latH))
         hy(k) = ObY(PlotY(tvdProj), LatScr(latH))
     Next k
-    PolyLine rx, ry, n, H("FF5555"), 2.4, msoLineSolid
-    PolyLine hx, hy, n, H("E09A3D"), 2.2, msoLineDash
+    PolyLine rx, ry, n, h("FF5555"), 2.4, msoLineSolid
+    PolyLine hx, hy, n, h("E09A3D"), 2.2, msoLineDash
 
     Dim bx As Double, by As Double
     bx = ObX(mSvyMD, LatScr(mSvyLat)): by = ObY(PlotY(mSvyTvd), LatScr(mSvyLat))
-    Dot bx, by, 5, H("FF5555"), H("1A1A1A"), 1.4
-    Tx bx - 10, by - 11, "BIT", 10, H("FF5555"), "end", True
+    Dot bx, by, 5, h("FF5555"), h("1A1A1A"), 1.4
+    Tx bx - 10, by - 11, "BIT", 10, h("FF5555"), "end", True
 
     Dim ax As Double, ay As Double
     tvdProj = mSvyTvd + mToGo * Cos(mSvyInc * PIE / 180#)
     ax = ObX(mWpMD, LatScr(mHoldLatEnd)): ay = ObY(PlotY(tvdProj), LatScr(mHoldLatEnd))
-    Dot ax, ay, 4, H("1A1A1A"), H("E09A3D"), 2
+    Dot ax, ay, 4, h("1A1A1A"), h("E09A3D"), 2
     ' Keep held-arrival label clear of the BIT tag.
     If mUseSailBands Then
-        Tx ax + 10, ay + 12, Format$(mHoldDevEnd, "0.00") & " m high", 8.5, H("E09A3D"), "start"
+        Tx ax + 10, ay + 12, Format$(mHoldDevEnd, "0.00") & " m high", 8.5, h("E09A3D"), "start"
     ElseIf Abs(mHoldDevEnd) > 1# Then
-        Tx ax + 10, ay + 12, Format$(Abs(mHoldDevEnd), "0.0") & " m TVD if held", 8.5, H("E09A3D"), "start"
+        Tx ax + 10, ay + 12, Format$(Abs(mHoldDevEnd), "0.0") & " m TVD if held", 8.5, h("E09A3D"), "start"
     End If
 
     ' ---- reporting-day span along the front foot of the room -------------------
@@ -1102,40 +1102,40 @@ Private Sub DrawRoom()
     d1 = ClampMd(NumCell(ThisWorkbook.Worksheets("Data").Range("C5")))
     dy = mVY + mVH - 16
     Rect ObX(d0, -mLatBox), dy - 8, ObX(d1, -mLatBox) - ObX(d0, -mLatBox), 11, _
-         H("1A3348"), H("5BA3D9"), 0.75
+         h("1A3348"), h("5BA3D9"), 0.75
     Tx (ObX(d0, -mLatBox) + ObX(d1, -mLatBox)) / 2, dy, _
        "24 h " & ChrW(183) & " " & Format$(d0, "#,##0") & " " & ChrW(8594) & " " & _
        Format$(d1, "#,##0") & " m " & ChrW(183) & " " & Format$(d1 - d0, "#,##0") & " m", _
-       8.5, H("5BA3D9"), "middle"
+       8.5, h("5BA3D9"), "middle"
 
     ' ---- captions and legend ---------------------------------------------------
     If mShaft Then
-        Tx mVX + 6, mVY + 16, "shaft " & ChrW(8212) & " TVD down, L/R from plan at true scale, m", 8.5, H("A8A8A8"), "start"
-        Tx mVX + mVW - 6, mVY + mVH - 44, "floor " & ChrW(8212) & " displacement from plan, m", 8.5, H("A8A8A8"), "end"
+        Tx mVX + 6, mVY + 16, "shaft " & ChrW(8212) & " TVD down, L/R from plan at true scale, m", 8.5, h("A8A8A8"), "start"
+        Tx mVX + mVW - 6, mVY + mVH - 44, "floor " & ChrW(8212) & " displacement from plan, m", 8.5, h("A8A8A8"), "end"
     Else
-        Tx mVX + 6, mVY + 16, "back wall " & ChrW(8212) & " TVD plot (0 = geo at window start), m", 8.5, H("A8A8A8"), "start"
-        Tx mVX + mVW - 6, mVY + mVH - 44, "floor " & ChrW(8212) & " left / right from plan, m", 8.5, H("A8A8A8"), "end"
+        Tx mVX + 6, mVY + 16, "back wall " & ChrW(8212) & " TVD plot (0 = geo at window start), m", 8.5, h("A8A8A8"), "start"
+        Tx mVX + mVW - 6, mVY + mVH - 44, "floor " & ChrW(8212) & " left / right from plan, m", 8.5, h("A8A8A8"), "end"
     End If
 
     Dim ly As Double: ly = mVY + mVH + 15
-    Ln mVX + 2, ly, mVX + 18, ly, H("FFFFFF"), 2.6, msoLineSolid
-    Tx mVX + 22, ly + 4, "hole", 10, H("FFFFFF"), "start"
-    Ln mVX + 52, ly, mVX + 68, ly, H("5BA3D9"), 2.2, msoLineSolid
-    Tx mVX + 72, ly + 4, "plan", 10, H("FFFFFF"), "start"
-    Ln mVX + 108, ly, mVX + 124, ly, H("9EC9B0"), 2#, msoLineDash
-    Tx mVX + 128, ly + 4, "shadows", 10, H("FFFFFF"), "start"
-    Ln mVX + 178, ly, mVX + 194, ly, H("FF5555"), 2.4, msoLineSolid
-    Tx mVX + 198, ly + 4, "required " & Format$(mReqInc, "0.00") & ChrW(176), 10, H("FFFFFF"), "start"
-    Ln mVX + 292, ly, mVX + 308, ly, H("E09A3D"), 2.2, msoLineDash
-    Tx mVX + 312, ly + 4, "if " & Format$(mSvyInc, "0.00") & ChrW(176) & " held", 10, H("FFFFFF"), "start"
-    Dot mVX + 420, ly, 2.5, H("4CAF7A"), -1, 0
-    Tx mVX + 428, ly + 4, mTgtName, 10, H("FFFFFF"), "start"
+    Ln mVX + 2, ly, mVX + 18, ly, h("FFFFFF"), 2.6, msoLineSolid
+    Tx mVX + 22, ly + 4, "hole", 10, h("FFFFFF"), "start"
+    Ln mVX + 52, ly, mVX + 68, ly, h("5BA3D9"), 2.2, msoLineSolid
+    Tx mVX + 72, ly + 4, "plan", 10, h("FFFFFF"), "start"
+    Ln mVX + 108, ly, mVX + 124, ly, h("9EC9B0"), 2#, msoLineDash
+    Tx mVX + 128, ly + 4, "shadows", 10, h("FFFFFF"), "start"
+    Ln mVX + 178, ly, mVX + 194, ly, h("FF5555"), 2.4, msoLineSolid
+    Tx mVX + 198, ly + 4, "required " & Format$(mReqInc, "0.00") & ChrW(176), 10, h("FFFFFF"), "start"
+    Ln mVX + 292, ly, mVX + 308, ly, h("E09A3D"), 2.2, msoLineDash
+    Tx mVX + 312, ly + 4, "if " & Format$(mSvyInc, "0.00") & ChrW(176) & " held", 10, h("FFFFFF"), "start"
+    Dot mVX + 420, ly, 2.5, h("4CAF7A"), -1, 0
+    Tx mVX + 428, ly + 4, mTgtName, 10, h("FFFFFF"), "start"
     If mShaft Then
-        Tx mVX + mVW, ly + 4, "true scale 1:1 TVD / L/R  ·  MD compressed", 8.5, H("A8A8A8"), "end"
+        Tx mVX + mVW, ly + 4, "true scale 1:1 TVD / L/R  ·  MD compressed", 8.5, h("A8A8A8"), "end"
     Else
         Tx mVX + mVW, ly + 4, "MD " & ChrW(247) & Format$(1# / mSxd, "0.0") & " " & _
            ChrW(183) & " TVD " & ChrW(215) & Format$(mSV, "0") & " " & _
-           ChrW(183) & " L/R " & ChrW(215) & Format$(mKzx, "0"), 8.5, H("A8A8A8"), "end"
+           ChrW(183) & " L/R " & ChrW(215) & Format$(mKzx, "0"), 8.5, h("A8A8A8"), "end"
     End If
 End Sub
 
@@ -1159,9 +1159,9 @@ Private Sub DrawShaftProfile()
     Dim ink As Long, shd As Long, planClr As Long, holeClr As Long
     Dim wallFill As Long, wallEdge As Long, gridClr As Long
 
-    ink = H("2C3338"): shd = H("8B949C")
-    planClr = H("1A3A5C"): holeClr = H("6B2020")
-    wallFill = H("FFFFFF"): wallEdge = H("8A949C"): gridClr = H("D0D6DB")
+    ink = h("2C3338"): shd = h("8B949C")
+    planClr = h("1A3A5C"): holeClr = h("6B2020")
+    wallFill = h("FFFFFF"): wallEdge = h("8A949C"): gridClr = h("D0D6DB")
 
     ReportDayMd day0, day1
     Dim visEnd As Double
@@ -1185,8 +1185,8 @@ Private Sub DrawShaftProfile()
        Format$(visEnd, "#,##0") & " mMD   " & Format$(visEnd - mdA, "#,##0.0") & " m", _
        12, ink, "start", True
     Tx mVX, mVY + 12, "plan  " & ChrW(183) & "  last 24 h hole  " & ChrW(183) & _
-       "  shadows on back / left / floor", 8, H("6B7A85"), "start"
-    Rect mVX, mVY, mVW, mVH, H("FFFFFF"), H("8A949C"), 0.6
+       "  shadows on back / left / floor", 8, h("6B7A85"), "start"
+    Rect mVX, mVY, mVW, mVH, h("FFFFFF"), h("8A949C"), 0.6
 
     mTgtN = 0#: mTgtE = 0#: mTgtV = mWpTvd
     np = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
@@ -1303,7 +1303,7 @@ Private Sub DrawShaftProfile()
 
     Quad3 nMax, eMin, vMin, nMax, eMax, vMin, nMax, eMax, vMax, nMax, eMin, vMax, wallFill, wallEdge
     Quad3 nMin, eMin, vMin, nMax, eMin, vMin, nMax, eMin, vMax, nMin, eMin, vMax, wallFill, wallEdge
-    Quad3 nMin, eMin, vMax, nMax, eMin, vMax, nMax, eMax, vMax, nMin, eMax, vMax, H("F7F8F9"), wallEdge
+    Quad3 nMin, eMin, vMax, nMax, eMin, vMax, nMax, eMax, vMax, nMin, eMax, vMax, h("F7F8F9"), wallEdge
 
     Dim stepV As Double, v As Double
     stepV = NiceStep(vMax - vMin, 5)
@@ -1312,7 +1312,7 @@ Private Sub DrawShaftProfile()
     Do While v <= vMax + 0.01
         Ln ShX(nMin, eMin), ShY(nMin, eMin, v), ShX(nMax, eMin), ShY(nMax, eMin, v), gridClr, 0.5, msoLineSolid
         Ln ShX(nMax, eMin), ShY(nMax, eMin, v), ShX(nMax, eMax), ShY(nMax, eMax, v), gridClr, 0.5, msoLineSolid
-        Tx ShX(nMin, eMin) - 5, ShY(nMin, eMin, v) + 3, Format$(v, "#,##0"), 7, H("5C6770"), "end"
+        Tx ShX(nMin, eMin) - 5, ShY(nMin, eMin, v) + 3, Format$(v, "#,##0"), 7, h("5C6770"), "end"
         v = v + stepV
     Loop
 
@@ -1323,7 +1323,7 @@ Private Sub DrawShaftProfile()
     If g < nMin Then g = g + stepN
     Do While g <= nMax + 0.01
         Ln ShX(g, eMin), ShY(g, eMin, vMax), ShX(g, eMax), ShY(g, eMax, vMax), gridClr, 0.5, msoLineSolid
-        Tx ShX(g, eMax) + 2, ShY(g, eMax, vMax) + 11, Format$(g + frmN, "0"), 6.5, H("5C6770"), "start"
+        Tx ShX(g, eMax) + 2, ShY(g, eMax, vMax) + 11, Format$(g + frmN, "0"), 6.5, h("5C6770"), "start"
         g = g + stepN
     Loop
     g = stepE * Int(eMin / stepE)
@@ -1332,7 +1332,7 @@ Private Sub DrawShaftProfile()
         Ln ShX(nMin, g), ShY(nMin, g, vMax), ShX(nMax, g), ShY(nMax, g, vMax), gridClr, 0.5, msoLineSolid
         ' E-axis numbers on the open FRONT edge of the floor (n = nMin), not at
         ' the back-wall joint where they read as part of the back scale.
-        Tx ShX(nMin, g) - 3, ShY(nMin, g, vMax) + 5, Format$(g + frmE, "0"), 6.5, H("5C6770"), "end"
+        Tx ShX(nMin, g) - 3, ShY(nMin, g, vMax) + 5, Format$(g + frmE, "0"), 6.5, h("5C6770"), "end"
         g = g + stepE
     Loop
 
@@ -1369,7 +1369,7 @@ Private Sub DrawShaftProfile()
     DrawNamedTargetsOnPlan np, pMD, pInc, pAzi, pTvd, pNS, pEW, frmN, frmE, mdA, mdB
 
     Dot ShX(mSvyNS - frmN, mSvyEW - frmE), ShY(mSvyNS - frmN, mSvyEW - frmE, mSvyTvd), _
-       3.6, holeClr, H("1A1A1A"), 0.8
+       3.6, holeClr, h("1A1A1A"), 0.8
     Tx ShX(mSvyNS - frmN, mSvyEW - frmE) - 7, _
        ShY(mSvyNS - frmN, mSvyEW - frmE, mSvyTvd) + 2, "BIT", 8.5, holeClr, "end", True
 
@@ -1615,12 +1615,12 @@ Private Sub DrawNamedTargetsOnPlan(ByVal np As Long, pMD() As Double, pInc() As 
         MDL_PlanGauge.PG_PlanAt tMd(i), np, pMD, pInc, pAzi, pTvd, pNS, pEW, pN, pE, pV, pA, PI
         pN = pN - frmN: pE = pE - frmE
         SampleTargetRingAt xs, ys, rT, pN, pE, pV, PI, pA, 29
-        PolyLine xs, ys, 29, H("1B4D2E"), 1.15, msoLineSolid
+        PolyLine xs, ys, 29, h("1B4D2E"), 1.15, msoLineSolid
         SampleTargetRingAt xs, ys, rT * 0.45, pN, pE, pV, PI, pA, 29
-        PolyLine xs, ys, 29, H("1B4D2E"), 0.8, msoLineSolid
-        Dot ShX(pN, pE), ShY(pN, pE, pV), 2.6, H("3D2458"), H("1A1A1A"), 0.7
+        PolyLine xs, ys, 29, h("1B4D2E"), 0.8, msoLineSolid
+        Dot ShX(pN, pE), ShY(pN, pE, pV), 2.6, h("3D2458"), h("1A1A1A"), 0.7
         Tx ShX(pN, pE) + 7, ShY(pN, pE, pV) + 12, _
-           tNm(i) & "  " & Format$(tMd(i), "#,##0"), 8, H("1B4D2E"), "start", True
+           tNm(i) & "  " & Format$(tMd(i), "#,##0"), 8, h("1B4D2E"), "start", True
     Next i
 End Sub
 
@@ -1638,7 +1638,7 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
     Dim wN As Double, wE As Double, wV As Double
     Dim mag As Double
     Dim n As Double, e As Double, v As Double
-    Dim sH As Double, sV As Double
+    Dim Sh As Double, sV As Double
 
     If nPts < 9 Then nPts = 9
     ReDim xs(0 To nPts - 1)
@@ -1648,10 +1648,10 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
     aziR = aziDeg * PIE / 180#
     ' Basis in plot-scaled metres so the ring stays perpendicular to the
     ' drawn segment after TVD is compressed relative to N/E.
-    sH = mShS: If sH < 0.001 Then sH = 0.001
+    Sh = mShS: If Sh < 0.001 Then Sh = 0.001
     sV = mShVS: If sV < 0.001 Then sV = 0.001
-    tN = Cos(aziR) * Sin(incR) * sH
-    tE = Sin(aziR) * Sin(incR) * sH
+    tN = Cos(aziR) * Sin(incR) * Sh
+    tE = Sin(aziR) * Sin(incR) * Sh
     tv = Cos(incR) * sV
     mag = Sqr(tN * tN + tE * tE + tv * tv)
     If mag < 0.0001 Then
@@ -1683,7 +1683,7 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
         a = 2# * PIE * CDbl(i) / CDbl(nPts - 1)
         n = cN + radius * (Cos(a) * uN + Sin(a) * wN)
         e = cE + radius * (Cos(a) * uE + Sin(a) * wE)
-        v = tvd + radius * (sH / sV) * (Cos(a) * uV + Sin(a) * wV)
+        v = tvd + radius * (Sh / sV) * (Cos(a) * uV + Sin(a) * wV)
         xs(i) = ShX(n, e)
         ys(i) = ShY(n, e, v)
     Next i
@@ -1751,7 +1751,7 @@ Private Sub DrawMinCurveToTarget()
         xs(i) = ShX(pN, pE)
         ys(i) = ShY(pN, pE, pV)
     Next i
-    PolyLine xs, ys, 25, H("C0392B"), 1.6, msoLineDash
+    PolyLine xs, ys, 25, h("C0392B"), 1.6, msoLineDash
 End Sub
 
 ' Target view: +North up-right (GN), +East down-right, +TVD down through the plane.
@@ -1818,7 +1818,7 @@ Private Sub DrawPlanPathInRoom()
             k = k + 1
         Else
             If k >= 2 Then
-                PolyLine xs, ys, k, H("5BA3D9"), 2.3, msoLineSolid
+                PolyLine xs, ys, k, h("5BA3D9"), 2.3, msoLineSolid
                 lastX = xs(k - 1): lastY = ys(k - 1): drawn = True
             End If
             k = 0
@@ -1826,14 +1826,14 @@ Private Sub DrawPlanPathInRoom()
         If md >= mMD1 Then Exit For
     Next i
     If k >= 2 Then
-        PolyLine xs, ys, k, H("5BA3D9"), 2.3, msoLineSolid
+        PolyLine xs, ys, k, h("5BA3D9"), 2.3, msoLineSolid
         lastX = xs(k - 1): lastY = ys(k - 1): drawn = True
     End If
     If Not drawn Then Exit Sub
 
     planName = Trim$(cellText(ThisWorkbook.Worksheets("Data"), "C2"))
     If Len(planName) = 0 Then planName = "Plan"
-    Tx lastX + 4, lastY - 6, planName, 9, H("5BA3D9"), "start", True
+    Tx lastX + 4, lastY - 6, planName, 9, h("5BA3D9"), "start", True
 End Sub
 
 ' Data lateral sign -> screen lateral. Positive data lat = RIGHT of plan.
@@ -1913,7 +1913,7 @@ Private Sub DrawWaypointMarks()
         wx = ObX(mWMD(i), -mLatBox)
         wy = ObY(plot, -mLatBox)
 
-        Dot wx, wy, IIf(isNext, 3.2, 2.4), H("4CAF7A"), H("1A1A1A"), 1
+        Dot wx, wy, IIf(isNext, 3.2, 2.4), h("4CAF7A"), h("1A1A1A"), 1
 
         ' Attitude tick in the MD / up-down plane on the left wall.
         ' Inc 90 deg = along MD; >90 tips toward drop (higher TVD / lower "high").
@@ -1923,13 +1923,13 @@ Private Sub DrawWaypointMarks()
             ang = (mWInc(i) - 90#) * PIE / 180#
             tx2 = wx + tick * Cos(ang)
             ty2 = wy + tick * Sin(ang)
-            Ln wx, wy, tx2, ty2, H("4CAF7A"), IIf(isNext, 1.8, 1.2), msoLineSolid
+            Ln wx, wy, tx2, ty2, h("4CAF7A"), IIf(isNext, 1.8, 1.2), msoLineSolid
             Tx wx, wy - 10, Format$(mWInc(i), "0.00") & ChrW(176), 8, _
-               IIf(isNext, H("4CAF7A"), H("8AAB9A")), "middle", isNext
+               IIf(isNext, h("4CAF7A"), h("8AAB9A")), "middle", isNext
         End If
 
         Tx wx, mVY + mVH - 30, Format$(mWMD(i), "#,##0"), 8.5, _
-           IIf(isNext, H("4CAF7A"), H("A8A8A8")), "middle", isNext
+           IIf(isNext, h("4CAF7A"), h("A8A8A8")), "middle", isNext
 NextWp:
     Next i
 End Sub
@@ -2007,28 +2007,28 @@ Private Sub DrawSection(ss As Worksheet)
     Dim gx As Double, gy As Double
     gx = mPX + PAD: gy = mPY + PAD
 
-    Tx mPX, 20, "VERTICAL SECTION " & ChrW(183) & " 1:1", 12.5, H("FFFFFF"), "start", True
-    Rect mPX, mPY, mPW, mPH, H("222222"), H("3A3A3A"), 0.75
+    Tx mPX, 20, "VERTICAL SECTION " & ChrW(183) & " 1:1", 12.5, h("FFFFFF"), "start", True
+    Rect mPX, mPY, mPW, mPH, h("222222"), h("3A3A3A"), 0.75
 
-    Ln gx - 8, gy, mPX + mPW - 8, gy, H("4A4A4A"), 1, msoLineSolid
+    Ln gx - 8, gy, mPX + mPW - 8, gy, h("4A4A4A"), 1, msoLineSolid
     Dim tv As Double
     For tv = 1000 To maxTvd Step 1000
-        Ln gx - 4, gy + tv / sc, mPX + mPW - 8, gy + tv / sc, H("3A3A3A"), 0.6, msoLineSysDot
-        Tx gx - 6, gy + tv / sc + 3, Format$(tv, "#,##0"), 7.5, H("A8A8A8"), "end"
+        Ln gx - 4, gy + tv / sc, mPX + mPW - 8, gy + tv / sc, h("3A3A3A"), 0.6, msoLineSysDot
+        Tx gx - 6, gy + tv / sc + 3, Format$(tv, "#,##0"), 7.5, h("A8A8A8"), "end"
     Next tv
 
     ' the plan, split so drilled / remaining / today read differently
     Dim d0 As Double, d1 As Double
     d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
     d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
-    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, 0, mBitMD, H("FFFFFF"), 2.4, msoLineSolid
-    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, mBitMD, pMD(np - 1), H("6A6A6A"), 1.6, msoLineDash
-    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, d0, d1, H("5BA3D9"), 4.2, msoLineSolid
+    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, 0, mBitMD, h("FFFFFF"), 2.4, msoLineSolid
+    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, mBitMD, pMD(np - 1), h("6A6A6A"), 1.6, msoLineDash
+    SectionSeg pMD, pTvd, vs, np, sc, gx, gy, d0, d1, h("5BA3D9"), 4.2, msoLineSolid
 
     For i = 0 To mWCount - 1
         Dim wvs As Double, wtv As Double
         If SectionAt(pMD, pTvd, vs, np, mWMD(i), wvs, wtv) Then
-            Dot gx + wvs / sc, gy + wtv / sc, 2, H("4CAF7A"), -1, 0
+            Dot gx + wvs / sc, gy + wtv / sc, 2, h("4CAF7A"), -1, 0
         End If
     Next i
 
@@ -2042,9 +2042,9 @@ Private Sub DrawSection(ss As Worksheet)
         If tMd > 0# And tName <> "" Then
             Dim gvs As Double, gtv As Double
             If SectionAt(pMD, pTvd, vs, np, tMd, gvs, gtv) Then
-                Dot gx + gvs / sc, gy + gtv / sc, 3, H("1A1A1A"), H("A8A8A8"), 1
+                Dot gx + gvs / sc, gy + gtv / sc, 3, h("1A1A1A"), h("A8A8A8"), 1
                 If tName <> prevName And gtv > 500# Then
-                    Tx gx + gvs / sc - 7, gy + gtv / sc + 3, tName, 8, H("A8A8A8"), "end"
+                    Tx gx + gvs / sc - 7, gy + gtv / sc + 3, tName, 8, h("A8A8A8"), "end"
                 End If
                 prevName = tName
             End If
@@ -2053,16 +2053,16 @@ Private Sub DrawSection(ss As Worksheet)
 
     Dim bvs As Double, btv As Double
     If SectionAt(pMD, pTvd, vs, np, mBitMD, bvs, btv) Then
-        Dot gx + bvs / sc, gy + btv / sc, 4, H("FF5555"), H("1A1A1A"), 1.2
-        Tx gx + bvs / sc + 8, gy + btv / sc + 4, "BIT " & Format$(mBitMD, "#,##0"), 8.5, H("FF5555"), "start", True
+        Dot gx + bvs / sc, gy + btv / sc, 4, h("FF5555"), h("1A1A1A"), 1.2
+        Tx gx + bvs / sc + 8, gy + btv / sc + 4, "BIT " & Format$(mBitMD, "#,##0"), 8.5, h("FF5555"), "start", True
     End If
     Dim tvs As Double, ttv As Double
     If SectionAt(pMD, pTvd, vs, np, pMD(np - 1), tvs, ttv) Then
-        Tx gx + tvs / sc, gy + ttv / sc - 8, "TD " & Format$(pMD(np - 1), "#,##0"), 8, H("A8A8A8"), "middle"
+        Tx gx + tvs / sc, gy + ttv / sc - 8, "TD " & Format$(pMD(np - 1), "#,##0"), 8, h("A8A8A8"), "middle"
     End If
 
-    Tx gx - 14, gy - 7, "TVD m", 8, H("A8A8A8"), "start"
-    Tx mPX + mPW - 8, mPY + mPH - 7, "vertical section m " & ChrW(8594), 8, H("A8A8A8"), "end"
+    Tx gx - 14, gy - 7, "TVD m", 8, h("A8A8A8"), "start"
+    Tx mPX + mPW - 8, mPY + mPH - 7, "vertical section m " & ChrW(8594), 8, h("A8A8A8"), "end"
 End Sub
 
 Private Function SectionAt(pMD() As Double, pTvd() As Double, vs() As Double, _
@@ -2125,17 +2125,17 @@ End Sub
 '  exactly what the cells say and the D7:F17 block stays read-only.
 ' ================================================================================
 Private Sub DrawDay(dt As Worksheet)
-    Rect mPX, mQY, mPW, mQH, H("222222"), H("3A3A3A"), 0.75
-    Tx mPX + 11, mQY + 17, "REPORTING DAY", 9.5, H("FFFFFF"), "start", True
-    Ln mPX + 11, mQY + 22, mPX + mPW - 11, mQY + 22, H("4A4A4A"), 0.75, msoLineSolid
+    Rect mPX, mQY, mPW, mQH, h("222222"), h("3A3A3A"), 0.75
+    Tx mPX + 11, mQY + 17, "REPORTING DAY", 9.5, h("FFFFFF"), "start", True
+    Ln mPX + 11, mQY + 22, mPX + mPW - 11, mQY + 22, h("4A4A4A"), 0.75, msoLineSolid
 
     Dim y As Double: y = mQY + 36
     KV mPX, mPW, y, "From / to", _
-       cellText(dt, "C4") & " " & ChrW(8594) & " " & cellText(dt, "C5"), 9, H("FFFFFF"), False
+       cellText(dt, "C4") & " " & ChrW(8594) & " " & cellText(dt, "C5"), 9, h("FFFFFF"), False
     y = y + 16
-    KV mPX, mPW, y, "Drilled", cellText(dt, "C6"), 9, H("5BA3D9"), True
+    KV mPX, mPW, y, "Drilled", cellText(dt, "C6"), 9, h("5BA3D9"), True
     y = y + 16
-    KV mPX, mPW, y, "Slid / rot", cellText(dt, "C7") & " / " & cellText(dt, "C8"), 9, H("FFFFFF"), False
+    KV mPX, mPW, y, "Slid / rot", cellText(dt, "C7") & " / " & cellText(dt, "C8"), 9, h("FFFFFF"), False
     y = y + 18
     DayStack mPX, mPW, y, "Sliding", cellText(dt, "C9")
     DayStack mPX, mPW, y, "Rotating", cellText(dt, "C10")
@@ -2143,68 +2143,68 @@ End Sub
 
 Private Sub DayStack(ByVal px As Double, ByVal pw As Double, ByRef y As Double, _
                      ByVal k As String, ByVal v As String)
-    Tx px + 11, y, k, 8.5, H("A8A8A8"), "start"
+    Tx px + 11, y, k, 8.5, h("A8A8A8"), "start"
     y = y + 12
-    Tx px + 11, y, v, 8, H("FFFFFF"), "start", False, pw - 22
+    Tx px + 11, y, v, 8, h("FFFFFF"), "start", False, pw - 22
     y = y + 15
 End Sub
 
 Private Sub DrawMetrics(ss As Worksheet, dt As Worksheet)
     Tx mMX, 20, "LAST SURVEY " & ChrW(183) & " POSITION " & ChrW(183) & " REQUIREMENT", _
-       12.5, H("FFFFFF"), "start", True
-    Rect mMX, mVY, mMW, mMH, H("222222"), H("3A3A3A"), 0.75
+       12.5, h("FFFFFF"), "start", True
+    Rect mMX, mVY, mMW, mMH, h("222222"), h("3A3A3A"), 0.75
 
     Dim y As Double: y = mVY + 20
 
     MHead y, "LAST SURVEY"
     ' E7 and E10 carry a degree suffix in their number format, so they are
     ' formatted from the value here rather than echoed as text
-    KV mMX, mMW, y, "Depth", Format$(mSvyMD, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "INC", cellText(dt, "E8"), 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "AZM", cellText(dt, "E9"), 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "TVD", Format$(mSvyTvd, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "DLS", cellText(dt, "E11"), 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "Bit depth", Format$(mBitMD, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "Depth", Format$(mSvyMD, "#,##0.00") & " m", 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "INC", cellText(dt, "E8"), 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "AZM", cellText(dt, "E9"), 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "TVD", Format$(mSvyTvd, "#,##0.00") & " m", 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "DLS", cellText(dt, "E11"), 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "Bit depth", Format$(mBitMD, "#,##0.00") & " m", 10.5, h("FFFFFF"), False: y = y + 16
 
     MHead y, "POSITION OF WELLBORE"
     ' Short keys so values stay clear of labels in the narrow metrics column.
     KV mMX, mMW, y, "R/L from plan", cellText(dt, "E13") & " " & cellText(dt, "F13"), _
-       10.5, H("FFFFFF"), False: y = y + 16
+       10.5, h("FFFFFF"), False: y = y + 16
     KV mMX, mMW, y, "Above/Below plan", cellText(dt, "E14") & " " & cellText(dt, "F14"), _
-       10.5, H("4CAF7A"), True: y = y + 16
+       10.5, h("4CAF7A"), True: y = y + 16
     If mUseSailBands Then
         KV mMX, mMW, y, "Dist. from geo", cellText(dt, "E15") & " " & cellText(dt, "F15"), _
-           10.5, H("FFFFFF"), False: y = y + 16
+           10.5, h("FFFFFF"), False: y = y + 16
     End If
     If mUseSailBands Then
         KV mMX, mMW, y, "Corridor used", _
            Format$(100# * Abs(mSvyDev) / mGeoHalf, "0") & "% of " & ChrW(177) & Format$(mGeoHalf, "0.00") & " m", _
-           10.5, H("FFFFFF"), False: y = y + 16
+           10.5, h("FFFFFF"), False: y = y + 16
         KV mMX, mMW, y, "Lateral used", _
            Format$(100# * Abs(mSvyLat) / mLatTol, "0") & "% of " & ChrW(177) & Format$(mLatTol, "0.00") & " m", _
-           10.5, H("FFFFFF"), False: y = y + 16
+           10.5, h("FFFFFF"), False: y = y + 16
     Else
         KV mMX, mMW, y, "Offset from plan", Format$(Abs(mSvyLat), "0.00") & " m " & _
-           IIf(mSvyLat < 0, "L", "R"), 10.5, H("FFFFFF"), False: y = y + 16
+           IIf(mSvyLat < 0, "L", "R"), 10.5, h("FFFFFF"), False: y = y + 16
         KV mMX, mMW, y, "TVD vs plan", Format$(Abs(mSvyDev), "0.00") & " m", _
-           10.5, H("FFFFFF"), False: y = y + 16
+           10.5, h("FFFFFF"), False: y = y + 16
     End If
 
     MHead y, "REQUIREMENT TO " & mTgtName & " " & Format$(mWpMD, "#,##0")
-    KV mMX, mMW, y, "Distance to go", Format$(mToGo, "#,##0.0") & " m", 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "Target TVD", Format$(mWpTvd, "#,##0.00") & " m", 10.5, H("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "Required inclination", Format$(mReqInc, "0.00") & ChrW(176), 10.5, H("FF5555"), True: y = y + 16
-    KV mMX, mMW, y, "Holding", Format$(mSvyInc, "0.00") & ChrW(176), 10.5, H("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "Distance to go", Format$(mToGo, "#,##0.0") & " m", 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "Target TVD", Format$(mWpTvd, "#,##0.00") & " m", 10.5, h("FFFFFF"), False: y = y + 16
+    KV mMX, mMW, y, "Required inclination", Format$(mReqInc, "0.00") & ChrW(176), 10.5, h("FF5555"), True: y = y + 16
+    KV mMX, mMW, y, "Holding", Format$(mSvyInc, "0.00") & ChrW(176), 10.5, h("FFFFFF"), False: y = y + 16
     KV mMX, mMW, y, "Correction", Format$(Abs(mReqInc - mSvyInc), "0.00") & ChrW(176) & " " & _
-       IIf(mReqInc < mSvyInc, "drop", "build"), 10.5, H("FF5555"), True: y = y + 16
+       IIf(mReqInc < mSvyInc, "drop", "build"), 10.5, h("FF5555"), True: y = y + 16
     KV mMX, mMW, y, "Arrival if held", Format$(Abs(mHoldDevEnd), "0.00") & " m " & _
-       IIf(mHoldDevEnd >= 0, "above", "below"), 10.5, H("E09A3D"), False: y = y + 16
+       IIf(mHoldDevEnd >= 0, "above", "below"), 10.5, h("E09A3D"), False: y = y + 16
 End Sub
 
 Private Sub MHead(ByRef y As Double, ByVal t As String)
     y = y + 5
-    Tx mMX + 11, y, t, 9.5, H("FFFFFF"), "start", True
-    Ln mMX + 11, y + 4, mMX + mMW - 11, y + 4, H("4A4A4A"), 0.75, msoLineSolid
+    Tx mMX + 11, y, t, 9.5, h("FFFFFF"), "start", True
+    Ln mMX + 11, y + 4, mMX + mMW - 11, y + 4, h("4A4A4A"), 0.75, msoLineSolid
     y = y + 16
 End Sub
 
@@ -2218,7 +2218,7 @@ Private Sub KV(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
     If pw < 200# Then valW = pw * 0.52
     keyW = pw - 22# - valW
     If keyW < 40# Then keyW = 40#
-    Tx px + 11, y, k, sz, H("A8A8A8"), "start", False, keyW
+    Tx px + 11, y, k, sz, h("A8A8A8"), "start", False, keyW
     Tx px + pw - 11, y, v, sz, clr, "end", bold
 End Sub
 
@@ -2268,19 +2268,19 @@ End Function
 Private Sub KVDark(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
                    ByVal k As String, ByVal v As String, ByVal sz As Double, _
                    ByVal clr As Long, ByVal bold As Boolean)
-    Tx px + 11, y, k, sz, H("A8A8A8"), "start"
+    Tx px + 11, y, k, sz, h("A8A8A8"), "start"
     Tx px + pw - 11, y, v, sz, clr, "end", bold
 End Sub
 
 Private Sub PanelHeadDark(ByVal px As Double, ByVal pw As Double, ByRef y As Double, ByVal t As String)
-    Tx px + 11, y, t, 9.5, H("FFFFFF"), "start", True
-    Ln px + 11, y + 4, px + pw - 11, y + 4, H("4A4A4A"), 0.75, msoLineSolid
+    Tx px + 11, y, t, 9.5, h("FFFFFF"), "start", True
+    Ln px + 11, y + 4, px + pw - 11, y + 4, h("4A4A4A"), 0.75, msoLineSolid
     y = y + 16
 End Sub
 
 Private Sub SecBarDark(ByVal y As Double, ByVal t As String)
-    Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26, H("2A2A2A"), H("3A3A3A"), 0.5
-    Tx CANVAS_W / 2#, y + 18, t, 10, H("FFFFFF"), "middle", True
+    Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26, h("2A2A2A"), h("3A3A3A"), 0.5
+    Tx CANVAS_W / 2#, y + 18, t, 10, h("FFFFFF"), "middle", True
 End Sub
 
 Private Sub DrawOps(dt As Worksheet)
@@ -2296,66 +2296,66 @@ Private Sub DrawOps(dt As Worksheet)
     y = mOpsOrigin + OPS_GAP
 
     ' ---- header chips: plan / BHA / costs ------------------------------------
-    Rect lx, y, CANVAS_W - 2 * OPS_PAD, 44, H("222222"), H("3A3A3A"), 0.75
-    Tx lx + 14, y + 28, cellText(dt, "B2") & " " & cellText(dt, "C2"), 12, H("FFFFFF"), "start", True
-    Tx lx + 220, y + 28, cellText(dt, "B3") & " " & cellText(dt, "C3"), 12, H("FFFFFF"), "start", True
-    Tx lx + 400, y + 28, cellText(dt, "D3") & " " & cellText(dt, "E3"), 12, H("FFFFFF"), "start", False
-    Tx CANVAS_W - OPS_PAD - 14, y + 28, cellText(dt, "D4") & " " & cellText(dt, "E4"), 12, H("FFFFFF"), "end", True
+    Rect lx, y, CANVAS_W - 2 * OPS_PAD, 44, h("222222"), h("3A3A3A"), 0.75
+    Tx lx + 14, y + 28, cellText(dt, "B2") & " " & cellText(dt, "C2"), 12, h("FFFFFF"), "start", True
+    Tx lx + 220, y + 28, cellText(dt, "B3") & " " & cellText(dt, "C3"), 12, h("FFFFFF"), "start", True
+    Tx lx + 400, y + 28, cellText(dt, "D3") & " " & cellText(dt, "E3"), 12, h("FFFFFF"), "start", False
+    Tx CANVAS_W - OPS_PAD - 14, y + 28, cellText(dt, "D4") & " " & cellText(dt, "E4"), 12, h("FFFFFF"), "end", True
     y = y + 44 + OPS_GAP
 
     ' ---- day drilling | BHA totals -------------------------------------------
-    Rect lx, y, cw, 167, H("222222"), H("3A3A3A"), 0.75
-    Rect rx, y, cw, 167, H("222222"), H("3A3A3A"), 0.75
+    Rect lx, y, cw, 167, h("222222"), h("3A3A3A"), 0.75
+    Rect rx, y, cw, 167, h("222222"), h("3A3A3A"), 0.75
     ly = y + 20: ry = y + 20
     PanelHeadDark lx, cw, ly, "DAY DRILLING"
-    KVDark lx, cw, ly, cellText(dt, "B4"), cellText(dt, "C4"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B5"), cellText(dt, "C5"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B6"), cellText(dt, "C6"), 11, H("5BA3D9"), True: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B7"), cellText(dt, "C7"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B8"), cellText(dt, "C8"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B9"), cellText(dt, "C9"), 10.5, H("FFFFFF"), False: ly = ly + 16
-    KVDark lx, cw, ly, cellText(dt, "B10"), cellText(dt, "C10"), 10.5, H("FFFFFF"), False: ly = ly + 16
-    KVDark lx, cw, ly, cellText(dt, "B11"), cellText(dt, "C11"), 10.5, H("FFFFFF"), False
+    KVDark lx, cw, ly, cellText(dt, "B4"), cellText(dt, "C4"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B5"), cellText(dt, "C5"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B6"), cellText(dt, "C6"), 11, h("5BA3D9"), True: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B7"), cellText(dt, "C7"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B8"), cellText(dt, "C8"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B9"), cellText(dt, "C9"), 10.5, h("FFFFFF"), False: ly = ly + 16
+    KVDark lx, cw, ly, cellText(dt, "B10"), cellText(dt, "C10"), 10.5, h("FFFFFF"), False: ly = ly + 16
+    KVDark lx, cw, ly, cellText(dt, "B11"), cellText(dt, "C11"), 10.5, h("FFFFFF"), False
 
     PanelHeadDark rx, cw, ry, "TOTALS FOR BHA " & cellText(dt, "C12")
-    KVDark rx, cw, ry, cellText(dt, "B13"), cellText(dt, "C13"), 11, H("FFFFFF"), False: ry = ry + 17
-    KVDark rx, cw, ry, cellText(dt, "B14"), cellText(dt, "C14"), 11, H("FFFFFF"), False: ry = ry + 17
-    KVDark rx, cw, ry, cellText(dt, "B15"), cellText(dt, "C15"), 11, H("FFFFFF"), False: ry = ry + 17
-    KVDark rx, cw, ry, cellText(dt, "B16"), cellText(dt, "C16"), 11, H("FFFFFF"), False: ry = ry + 17
-    KVDark rx, cw, ry, cellText(dt, "B17"), cellText(dt, "C17"), 11, H("FFFFFF"), False
+    KVDark rx, cw, ry, cellText(dt, "B13"), cellText(dt, "C13"), 11, h("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B14"), cellText(dt, "C14"), 11, h("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B15"), cellText(dt, "C15"), 11, h("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B16"), cellText(dt, "C16"), 11, h("FFFFFF"), False: ry = ry + 17
+    KVDark rx, cw, ry, cellText(dt, "B17"), cellText(dt, "C17"), 11, h("FFFFFF"), False
     y = y + 167 + OPS_GAP
 
     ' ---- ROP + motor perf | motor info + 3rd party ---------------------------
-    Rect lx, y, cw, 267, H("222222"), H("3A3A3A"), 0.75
-    Rect rx, y, cw, 267, H("222222"), H("3A3A3A"), 0.75
+    Rect lx, y, cw, 267, h("222222"), h("3A3A3A"), 0.75
+    Rect rx, y, cw, 267, h("222222"), h("3A3A3A"), 0.75
     ly = y + 20: ry = y + 20
     PanelHeadDark lx, cw, ly, "PERFORMANCE"
-    KVDark lx, cw, ly, cellText(dt, "B18"), cellText(dt, "C18"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B19"), cellText(dt, "C19"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "B20"), cellText(dt, "C20"), 11, H("FFFFFF"), False: ly = ly + 20
+    KVDark lx, cw, ly, cellText(dt, "B18"), cellText(dt, "C18"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B19"), cellText(dt, "C19"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "B20"), cellText(dt, "C20"), 11, h("FFFFFF"), False: ly = ly + 20
     PanelHeadDark lx, cw, ly, "MOTOR PERFORMANCE"
-    KVDark lx, cw, ly, cellText(dt, "D19"), cellText(dt, "E19"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "D20"), cellText(dt, "E20"), 11, H("FFFFFF"), False: ly = ly + 17
-    KVDark lx, cw, ly, cellText(dt, "D21"), cellText(dt, "E21"), 11, H("FFFFFF"), False
+    KVDark lx, cw, ly, cellText(dt, "D19"), cellText(dt, "E19"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "D20"), cellText(dt, "E20"), 11, h("FFFFFF"), False: ly = ly + 17
+    KVDark lx, cw, ly, cellText(dt, "D21"), cellText(dt, "E21"), 11, h("FFFFFF"), False
 
     PanelHeadDark rx, cw, ry, "MOTOR INFORMATION"
-    KVDark rx, cw, ry, cellText(dt, "B22"), cellText(dt, "C22"), 11, H("FFFFFF"), True: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B23"), cellText(dt, "C23"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B24"), cellText(dt, "C24"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B25"), cellText(dt, "C25"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B26"), cellText(dt, "C26"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B27"), cellText(dt, "C27"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B28"), cellText(dt, "C28"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B29"), cellText(dt, "C29"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B30"), cellText(dt, "C30"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B31"), cellText(dt, "C31"), 10.5, H("FFFFFF"), False: ry = ry + 16
-    KVDark rx, cw, ry, cellText(dt, "B32"), cellText(dt, "C32"), 10.5, H("FFFFFF"), False: ry = ry + 18
+    KVDark rx, cw, ry, cellText(dt, "B22"), cellText(dt, "C22"), 11, h("FFFFFF"), True: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B23"), cellText(dt, "C23"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B24"), cellText(dt, "C24"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B25"), cellText(dt, "C25"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B26"), cellText(dt, "C26"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B27"), cellText(dt, "C27"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B28"), cellText(dt, "C28"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B29"), cellText(dt, "C29"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B30"), cellText(dt, "C30"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B31"), cellText(dt, "C31"), 10.5, h("FFFFFF"), False: ry = ry + 16
+    KVDark rx, cw, ry, cellText(dt, "B32"), cellText(dt, "C32"), 10.5, h("FFFFFF"), False: ry = ry + 18
     PanelHeadDark rx, cw, ry, cellText(dt, "D23")
     KVDark rx, cw, ry, cellText(dt, "D24"), _
-           cellText(dt, "E24") & "  /  " & cellText(dt, "F24"), 10.5, H("FFFFFF"), False: ry = ry + 16
+           cellText(dt, "E24") & "  /  " & cellText(dt, "F24"), 10.5, h("FFFFFF"), False: ry = ry + 16
     PanelHeadDark rx, cw, ry, cellText(dt, "D29")
     KVDark rx, cw, ry, cellText(dt, "D30"), _
-           cellText(dt, "E30") & "  /  " & cellText(dt, "F30"), 10.5, H("FFFFFF"), False
+           cellText(dt, "E30") & "  /  " & cellText(dt, "F30"), 10.5, h("FFFFFF"), False
     y = y + 267 + OPS_GAP
 
     ' ---- AC Info (filled rows only) ------------------------------------------
@@ -2363,22 +2363,22 @@ Private Sub DrawOps(dt As Worksheet)
     SecBarDark y, cellText(dt, "B33")
     y = y + 36
     If n = 0 Then
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, H("222222"), H("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 20, "none", 11, H("A8A8A8"), "start"
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, h("222222"), h("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 20, "none", 11, h("A8A8A8"), "start"
         y = y + 32
     Else
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), H("222222"), H("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 16, "Offset Well", 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 620, y + 16, "SF", 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 720, y + 16, "C2C (m)", 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 860, y + 16, "Closest C2C", 10, H("A8A8A8"), "start"
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), h("222222"), h("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 16, "Offset Well", 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 620, y + 16, "SF", 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 720, y + 16, "C2C (m)", 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 860, y + 16, "Closest C2C", 10, h("A8A8A8"), "start"
         y = y + 24
         For r = 35 To 42
             If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
-                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 10.5, H("FFFFFF"), "start"
-                Tx OPS_PAD + 620, y + 2, cellText(dt, "D" & r), 10.5, H("FFFFFF"), "start"
-                Tx OPS_PAD + 720, y + 2, cellText(dt, "E" & r), 10.5, H("FFFFFF"), "start"
-                Tx OPS_PAD + 860, y + 2, cellText(dt, "F" & r), 10.5, H("FFFFFF"), "start"
+                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 10.5, h("FFFFFF"), "start"
+                Tx OPS_PAD + 620, y + 2, cellText(dt, "D" & r), 10.5, h("FFFFFF"), "start"
+                Tx OPS_PAD + 720, y + 2, cellText(dt, "E" & r), 10.5, h("FFFFFF"), "start"
+                Tx OPS_PAD + 860, y + 2, cellText(dt, "F" & r), 10.5, h("FFFFFF"), "start"
                 y = y + ROW_PITCH
             End If
         Next r
@@ -2391,24 +2391,24 @@ Private Sub DrawOps(dt As Worksheet)
     SecBarDark y, cellText(dt, "B43")
     y = y + 36
     If n = 0 Then
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, H("222222"), H("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 20, "none", 11, H("A8A8A8"), "start"
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, h("222222"), h("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 20, "none", 11, h("A8A8A8"), "start"
         y = y + 32
     Else
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), H("222222"), H("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 16, cellText(dt, "B44"), 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 220, y + 16, cellText(dt, "C44"), 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 420, y + 16, cellText(dt, "D44"), 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 560, y + 16, cellText(dt, "E44"), 10, H("A8A8A8"), "start"
-        Tx OPS_PAD + 720, y + 16, cellText(dt, "F44"), 10, H("A8A8A8"), "start"
+        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), h("222222"), h("3A3A3A"), 0.5
+        Tx OPS_PAD + 14, y + 16, cellText(dt, "B44"), 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 220, y + 16, cellText(dt, "C44"), 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 420, y + 16, cellText(dt, "D44"), 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 560, y + 16, cellText(dt, "E44"), 10, h("A8A8A8"), "start"
+        Tx OPS_PAD + 720, y + 16, cellText(dt, "F44"), 10, h("A8A8A8"), "start"
         y = y + 24
         For r = 45 To 55
             If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
-                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 11, H("FFFFFF"), "start"
-                Tx OPS_PAD + 220, y + 2, cellText(dt, "C" & r), 11, H("FFFFFF"), "start"
-                Tx OPS_PAD + 420, y + 2, cellText(dt, "D" & r), 11, H("FFFFFF"), "start"
-                Tx OPS_PAD + 560, y + 2, cellText(dt, "E" & r), 11, H("FFFFFF"), "start"
-                Tx OPS_PAD + 720, y + 2, cellText(dt, "F" & r), 11, H("FFFFFF"), "start"
+                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 11, h("FFFFFF"), "start"
+                Tx OPS_PAD + 220, y + 2, cellText(dt, "C" & r), 11, h("FFFFFF"), "start"
+                Tx OPS_PAD + 420, y + 2, cellText(dt, "D" & r), 11, h("FFFFFF"), "start"
+                Tx OPS_PAD + 560, y + 2, cellText(dt, "E" & r), 11, h("FFFFFF"), "start"
+                Tx OPS_PAD + 720, y + 2, cellText(dt, "F" & r), 11, h("FFFFFF"), "start"
                 y = y + ROW_PITCH
             End If
         Next r
@@ -2419,11 +2419,11 @@ Private Sub DrawOps(dt As Worksheet)
         Tx CANVAS_W - OPS_PAD, mCanvasH - 10, _
            "Plan " & cellText(dt, "C2") & " " & ChrW(183) & " geo " & ChrW(177) & Format$(mGeoHalf, "0.00") & _
            " m (AB14) " & ChrW(183) & " lateral " & ChrW(177) & Format$(mLatTol, "0.00") & " m (AA14)", _
-           8.5, H("7A7A7A"), "end"
+           8.5, h("7A7A7A"), "end"
     Else
         Tx CANVAS_W - OPS_PAD, mCanvasH - 10, _
            "Plan " & cellText(dt, "C2") & " " & ChrW(183) & " shaft 1:1 (sail bands are lateral-only)", _
-           8.5, H("7A7A7A"), "end"
+           8.5, h("7A7A7A"), "end"
     End If
 End Sub
 
@@ -2446,8 +2446,8 @@ Private Function MinD(ByVal a As Double, ByVal b As Double) As Double
     If a < b Then MinD = a Else MinD = b
 End Function
 
-Private Function H(ByVal hex6 As String) As Long
-    H = RGB(CLng("&H" & mid$(hex6, 1, 2)), _
+Private Function h(ByVal hex6 As String) As Long
+    h = RGB(CLng("&H" & mid$(hex6, 1, 2)), _
             CLng("&H" & mid$(hex6, 3, 2)), _
             CLng("&H" & mid$(hex6, 5, 2)))
 End Function
@@ -2456,44 +2456,44 @@ End Function
 ' hole / plan / required / held. Call sites keep the old hex names.
 Private Function PrintFill(ByVal clr As Long) As Long
     If clr < 0 Then PrintFill = clr: Exit Function
-    If clr = H("1A1A1A") Or clr = H("222222") Or clr = H("2A2A2A") _
-            Or clr = H("242424") Or clr = H("252825") Then
-        PrintFill = H("FFFFFF"): Exit Function
+    If clr = h("1A1A1A") Or clr = h("222222") Or clr = h("2A2A2A") _
+            Or clr = h("242424") Or clr = h("252825") Then
+        PrintFill = h("FFFFFF"): Exit Function
     End If
-    If clr = H("1E3A2F") Or clr = H("1A3328") Or clr = H("1A3348") Then
+    If clr = h("1E3A2F") Or clr = h("1A3328") Or clr = h("1A3348") Then
         PrintFill = -1: Exit Function
     End If
-    If clr = H("B6DBC8") Then PrintFill = H("888888"): Exit Function
+    If clr = h("B6DBC8") Then PrintFill = h("888888"): Exit Function
     PrintFill = clr
 End Function
 
 Private Function PrintLine(ByVal clr As Long) As Long
     If clr < 0 Then PrintLine = clr: Exit Function
-    If clr = H("FFFFFF") Then PrintLine = H("1A1A1A"): Exit Function
-    If clr = H("A8CBB8") Or clr = H("B6DBC8") Or clr = H("9EC9B0") Then
-        PrintLine = H("777777"): Exit Function
+    If clr = h("FFFFFF") Then PrintLine = h("1A1A1A"): Exit Function
+    If clr = h("A8CBB8") Or clr = h("B6DBC8") Or clr = h("9EC9B0") Then
+        PrintLine = h("777777"): Exit Function
     End If
-    If clr = H("3A3A3A") Or clr = H("333333") Or clr = H("444444") Then
-        PrintLine = H("B0B0B0"): Exit Function
+    If clr = h("3A3A3A") Or clr = h("333333") Or clr = h("444444") Then
+        PrintLine = h("B0B0B0"): Exit Function
     End If
-    If clr = H("5BA3D9") Then PrintLine = H("1A3A5C"): Exit Function
-    If clr = H("4CAF7A") Then PrintLine = H("1B4D2E"): Exit Function
-    If clr = H("3D6B54") Then PrintLine = H("1B4D2E"): Exit Function
-    If clr = H("FF5555") Then PrintLine = H("8B0000"): Exit Function
-    If clr = H("E09A3D") Then PrintLine = H("6B4A00"): Exit Function
+    If clr = h("5BA3D9") Then PrintLine = h("1A3A5C"): Exit Function
+    If clr = h("4CAF7A") Then PrintLine = h("1B4D2E"): Exit Function
+    If clr = h("3D6B54") Then PrintLine = h("1B4D2E"): Exit Function
+    If clr = h("FF5555") Then PrintLine = h("8B0000"): Exit Function
+    If clr = h("E09A3D") Then PrintLine = h("6B4A00"): Exit Function
     PrintLine = clr
 End Function
 
 Private Function PrintText(ByVal clr As Long) As Long
-    If clr = H("FFFFFF") Then PrintText = H("1A1A1A"): Exit Function
-    If clr = H("A8A8A8") Then PrintText = H("4A4A4A"): Exit Function
-    If clr = H("7A7A7A") Then PrintText = H("555555"): Exit Function
-    If clr = H("8AAB9A") Then PrintText = H("4A4A4A"): Exit Function
-    If clr = H("4CAF7A") Then PrintText = H("1B4D2E"): Exit Function
-    If clr = H("5BA3D9") Then PrintText = H("1A3A5C"): Exit Function
-    If clr = H("FF5555") Then PrintText = H("8B0000"): Exit Function
-    If clr = H("E09A3D") Then PrintText = H("6B4A00"): Exit Function
-    If clr = H("B6DBC8") Then PrintText = H("555555"): Exit Function
+    If clr = h("FFFFFF") Then PrintText = h("1A1A1A"): Exit Function
+    If clr = h("A8A8A8") Then PrintText = h("4A4A4A"): Exit Function
+    If clr = h("7A7A7A") Then PrintText = h("555555"): Exit Function
+    If clr = h("8AAB9A") Then PrintText = h("4A4A4A"): Exit Function
+    If clr = h("4CAF7A") Then PrintText = h("1B4D2E"): Exit Function
+    If clr = h("5BA3D9") Then PrintText = h("1A3A5C"): Exit Function
+    If clr = h("FF5555") Then PrintText = h("8B0000"): Exit Function
+    If clr = h("E09A3D") Then PrintText = h("6B4A00"): Exit Function
+    If clr = h("B6DBC8") Then PrintText = h("555555"): Exit Function
     PrintText = clr
 End Function
 
@@ -2862,6 +2862,8 @@ Private Function cellText(ws As Worksheet, ByVal addr As String) As String
     ' the sheet prints its own trailing colons on labels; the panel adds its own layout
     If right$(cellText, 1) = ":" Then cellText = Left$(cellText, Len(cellText) - 1)
 End Function
+
+
 
 
 

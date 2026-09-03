@@ -249,7 +249,7 @@ Private Function LastActualAtBit(ByRef md As Double, ByRef inc As Double, _
     Dim vMd As Variant, vInc As Variant, vAzi As Variant
     Dim mdv As Double
     Dim dv As Double, dN As Double, dE As Double
-    Dim bitMD As Double, bitInc As Double, bitAzm As Double
+    Dim bitMd As Double, bitInc As Double, bitAzm As Double
     Dim vD As Variant, vW As Variant, vX As Variant, vH As Variant
 
     LastActualAtBit = False
@@ -288,9 +288,9 @@ NextSurvey:
 
     vD = ws.Cells(lastR, SS_COL_BIT_MD).Value2
     If IsNumeric(vD) And Len(CStr(vD & "")) > 0 Then
-        bitMD = CDbl(vD)
+        bitMd = CDbl(vD)
     Else
-        bitMD = prevMD
+        bitMd = prevMD
     End If
 
     vW = ws.Cells(lastR, SS_COL_BIT_INC).Value2
@@ -298,12 +298,12 @@ NextSurvey:
     If IsNumeric(vW) And Len(CStr(vW & "")) > 0 Then bitInc = CDbl(vW) Else bitInc = prevInc
     If IsNumeric(vX) And Len(CStr(vX & "")) > 0 Then bitAzm = CDbl(vX) Else bitAzm = prevAzi
 
-    If bitMD > prevMD + 0.005 Then
-        McStep prevMD, prevInc, prevAzi, bitMD, bitInc, bitAzm, dv, dN, dE
+    If bitMd > prevMD + 0.005 Then
+        McStep prevMD, prevInc, prevAzi, bitMd, bitInc, bitAzm, dv, dN, dE
         n = n + dN: e = e + dE: tvd = tvd + dv
-        md = bitMD: inc = bitInc: azm = bitAzm
-    ElseIf bitMD > 0# Then
-        md = bitMD
+        md = bitMd: inc = bitInc: azm = bitAzm
+    ElseIf bitMd > 0# Then
+        md = bitMd
         inc = bitInc
         azm = bitAzm
     End If
@@ -311,7 +311,7 @@ NextSurvey:
     LastActualAtBit = True
 End Function
 
-Private Function NextNamedTarget(ByVal bitMD As Double, _
+Private Function NextNamedTarget(ByVal bitMd As Double, _
         ByRef tMd As Double, ByRef tInc As Double, ByRef tAzm As Double, _
         ByRef tN As Double, ByRef tE As Double, ByRef tv As Double) As Boolean
     Dim ss As Worksheet
@@ -329,7 +329,7 @@ Private Function NextNamedTarget(ByVal bitMD As Double, _
         vNm = Trim$(CStr(ss.Cells(r, "Y").Value2 & ""))
         If Len(vNm) = 0 Then GoTo NextTgt
         If Not IsNumeric(vMd) Then GoTo NextTgt
-        If CDbl(vMd) <= bitMD + 0.005 Then GoTo NextTgt
+        If CDbl(vMd) <= bitMd + 0.005 Then GoTo NextTgt
         tMd = CDbl(vMd)
         tInc = NumOr(ss.Cells(r, "V").Value2, 0#)
         tAzm = NumOr(ss.Cells(r, "W").Value2, 0#)
@@ -570,7 +570,7 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
                    ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
                    ByRef dv As Double, ByRef dN As Double, ByRef dE As Double)
     Dim r1 As Double, r2 As Double, b1 As Double, b2 As Double
-    Dim cosDL As Double, beta As Double, H As Double
+    Dim cosDL As Double, beta As Double, h As Double
     r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
     b1 = Deg2Rad(a1): b2 = Deg2Rad(a2)
     cosDL = Cos(r2 - r1) - Sin(r1) * Sin(r2) * (1# - Cos(b2 - b1))
@@ -578,13 +578,14 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     If cosDL < -1# Then cosDL = -1#
     beta = Application.WorksheetFunction.Acos(cosDL)
     If beta > EPS Then
-        H = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
+        h = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
     Else
-        H = (md2 - md1) / 2#
+        h = (md2 - md1) / 2#
     End If
-    dv = H * (Cos(r1) + Cos(r2))
-    dN = H * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
-    dE = H * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
+    dv = h * (Cos(r1) + Cos(r2))
+    dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
+    dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
+
 
 

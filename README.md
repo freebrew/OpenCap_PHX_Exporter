@@ -82,7 +82,7 @@ Columns (data rows 13:305):
 | **E** | Survey MD |
 | **Q** | Seen motor yield (`C×J/M`) |
 | **T** | Metres **already slid** (history). Not used for Y or Z. |
-| **U** | User toolface (what they ran) |
+| **U** | User toolface (what they ran): `40R` / `R40` / `-40` / `40` highside, `190M` magnetic. Parsed in hidden `AK`; unparseable text is `#VALUE!` (never silently TF 0). |
 | **V / W / X** | TVD / INC / AZM @ bit. INC and AZM use the same seen-yield dogleg (`DoglegBelow`). |
 | **AO** | Active target MD |
 | **AR** | BURR (°/30 m) |
@@ -91,7 +91,7 @@ Columns (data rows 13:305):
 | **Y** | Comment: `Sliding <m> @ <TF>` … `BURR n.nn` |
 | **Z** | Leftover rotate: `C − instructed slide` |
 
-`T2:Y5` is a **display window** only. BURR / AS read the **full** named list on `_OC_PlanSec` (`ProjTargets_MD/INC/AZM/TVD`); AT aims at the **full plan** on `_OC_Survey` (named list is only the fallback). First KOP / TANGENT MD is `ProjBuildStartMd` — that is the gate for AR/AS/AT. **Do not use `$U$2` as a build-start gate.** U2 is whatever target the four-row window currently shows (often SOT after the window has slid).
+`T2:Y5` is a **display window** only. BURR / AS / AT all read the **full** named list on `_OC_PlanSec` (`ProjTargets_MD/INC/AZM/TVD`) and all start from the **projected bit** (`W` / `X` = Inc / Azm @ bit, never survey `F` / `G`), so the metres, BURR and toolface in Y describe one manoeuvre to one target. `RefreshSlideComments` rewires any legacy `ProjBurr(D,F,G,…)` / `ProjMetersToSlide(D,F,G,…)` helper formula to `W`/`X` on the fly. First KOP / TANGENT MD is `ProjBuildStartMd` — that is the gate for AR/AS/AT. **Do not use `$U$2` as a build-start gate.** U2 is whatever target the four-row window currently shows (often SOT after the window has slid).
 
 ### Aim
 

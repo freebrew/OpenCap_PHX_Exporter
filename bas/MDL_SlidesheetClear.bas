@@ -276,9 +276,9 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     ' keeps the AS/AR/AT formula inputs fresh; Clean restores the caller's
     ' mode, which recalcs the written cells once.
     Application.Calculation = xlCalculationManual
-    ss.Calculate
-
     wasProt = SheetUnprotectForVba(ss)
+    EnsureProjAimFormulasOnSheet ss
+    ss.Calculate
 
     ' Keep / restore label row
     If Len(Trim$(CStr(ss.Cells(Y_FIRST, "Y").text))) = 0 Then
@@ -384,6 +384,57 @@ Clean:
     Application.Calculation = prevCalc
     Application.EnableEvents = prevEvents
     m_updatingY = False
+End Sub
+
+' Hidden AR (BURR) / AS (Metres To Slide) must start from the PROJECTED bit
+' (W = Inc@Bit, X = Azm@Bit) — the same attitude AT (required TF) uses — not
+' the survey station (F / G). Older sheets carry
+'   ProjBurr(D13,F13,G13,...) / ProjMetersToSlide(D13,F13,G13,...)
+' which sized the slide from the survey while the TF was aimed from the bit,
+' so Y paired metres and toolface that belonged to two different manoeuvres.
+' Rewrites only the F{r},G{r} argument pair; every other token is preserved.
+'
+' W / X (Inc@Bit / Azm@Bit) used to pass IF(AK="",0,AK): a blank dial became
+' TF 0 = high side, so a rotary stand was projected as a full build with the
+' demonstrated N/O walk. Pass AK through so ProjIncAtBit / ProjAzmAtBit see
+' the blank and project pure rotary (bit attitude = survey attitude).
+' Caller owns protection / EnableEvents / calc mode.
+Private Sub EnsureProjAimFormulasOnSheet(ByVal ss As Worksheet)
+    Dim col As Variant
+    Dim rng As Range
+    Dim arr As Variant
+    Dim i As Long
+    Dim r As Long
+    Dim f As String
+    Dim oldTok As String
+    Dim newTok As String
+    Dim dirty As Boolean
+
+    On Error GoTo Done
+    For Each col In Array("AR", "AS", "W", "X")
+        Set rng = ss.Range(ss.Cells(Y_DATA_FIRST, col), ss.Cells(Y_LAST, col))
+        arr = rng.Formula
+        dirty = False
+        For i = 1 To UBound(arr, 1)
+            r = Y_DATA_FIRST + i - 1
+            f = CStr(arr(i, 1) & "")
+            If Len(f) > 1 And Left$(f, 1) = "=" Then
+                If col = "W" Or col = "X" Then
+                    oldTok = "IF(AK" & r & "="""",0,AK" & r & ")"
+                    newTok = "AK" & r
+                Else
+                    oldTok = "(D" & r & ",F" & r & ",G" & r & ","
+                    newTok = "(D" & r & ",W" & r & ",X" & r & ","
+                End If
+                If InStr(1, f, oldTok, vbBinaryCompare) > 0 Then
+                    arr(i, 1) = Replace(f, oldTok, newTok)
+                    dirty = True
+                End If
+            End If
+        Next i
+        If dirty Then rng.Formula = arr
+    Next col
+Done:
 End Sub
 
 ' Pad left/right text with spaces so the right part sits on the cell's right edge.
@@ -562,7 +613,7 @@ End Sub
 ' Assumes the caller already owns EnableEvents / protection.
 Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
     Dim r As Long
-    Dim bitMD As Double
+    Dim bitMd As Double
     Dim aimMd As Double
     Dim tgtMd As Variant
     Dim activeRow As Long
@@ -580,7 +631,7 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
     ' Bit-only depths past a target MD would otherwise advance the highlight
     ' while BURR is still computed against the prior survey's aim (e.g. TAR2 / 8.37).
     lastSurvRow = 0
-    bitMD = 0#
+    bitMd = 0#
     aimMd = 0#
     For r = 12 To 305
         vF = ss.Cells(r, "F").Value2
@@ -588,7 +639,7 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
             If Len(Trim$(CStr(vF & ""))) > 0 Then
                 lastSurvRow = r
                 vD = ss.Cells(r, "D").Value2
-                If IsNumeric(vD) Then bitMD = CDbl(vD)
+                If IsNumeric(vD) Then bitMd = CDbl(vD)
                 vAo = ss.Cells(r, "AO").Value2
                 If IsNumeric(vAo) Then
                     aimMd = CDbl(vAo)
@@ -614,11 +665,11 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
             Next r
         End If
         ' Fallback: first plan MD ahead of that survey's bit depth.
-        If activeRow = 0 And bitMD > 0# Then
+        If activeRow = 0 And bitMd > 0# Then
             For r = TGT_FIRST To TGT_LAST
                 tgtMd = ss.Cells(r, "U").Value2
                 If IsNumeric(tgtMd) Then
-                    If CDbl(tgtMd) > bitMD Then
+                    If CDbl(tgtMd) > bitMd Then
                         activeRow = r
                         Exit For
                     End If
@@ -762,7 +813,7 @@ Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
     Dim n As Long
     Dim md() As Double, inc() As Double, azm() As Double, tvd() As Double
     Dim nm() As String
-    Dim bitMD As Double
+    Dim bitMd As Double
     Dim aimI As Long
     Dim startI As Long
     Dim i As Long
@@ -784,10 +835,10 @@ Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
     EnsureProjTargetNames
     WriteFullProjTargetTable ps, md, inc, azm, tvd, nm, n
 
-    bitMD = LastSurveyBitMd(ss)
+    bitMd = LastSurveyBitMd(ss)
     aimI = 1
     For i = 1 To n
-        If md(i) > bitMD + 0.005 Then
+        If md(i) > bitMd + 0.005 Then
             aimI = i
             Exit For
         End If
@@ -1034,6 +1085,10 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
+
+
+
 
 
 

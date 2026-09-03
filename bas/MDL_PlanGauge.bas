@@ -83,7 +83,7 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
                    ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
                    ByRef dv As Double, ByRef dN As Double, ByRef dE As Double)
     Dim r1 As Double, r2 As Double, b1 As Double, b2 As Double
-    Dim cosDL As Double, beta As Double, H As Double
+    Dim cosDL As Double, beta As Double, h As Double
     r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
     b1 = Deg2Rad(a1): b2 = Deg2Rad(a2)
 
@@ -93,13 +93,13 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     beta = WorksheetFunction.Acos(cosDL)
 
     If beta > 0.0000001 Then
-        H = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
+        h = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
     Else
-        H = (md2 - md1) / 2#
+        h = (md2 - md1) / 2#
     End If
-    dv = H * (Cos(r1) + Cos(r2))
-    dN = H * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
-    dE = H * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
+    dv = h * (Cos(r1) + Cos(r2))
+    dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
+    dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
 
 ' --------------------------------------------------------------------------------
@@ -458,9 +458,9 @@ Private Sub RenderPlanGaugeCore()
     Dim showPtb As Boolean: showPtb = False
     Dim bx As Double, by As Double
     Dim tarStart As Variant: tarStart = ws.Range("U2").Value2
-    Dim bitMD As Variant: bitMD = ws.Cells(lastRow, 4).Value2
-    If IsNumeric(tarStart) And IsNumeric(bitMD) Then
-        If sMD >= CDbl(tarStart) And CDbl(bitMD) > sMD Then
+    Dim bitMd As Variant: bitMd = ws.Cells(lastRow, 4).Value2
+    If IsNumeric(tarStart) And IsNumeric(bitMd) Then
+        If sMD >= CDbl(tarStart) And CDbl(bitMd) > sMD Then
             Dim incB As Double, azB As Double
             Dim vW As Variant: vW = ws.Cells(lastRow, 23).Value2
             Dim vX As Variant: vX = ws.Cells(lastRow, 24).Value2
@@ -468,12 +468,12 @@ Private Sub RenderPlanGaugeCore()
             If IsNumeric(vX) And Len(CStr(vX & "")) > 0 Then azB = CDbl(vX) Else azB = sAzi
 
             Dim stepV As Double, stepN As Double, stepE As Double
-            McStep sMD, sInc, sAzi, CDbl(bitMD), incB, azB, stepV, stepN, stepE
+            McStep sMD, sInc, sAzi, CDbl(bitMd), incB, azB, stepV, stepN, stepE
 
             Dim bitTvd As Double: bitTvd = actTvd + stepV
             Dim pbN As Double, pbE As Double, pbV As Double, pbAzi As Double, pbInc As Double
             If gravityMode Then
-                PlanAt CDbl(bitMD), nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, pbN, pbE, pbV, pbAzi, pbInc
+                PlanAt CDbl(bitMd), nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, pbN, pbE, pbV, pbAzi, pbInc
             Else
                 PlanAtTvd bitTvd, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, pbN, pbE, pbV, pbAzi, pbInc
             End If
@@ -548,15 +548,15 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
         If Left$(ws.Shapes(i).name, Len(SHP_PREFIX)) = SHP_PREFIX Then ws.Shapes(i).Delete
     Next i
     Dim area As Range: Set area = ws.Range(GAUGE_RANGE)
-    Dim l As Double, t As Double, w As Double, H As Double
-    l = area.Left: t = area.Top: w = area.Width: H = area.Height
+    Dim l As Double, t As Double, w As Double, h As Double
+    l = area.Left: t = area.Top: w = area.Width: h = area.Height
 
     ' Dial hugs the left edge (AA into AB) and grows with the AA1:AC7 height
     ' (rows 1-7 at 15 pt). Tight metrics column sits to its right, ending at AC.
     Dim textW As Double: textW = 72#
     Dim gap As Double: gap = 3#
     Dim r As Double
-    r = (H - 4#) / 2#
+    r = (h - 4#) / 2#
     Dim dialLeft As Double: dialLeft = l + 1#
     If dialLeft + 2# * r > l + w - textW - gap - 1# Then _
         r = (l + w - textW - gap - 1# - dialLeft) / 2#
@@ -564,7 +564,7 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
 
     Dim cx As Double, cy As Double
     cx = dialLeft + r
-    cy = t + H / 2#
+    cy = t + h / 2#
 
     Dim textX As Double: textX = l + w - textW - 1#
     If textX < dialLeft + 2# * r + gap Then textX = dialLeft + 2# * r + gap
@@ -574,7 +574,7 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
     boxT = t + 1#
     boxR = textX - 1#
     If boxR < dialLeft + 2# * r + 1# Then boxR = dialLeft + 2# * r + 1#
-    boxB = t + H - 1#
+    boxB = t + h - 1#
 
     If Not hasData Then
         DrawCombinedDial ws, cx, cy, r, modeTxt, scaleS, False, 0, 0, False, 0, 0, _
@@ -754,11 +754,11 @@ Private Sub DrawWaypointBand(ws As Worksheet, ByVal cx As Double, ByVal cy As Do
 End Sub
 
 Private Sub AddBandRect(ws As Worksheet, ByVal tag As String, _
-        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal H As Double, _
+        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal h As Double, _
         ByVal clr As Long, ByVal transparency As Double)
-    If w < 1# Or H < 1# Then Exit Sub
+    If w < 1# Or h < 1# Then Exit Sub
     Dim shp As Shape
-    Set shp = ws.Shapes.AddShape(msoShapeRectangle, x, y, w, H)
+    Set shp = ws.Shapes.AddShape(msoShapeRectangle, x, y, w, h)
     StyleGaugeShape shp, SHP_PREFIX & tag
     shp.fill.ForeColor.RGB = clr
     shp.fill.transparency = transparency
@@ -852,10 +852,10 @@ Private Sub StyleGaugeShape(shp As Shape, ByVal nm As String)
 End Sub
 
 Private Sub AddGaugeText(ws As Worksheet, ByVal nm As String, _
-        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal H As Double, _
+        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal h As Double, _
         ByVal txt As String, ByVal clr As Long, ByVal sz As Single, ByVal bold As Boolean)
     Dim shp As Shape
-    Set shp = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, x, y, w, H)
+    Set shp = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, x, y, w, h)
     StyleGaugeShape shp, nm
     shp.fill.Visible = msoFalse
     shp.line.Visible = msoFalse
@@ -941,6 +941,8 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
 
 
 

@@ -148,8 +148,8 @@ Public Sub InitSetup()
     If mBusy Then Exit Sub
     mBusy = True
 
-    Dim eN As Long
-    Dim eD As String
+    Dim en As Long
+    Dim ed As String
     Dim setupWasProt As Boolean
 
     ScreenBeginBusy "OpenCap: starting up..."
@@ -190,12 +190,12 @@ Public Sub InitSetup()
     Exit Sub
 
 ErrHandler:
-    eN = Err.Number
-    eD = Err.Description
+    en = Err.Number
+    ed = Err.Description
     ScreenForceReset
     mBusy = False
     On Error Resume Next
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "INIT ERR " & eN & ": " & eD
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "INIT ERR " & en & ": " & ed
     On Error GoTo 0
 End Sub
 
@@ -444,7 +444,7 @@ Private Sub ResetSetupWindow(ws As Worksheet)
     If Application.ActiveWorkbook Is Nothing Then Exit Sub
     ws.Activate
     With ActiveWindow
-        .View = xlNormalView
+        .view = xlNormalView
         .DisplayGridlines = False
         .DisplayHeadings = False
         .DisplayPageBreaks = False
@@ -465,7 +465,7 @@ Private Sub ApplySetupSheetLayout(ws As Worksheet)
     Dim owh As Object: Set owh = ActiveWindow
     If Not owh Is Nothing Then
         If StrComp(ActiveSheet.name, ws.name, vbTextCompare) = 0 Then
-            owh.View = xlNormalView
+            owh.view = xlNormalView
             owh.DisplayGridlines = False
             owh.DisplayHeadings = False
             owh.DisplayPageBreaks = False
@@ -748,7 +748,7 @@ Private Sub DrawCrew(ws As Worksheet, topRow As Long, bottomRow As Long)
 End Sub
 
 Private Sub PaintCrewRow(ws As Worksheet, ByVal r As Long, ByVal slot As Long, _
-        ByVal role As String, ByVal nm As String, ByVal em As String, ByVal ph As String)
+        ByVal role As String, ByVal nm As String, ByVal em As String, ByVal pH As String)
     Dim bg As Long
     If slot Mod 2 = 0 Then bg = cWh() Else bg = cBg()
     ws.Rows(r).rowHeight = 12
@@ -756,7 +756,7 @@ Private Sub PaintCrewRow(ws As Worksheet, ByVal r As Long, ByVal slot As Long, _
     MrgCell ws, r, C_CRL + 1, C_CRL + 2, nm, bg, cBlk(), (nm <> ""), 8, xlHAlignLeft
     MrgCell ws, r, C_CRL + 3, C_CRL + 5, em, bg, cDk(), False, 7, xlHAlignLeft
     ApplyMailtoLink ws.Range(ws.Cells(r, C_CRL + 3), ws.Cells(r, C_CRL + 5))
-    MrgCell ws, r, C_CRL + 6, C_LAST, ph, bg, cDk(), False, 7, xlHAlignLeft
+    MrgCell ws, r, C_CRL + 6, C_LAST, pH, bg, cDk(), False, 7, xlHAlignLeft
     With ws.Range(ws.Cells(r, C_CRL), ws.Cells(r, C_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous: .Color = RGB(235, 235, 235): .Weight = xlHairline
     End With
@@ -1232,7 +1232,7 @@ End Function
 ' http(s) hyperlink — keep Consolas sizing (Hyperlinks.Add resets font otherwise)
 Private Sub ApplyHttpLink(rng As Range, ByVal url As String, ByVal displayText As String)
     Dim anchor As Range
-    Dim H As Hyperlink
+    Dim h As Hyperlink
     Dim sz As Double
     Dim wasBold As Boolean
     Dim fName As String
@@ -1249,9 +1249,9 @@ Private Sub ApplyHttpLink(rng As Range, ByVal url As String, ByVal displayText A
     If sz < 6# Or sz > 10# Then sz = 7#
 
     On Error Resume Next
-    For Each H In anchor.Hyperlinks
-        H.Delete
-    Next H
+    For Each h In anchor.Hyperlinks
+        h.Delete
+    Next h
     On Error GoTo Fail
 
     anchor.Worksheet.Hyperlinks.Add anchor:=anchor, Address:=url, TextToDisplay:=displayText
@@ -1270,7 +1270,7 @@ End Sub
 Private Sub ApplyMailtoLink(rng As Range)
     Dim em As String
     Dim anchor As Range
-    Dim H As Hyperlink
+    Dim h As Hyperlink
     Dim sz As Double
     Dim wasBold As Boolean
     Dim fName As String
@@ -1287,9 +1287,9 @@ Private Sub ApplyMailtoLink(rng As Range)
     If sz < 6# Or sz > 10# Then sz = 8#
 
     On Error Resume Next
-    For Each H In anchor.Hyperlinks
-        H.Delete
-    Next H
+    For Each h In anchor.Hyperlinks
+        h.Delete
+    Next h
     On Error GoTo Fail
 
     ' Address only — keep the cell's existing display text
@@ -1490,18 +1490,18 @@ Private Function ReadCrewRows() As String()
         Dim nm As String:  nm = Trim(SafeStr(ws.Cells(r, cName)))
         Dim rl As String:  rl = ""
         Dim em As String:  em = ""
-        Dim ph As String:  ph = ""
+        Dim pH As String:  pH = ""
 
         If cRole > 0 Then rl = Trim(SafeStr(ws.Cells(r, cRole)))
         If rl = "" And cWork > 0 Then rl = Trim(SafeStr(ws.Cells(r, cWork)))
         If cEmail > 0 Then em = Trim(SafeStr(ws.Cells(r, cEmail)))
-        If cPhone > 0 Then ph = Trim(SafeStr(ws.Cells(r, cPhone)))
+        If cPhone > 0 Then pH = Trim(SafeStr(ws.Cells(r, cPhone)))
 
         If nm = "" Then GoTo SkipRow
         buf(n, 0) = rl
         buf(n, 1) = nm
         buf(n, 2) = em
-        buf(n, 3) = ph
+        buf(n, 3) = pH
         n = n + 1
 SkipRow:
     Next r
@@ -1973,13 +1973,13 @@ Private Function IsMudMotorSerial(ByVal sn As String, ByVal desc As String) As B
 End Function
 
 Private Function FindHeaderCol(ws As Worksheet, ByVal headerName As String) As Long
-    Dim c As Long, lastC As Long, H As String
+    Dim c As Long, lastC As Long, h As String
     FindHeaderCol = 0
     lastC = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
     If lastC < 1 Then Exit Function
     For c = 1 To lastC
-        H = Trim$(CStr(ws.Cells(1, c).Value2 & ""))
-        If StrComp(H, headerName, vbTextCompare) = 0 Then
+        h = Trim$(CStr(ws.Cells(1, c).Value2 & ""))
+        If StrComp(h, headerName, vbTextCompare) = 0 Then
             FindHeaderCol = c
             Exit Function
         End If
@@ -3343,11 +3343,11 @@ End Sub
 ' Finds pdftotext on PATH or in the per-user self-installed copy under
 ' %LOCALAPPDATA%\Poppler (pointer file written by the bootstrap).
 ' Returns "pdftotext" (PATH), a full exe path, or "" when unavailable.
-Private Function ResolvePdftotext(sH As Object) As String
+Private Function ResolvePdftotext(Sh As Object) As String
     ResolvePdftotext = ""
 
     On Error Resume Next
-    If sH.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
+    If Sh.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
         ResolvePdftotext = "pdftotext"
     End If
     On Error GoTo 0
@@ -3374,7 +3374,7 @@ End Function
 ' Per-user install, no admin rights required. Asks first (never downloads silently)
 ' and asks at most once per Excel session. Returns the pdftotext path on success,
 ' "" if declined or failed - callers fall back to the built-in PowerShell parser.
-Private Function OfferPopplerBootstrap(sH As Object) As String
+Private Function OfferPopplerBootstrap(Sh As Object) As String
     OfferPopplerBootstrap = ""
     If mPopplerPrompted Then Exit Function
     mPopplerPrompted = True
@@ -3401,7 +3401,7 @@ Private Function OfferPopplerBootstrap(sH As Object) As String
 
     Application.StatusBar = "Downloading Poppler (one-time, ~16 MB)..."
     On Error Resume Next
-    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
+    Sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
     On Error GoTo 0
     Application.StatusBar = False
     On Error Resume Next: Kill tmpScript: On Error GoTo 0
@@ -3479,16 +3479,16 @@ Private Function ExtractPdfText(pdfPath As String) As String
     '   admin rights). Declining falls through to Strategy 2.
     ' ----------------------------------------------------------------
     On Error Resume Next: Kill tmpOut: On Error GoTo 0
-    Dim sH As Object
-    Set sH = CreateObject("WScript.Shell")
+    Dim Sh As Object
+    Set Sh = CreateObject("WScript.Shell")
 
     Dim p2tPath As String
-    p2tPath = ResolvePdftotext(sH)
-    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(sH)
+    p2tPath = ResolvePdftotext(Sh)
+    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(Sh)
 
     If p2tPath <> "" Then
         On Error Resume Next
-        sH.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
+        Sh.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
         On Error GoTo 0
     End If
 
@@ -3516,7 +3516,7 @@ Private Function ExtractPdfText(pdfPath As String) As String
     Print #fNum, BuildPdfExtractScript()
     Close #fNum
 
-    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
+    Sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
 
     If Dir(tmpOut) <> "" Then
         fNum = FreeFile: content = ""
@@ -3547,12 +3547,12 @@ Private Function ExtractPdfText(pdfPath As String) As String
     Dim jsObj As Object
     On Error Resume Next: Set jsObj = pdDoc.GetJSObject: On Error GoTo 0
     If Not jsObj Is Nothing Then
-        Dim pg As Long, allText As String
-        For pg = 0 To pdDoc.GetNumPages - 1
+        Dim pG As Long, allText As String
+        For pG = 0 To pdDoc.GetNumPages - 1
             On Error Resume Next
-            allText = allText & jsObj.getPageNthWord(pg, 0, True) & Chr(10)
+            allText = allText & jsObj.getPageNthWord(pG, 0, True) & Chr(10)
             On Error GoTo 0
-        Next pg
+        Next pG
         ExtractPdfText = allText
     End If
     pdDoc.Close False
@@ -4054,6 +4054,7 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
 
 
 
