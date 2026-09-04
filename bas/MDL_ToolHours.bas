@@ -25,10 +25,12 @@ Option Explicit
 ' Motor: the row in O42:O55 whose serial = C22 gets R = Q24. If C22 is blank the
 ' motor is taken from _OC_BHA (Description contains "Mud Motor") for BHA# = H3.
 '
-' Other Inventory: the OpenCap exporter (v3.2.0+) tags third-party tools with
+' Other Inventory: the OpenCap exporter (v3.2.1+) tags third-party tools with
 ' Category = "Other Inventory" in inventory.csv and Source = "Other Inventory" in
-' bha-equipment.csv. ToolHours_SeedFromInventory drops any such serial that is not
-' already in O33:O38 into the first blank row (never clears / reorders rows).
+' bha-equipment.csv. ToolHours_SeedFromInventory takes the selected BHA's tagged
+' serials (skipping drill bits / tubulars) and drops any not already in O33:O38
+' into the first blank row (never clears / reorders rows). Serial matching
+' ignores spaces, dashes and case ("HMJ 625 62" = "HMJ-625-62").
 '
 ' C31 "Previous Motor Hours" self-heals to VLOOKUP column 3 (Q previous); the
 ' original pointed at column 4 (R current) and echoed C32.
@@ -151,7 +153,7 @@ Public Sub ToolHours_Sync()
         For r = motorFirst To motorLast
             sn = SerialAt(ws, r)
             If Len(sn) > 0 Then
-                If StrComp(sn, motorSn, vbTextCompare) = 0 Then WriteCurrent ws, r, hrs
+                If NormSerial(sn) = NormSerial(motorSn) Then WriteCurrent ws, r, hrs
             End If
         Next r
     End If
@@ -170,28 +172,39 @@ Fail:
     mBusy = False
 End Sub
 
-' Fill blank 3rd-party rows with "Other Inventory" serials from _OC_Inventory.
+' Fill blank 3rd-party rows with the selected BHA's "Other Inventory" serials.
+' Source: _OC_BHA rows for BHA# = H3 with Source = "Other Inventory" (assembly
+' order). Drill bits and tubulars are skipped (SubCategory from _OC_Inventory).
+' Serials already listed (compared ignoring spaces / dashes / case) are left as
+' typed; rows are never cleared or reordered; stops when the table is full.
 Public Sub ToolHours_SeedFromInventory()
-    Dim ws As Worksheet, inv As Worksheet
+    Dim ws As Worksheet, bhaWs As Worksheet
     Dim wasProt As Boolean
     Dim prevEvents As Boolean
-    Dim cSn As Long, cCat As Long
+    Dim cNum As Long, cSn As Long, cSrc As Long
     Dim lastR As Long, r As Long
+    Dim bha As Long
     Dim toolsFirst As Long, toolsLast As Long
     Dim motorFirst As Long, motorLast As Long
     Dim existing As New Collection
+    Dim skipKinds As Collection
     Dim sn As String
     Dim blankRow As Long
 
     If mBusy Then Exit Sub
     If Not SheetExistsTH(SH_DATA) Then Exit Sub
-    If Not SheetExistsTH(SH_INVENTORY) Then Exit Sub
+    If Not SheetExistsTH(SH_BHA) Then Exit Sub
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
-    Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
+    Set bhaWs = ThisWorkbook.Worksheets(SH_BHA)
 
-    cSn = HeaderCol(inv, "SerialNumber")
-    cCat = HeaderCol(inv, "Category")
-    If cSn = 0 Or cCat = 0 Then Exit Sub
+    bha = BhaNumber(ws.Range(CELL_BHA).Value)
+    If bha <= 0 Then Exit Sub
+    cNum = HeaderCol(bhaWs, "BHA #")
+    cSn = HeaderCol(bhaWs, "Serial #")
+    cSrc = HeaderCol(bhaWs, "Source")
+    If cNum = 0 Or cSn = 0 Or cSrc = 0 Then Exit Sub   ' pre-v3.2 export: nothing tagged
+
+    Set skipKinds = InventorySerialsOfKind("drill bit", "tubular")
 
     LocateTables ws, toolsFirst, toolsLast, motorFirst, motorLast
     For r = toolsFirst To toolsLast
@@ -206,16 +219,18 @@ Public Sub ToolHours_SeedFromInventory()
     wasProt = SheetUnprotectForVba(ws)
     On Error GoTo FailProt
 
-    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    lastR = bhaWs.Cells(bhaWs.Rows.Count, cNum).End(xlUp).Row
     For r = 2 To lastR
-        If StrComp(Trim$(CStr(inv.Cells(r, cCat).Value & "")), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
-            sn = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
-            If Len(sn) > 0 Then
-                If Not InSet(existing, sn) Then
-                    blankRow = FirstBlankSerialRow(ws, toolsFirst, toolsLast)
-                    If blankRow = 0 Then Exit For
-                    SetSerialAt ws, blankRow, sn
-                    AddUnique existing, sn
+        If BhaNumber(bhaWs.Cells(r, cNum).Value) = bha Then
+            If StrComp(Trim$(CStr(bhaWs.Cells(r, cSrc).Value & "")), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
+                sn = Trim$(CStr(bhaWs.Cells(r, cSn).Value & ""))
+                If Len(sn) > 0 Then
+                    If Not InSet(existing, sn) And Not InSet(skipKinds, sn) Then
+                        blankRow = FirstBlankSerialRow(ws, toolsFirst, toolsLast)
+                        If blankRow = 0 Then Exit For
+                        SetSerialAt ws, blankRow, sn
+                        AddUnique existing, sn
+                    End If
                 End If
             End If
         End If
@@ -249,6 +264,34 @@ Private Sub FixPrevMotorHoursFormula(ByVal ws As Worksheet)
     If InStr(1, f, PREV_MOTOR_BAD, vbTextCompare) = 0 Then Exit Sub
     c.Formula = Replace(f, PREV_MOTOR_BAD, PREV_MOTOR_GOOD, 1, 1, vbTextCompare)
 End Sub
+
+' Serials from _OC_Inventory whose SubCategory is one of the given kinds.
+Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collection
+    Dim col As New Collection
+    Dim inv As Worksheet
+    Dim cSn As Long, cSub As Long
+    Dim lastR As Long, r As Long, k As Long
+    Dim sub_ As String, sn As String
+
+    Set InventorySerialsOfKind = col
+    If Not SheetExistsTH(SH_INVENTORY) Then Exit Function
+    Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
+    cSn = HeaderCol(inv, "SerialNumber")
+    cSub = HeaderCol(inv, "SubCategory")
+    If cSn = 0 Or cSub = 0 Then Exit Function
+
+    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    For r = 2 To lastR
+        sub_ = Trim$(CStr(inv.Cells(r, cSub).Value & ""))
+        For k = LBound(kinds) To UBound(kinds)
+            If StrComp(sub_, CStr(kinds(k)), vbTextCompare) = 0 Then
+                sn = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
+                If Len(sn) > 0 Then AddUnique col, sn
+                Exit For
+            End If
+        Next k
+    Next r
+End Function
 
 Private Function FirstBlankSerialRow(ByVal ws As Worksheet, ByVal firstRow As Long, _
                                      ByVal lastRow As Long) As Long
@@ -414,9 +457,23 @@ Private Function HeaderCol(ByVal ws As Worksheet, ByVal header As String) As Lon
     Next c
 End Function
 
+' Serial compare key: case-insensitive, ignoring spaces / dashes / punctuation,
+' so FieldCap "HMJ 625 62" matches a typed "HMJ-625-62".
+Private Function NormSerial(ByVal sn As String) As String
+    Dim i As Long, ch As String, out As String
+    For i = 1 To Len(sn)
+        ch = Mid$(sn, i, 1)
+        If ch Like "[A-Za-z0-9]" Then out = out & UCase$(ch)
+    Next i
+    NormSerial = out
+End Function
+
 Private Sub AddUnique(ByVal col As Collection, ByVal sn As String)
+    Dim key As String
+    key = NormSerial(sn)
+    If Len(key) = 0 Then Exit Sub
     On Error Resume Next
-    col.Add sn, UCase$(sn)
+    col.Add sn, key
     On Error GoTo 0
 End Sub
 
@@ -425,7 +482,8 @@ Private Function InSet(ByVal col As Collection, ByVal sn As String) As Boolean
     InSet = False
     If col Is Nothing Then Exit Function
     On Error Resume Next
-    v = col.Item(UCase$(sn))
+    If Len(NormSerial(sn)) = 0 Then Exit Function
+    v = col.Item(NormSerial(sn))
     InSet = (Err.Number = 0)
     On Error GoTo 0
 End Function

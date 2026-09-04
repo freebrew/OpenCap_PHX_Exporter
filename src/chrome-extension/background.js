@@ -1657,7 +1657,8 @@ const otherToolOf = (item) => {
 const otherToolSerial = (o) => pickByKey(o, /^SerialNumber$/i, /serial/i, /^MnfNumber$/i);
 const otherToolName   = (o) => pickByKey(o, /^(ItemName|ToolName|Name|Description|ToolDescription|ItemDescription|OtherToolName|OtherTool)$/i, /desc|name|title|^notes?$/i);
 const otherToolCode   = (o) => pickByKey(o, /^(ItemCode|ToolCode|Code|PartNumber|Model)$/i, /code|part|model/i);
-const otherToolKind   = (o) => pickByKey(o, /^(SubCategory|Category|ToolType|Type|Vendor|Supplier|Company|Owner)$/i, /type|vendor|supplier|categor|owner/i);
+// SubCategory ("other", "drill bit", "tubular") before the pipe-wrapped Category ("|DD|")
+const otherToolKind   = (o) => pickByKey(o, /^SubCategory$/i, /^(ToolType|Type|Vendor|Supplier|Company|Owner)$/i, /^Category$/i, /type|vendor|supplier|categor|owner/i).replace(/\|/g, "").trim();
 const otherToolHours  = (o) => {
   const s = pickByKey(o, /^(HrsSinceService|HoursSinceService|TotalHours|Hours|JobHours|RunHours)$/i, /hour|hrs/i);
   const n = Number(s);

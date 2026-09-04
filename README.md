@@ -7,7 +7,7 @@
 **Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)  
 **Data Hub prospect notes:** [docs/FieldCap_Data_Hub_Prospect_Report.md](docs/FieldCap_Data_Hub_Prospect_Report.md)
 
-**Current Chrome extension revision:** `v3.2.1`
+**Current Chrome extension revision:** `v3.2.2`
 
 ---
 
@@ -244,7 +244,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.2.1
+    ├── chrome-extension/            ← Manifest V3, v3.2.2
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -286,7 +286,8 @@ PHX_FieldCap/
 
 - Probe on job 21782 showed the blank BHA rows each carry a `JobToolId` — the third-party tools are ordinary JobTools with no `Item` / `ItemSerial` link, their serial and description typed straight onto the JobTool. v3.2.0 only looked for a separate table.
 - `normalizeBhaRow` now reads serial / code / description from the JobTool's own fields when it has no Item link (`Source = Other Inventory`); `buildInventoryCsv` keeps those JobTools instead of dropping them as placeholders and tags them `Category = Other Inventory`. Key picking skips `*Id` / GUID / timestamp fields.
-- Probe reports the item-less JobTools it recognised plus the raw JobTool behind any still-unresolved item; `$metadata` parser tolerates namespace-prefixed tags.
+- Probe reports the item-less JobTools it recognised plus the raw JobTool behind any still-unresolved item; `$metadata` parser tolerates namespace-prefixed tags. `Sub Description` / `SubCategory` prefer FieldCap's SubCategory (`other`, `drill bit`, `tubular`) over the pipe-wrapped Category.
+- **Slide Sheet seeding is BHA-scoped** — Refresh adds only the selected BHA's (`H3`) `Other Inventory` serials from `_OC_BHA`, in assembly order, skipping drill bits and tubulars, into blank `O33:O38` rows. Serial matching ignores spaces / dashes / case, so FieldCap's `HMJ 625 62` is your `HMJ-625-62`.
 
 ### v3.2.0 — Other Tools (third-party) in the existing CSVs
 
