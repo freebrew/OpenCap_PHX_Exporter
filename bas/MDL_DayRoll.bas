@@ -161,8 +161,17 @@ Public Function DayRoll_ApplyPasonHours(ByVal bitTotal As Double, _
     ws.Cells(r, COL_END).Value = endDepth
     ws.Cells(r, COL_BIT).Value = bitDelta
     ws.Cells(r, COL_CIRC).Value = circDelta
+    ' No bit hours today -> no sliding either. Fill blank L/M/N with zeros so
+    ' the row's ROP / % formulas resolve instead of sitting empty.
+    If bitDelta = 0 Then
+        If CellBlank(ws.Cells(r, COL_SLIDE_M)) Then ws.Cells(r, COL_SLIDE_M).Value = 0
+        If CellBlank(ws.Cells(r, COL_HRS)) Then ws.Cells(r, COL_HRS).Value = 0
+        If CellBlank(ws.Cells(r, COL_MIN)) Then WriteMinutesCell ws.Cells(r, COL_MIN), 0
+    End If
     On Error Resume Next
     Application.Calculate
+    ' Events are off here, so push the new Q24 into tool / motor Current Hours.
+    ToolHours_Sync
     On Error GoTo RestoreEvents
     gDayRoll_Applied = True
     DayRoll_ApplyPasonHours = True
@@ -333,8 +342,10 @@ Private Function ValidateHourDeltas(ByVal bitDelta As Double, _
     ValidateHourDeltas = False
     errMsg = ""
 
-    If bitDelta <= 0 Or circDelta <= 0 Then
-        errMsg = "Bit and Circ deltas must both be positive."
+    ' Zero is a valid day (no drilling / no circulating). Only a running
+    ' total that went backwards is an error.
+    If bitDelta < 0 Or circDelta < 0 Then
+        errMsg = "Bit and Circ deltas cannot be negative (running totals must not go backwards)."
         Exit Function
     End If
     If circDelta + 0.0000001 < bitDelta Then
@@ -519,6 +530,8 @@ Private Function CellBlank(ByVal cell As Range) As Boolean
         CellBlank = False
     End If
 End Function
+
+
 
 
 
