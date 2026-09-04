@@ -806,6 +806,59 @@ Fail:
     ProjBurr = CVErr(xlErrNum)
 End Function
 
+' Build rate (°/30 m) to LAND on the next plan station's TVD (Cont DI BRR).
+'
+' When the aim station is a landing (Inc >= landInc, default 88°) the number
+' that matters is the circular arc that reaches the station's inclination
+' exactly at its TVD - MD is a by-product:
+'     dTVD = R * (sin I_tgt - sin I_bit)      ->   BUR = (30 * 180/pi) / R
+' ProjBurr's 3D-dogleg-over-plan-MD rate answers "match the plan's attitude
+' by the plan's MD" instead; when the bit is behind plan that lands high
+' (4.07 vs 3.74 at 2870 m on 35780: 11 m above target TVD).
+' Intermediate (non-landing) stations, or a bit already at / below the
+' station's Inc or TVD, fall back to ProjBurr so the cell never goes blank
+' mid-curve.
+Public Function ProjLandingBurr(ByVal bitMd As Variant, ByVal incBit As Variant, _
+                                ByVal azmBit As Variant, ByVal tvdBit As Variant, _
+                                ByVal course As Variant, ByVal tgtMd As Range, _
+                                ByVal tgtInc As Range, ByVal tgtAzm As Range, _
+                                ByVal tgtTvd As Range, _
+                                Optional ByVal landInc As Variant) As Variant
+    Dim m() As Double, i() As Double, a() As Double, tv() As Double
+    Dim n As Long, k As Long
+    Dim bm As Double, ib As Double, tb As Double, li As Double
+    Dim dTvd As Double, dSin As Double, radius As Double
+    On Error GoTo Fail
+
+    If Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(tvdBit) Then
+        ProjLandingBurr = "": Exit Function
+    End If
+    bm = CDbl(bitMd): ib = CDbl(incBit): tb = CDbl(tvdBit)
+    li = SafeNum(landInc, 88#)
+
+    n = LoadTargets(tgtMd, tgtInc, tgtAzm, tgtTvd, m, i, a, tv)
+    If n < 1 Then ProjLandingBurr = "": Exit Function
+    k = FirstAimIndex(m, i, tv, n, bm, ib, tvdBit)
+    If k > n Then ProjLandingBurr = "": Exit Function
+
+    If i(k) >= li Then
+        dTvd = tv(k) - tb
+        dSin = Sin(Deg2Rad(i(k))) - Sin(Deg2Rad(ib))
+        If dTvd > EPS And dSin > EPS Then
+            radius = dTvd / dSin
+            ProjLandingBurr = Rad2Deg(30# / radius)
+            Exit Function
+        End If
+    End If
+
+    ' Not a landing aim (or geometry already past it): plan-MD dogleg rate.
+    ProjLandingBurr = ProjBurr(bitMd, incBit, azmBit, 0, course, _
+                               tgtMd, tgtInc, tgtAzm, tgtTvd, tvdBit)
+    Exit Function
+Fail:
+    ProjLandingBurr = CVErr(xlErrNum)
+End Function
+
 ' Hole metres to put in the Y comment: AS = |reqDLS| / Q_avg × C, hard-capped
 ' at this stand's C. Two-decimal sheet precision — never 0.25 rounding.
 Public Function ProjInstructedSlideM(ByVal metersToSlide As Variant, ByVal tfText As Variant, _
@@ -1119,6 +1172,8 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
 Fail:
     ProjSlideMetersBetween = CVErr(xlErrNum)
 End Function
+
+
 
 
 

@@ -1572,6 +1572,17 @@ Private Sub LoadCsv(filePath As String, shName As String)
     ws.Range(ws.Cells(1, 1), ws.Cells(nLines, nCols)).Value = data
 End Sub
 
+' Public hunt used by Setup REFRESH CSVs and Data REFRESH / DD Tools.
+' Same folders: workbook\OpenCap, workbook root, OC_CsvRoot, Setup path list.
+Public Function FindOpenCapCsv(ByVal token As String) As String
+    Dim wbPath As String
+    FindOpenCapCsv = ""
+    wbPath = ThisWorkbook.Path
+    If Len(wbPath) = 0 Then Exit Function
+    RememberCsvRootsFromSetup
+    FindOpenCapCsv = FindCsvByToken(wbPath, token)
+End Function
+
 Private Function FindCsvByToken(folder As String, token As String) As String
     ' Newest matching CSV across workbook\OpenCap, workbook root, and remembered job folders.
     Dim bestPath As String
@@ -4054,6 +4065,8 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
+
 
 
 
