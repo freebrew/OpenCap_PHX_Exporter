@@ -1471,6 +1471,267 @@ const fetchAllJobInventory = async (jobId) => {
   return odataGetAll(`JobTools?$expand=${expand}&$filter=${filter}&$orderby=Item/ItemName`);
 };
 
+// ── Other Tools (third-party / rental components that are not JobTools) ──────
+// FieldCap's "Other Tools" inventory lives in its own table; ToolAssemblyItems
+// reference it through a navigation property that is NOT JobTool, so those BHA
+// rows came through with no serial / description. The entity and nav names are
+// not fixed across tenants, so discover them from $metadata (cached), verify
+// with a live $expand, and fall back to sniffing *Id keys on the bare items.
+// Rows found this way are tagged "Other Inventory" (inventory Category, BHA
+// Source column) — no extra CSV file.
+const KEY_OTHER_TOOLS_SCHEMA = "fieldcap_other_tools_schema";
+const OTHER_INVENTORY_TAG = "Other Inventory";
+const OTHER_TOOLS_NAME_RE = /other|third|3rd|rental|external|vendor|misc|customer|nonserial|non_serial|freeform|free_form/i;
+const KNOWN_ITEM_NAVS = new Set([
+  "JobTool", "ToolAssembly", "Item", "ItemSerial", "ParentJobTool",
+  "CreatedByUser", "ModifiedByUser", "DeletedByUser", "Statistics",
+]);
+const ITEM_ID_KEYS_SKIP = /^(ToolAssemblyItemId|ToolAssemblyId|JobToolId|ClientJobId|ItemSerialId|ItemId|CreatedBy|ModifiedBy|DeletedBy|ParentToolAssemblyItemId|Id)$/i;
+
+const xmlAttr = (tag, name) => (tag.match(new RegExp(`\\b${name}="([^"]*)"`)) || [])[1] ?? "";
+const shortType = (t) => String(t ?? "").replace(/^Collection\(|\)$/g, "").split(".").pop();
+
+// Regex EDM parser — MV3 service workers have no DOMParser.
+const parseEdmMetadata = (xml) => {
+  const types = {};
+  const sets = {};
+  const typeRe = /<EntityType\b([^>]*)>([\s\S]*?)<\/EntityType>/g;
+  let m;
+  while ((m = typeRe.exec(xml))) {
+    const name = xmlAttr(m[1], "Name");
+    if (!name) continue;
+    const body = m[2];
+    const props = [...body.matchAll(/<Property\b([^>]*)\/?>/g)].map((x) => xmlAttr(x[1], "Name")).filter(Boolean);
+    const navs = [...body.matchAll(/<NavigationProperty\b([^>]*)\/?>/g)].map((x) => ({
+      name: xmlAttr(x[1], "Name"),
+      type: shortType(xmlAttr(x[1], "Type")),
+      collection: /^Collection\(/.test(xmlAttr(x[1], "Type")),
+    })).filter((n) => n.name);
+    types[name] = { props, navs };
+  }
+  const setRe = /<EntitySet\b([^>]*)\/?>/g;
+  while ((m = setRe.exec(xml))) {
+    const name = xmlAttr(m[1], "Name");
+    const type = shortType(xmlAttr(m[1], "EntityType"));
+    if (name && type) sets[name] = type;
+  }
+  return { types, sets };
+};
+
+const fetchMetadataEdm = async () => {
+  const res = await fetch(`${BASE}/$metadata`, {
+    credentials: "include",
+    headers: { Accept: "application/xml" },
+  });
+  if (!res.ok) throw new Error(`OData $metadata ${res.status}`);
+  return parseEdmMetadata(await res.text());
+};
+
+const jobKeyFor = (props) =>
+  (props ?? []).find((p) => /^ClientJobId$/i.test(p))
+  ?? (props ?? []).find((p) => /^JobId$/i.test(p))
+  ?? null;
+
+// Schema shape: { source, itemNavs: [{name,type}], inventorySets: [{set,type,jobKey,hasDeleted}], notes: [] }
+const discoverOtherToolsSchema = async (jobId, { force = false } = {}) => {
+  if (!force) {
+    const cached = await new Promise((res) => chrome.storage.local.get(KEY_OTHER_TOOLS_SCHEMA, res));
+    const s = cached?.[KEY_OTHER_TOOLS_SCHEMA];
+    if (s && s.base === BASE && Array.isArray(s.itemNavs)) return s;
+  }
+
+  const schema = { base: BASE, source: "", itemNavs: [], inventorySets: [], notes: [] };
+
+  // 1) $metadata
+  try {
+    const edm = await fetchMetadataEdm();
+    schema.source = "metadata";
+    const itemTypeName = Object.keys(edm.types).find((k) => /^ToolAssemblyItem$/i.test(k));
+    const itemType = itemTypeName ? edm.types[itemTypeName] : null;
+    if (itemType) {
+      const unknown = itemType.navs.filter((n) => !n.collection && !KNOWN_ITEM_NAVS.has(n.name));
+      const named = unknown.filter((n) => OTHER_TOOLS_NAME_RE.test(n.name) || OTHER_TOOLS_NAME_RE.test(n.type));
+      schema.itemNavs = (named.length ? named : unknown).map((n) => ({ name: n.name, type: n.type }));
+      schema.notes.push(`ToolAssemblyItem navs: ${itemType.navs.map((n) => n.name).join(", ") || "(none)"}`);
+    } else {
+      schema.notes.push("ToolAssemblyItem entity type not found in $metadata");
+    }
+    const navTypes = new Set(schema.itemNavs.map((n) => n.type));
+    for (const [set, type] of Object.entries(edm.sets)) {
+      const t = edm.types[type];
+      if (!t) continue;
+      const byName = OTHER_TOOLS_NAME_RE.test(set) || OTHER_TOOLS_NAME_RE.test(type);
+      const byNav = navTypes.has(type);
+      if (!byName && !byNav) continue;
+      if (!t.props.some((p) => /serial|name|desc/i.test(p))) continue;
+      schema.inventorySets.push({
+        set, type,
+        jobKey: jobKeyFor(t.props),
+        hasDeleted: t.props.some((p) => /^DeletedBy$/i.test(p)),
+        props: t.props,
+      });
+    }
+  } catch (err) {
+    schema.notes.push(`$metadata unavailable: ${err.message}`);
+  }
+
+  // 2) Fallback / confirmation: bare items without a JobTool — which *Id keys carry values?
+  if (!schema.itemNavs.length && jobId) {
+    try {
+      const filter = encodeURIComponent(
+        `(null eq DeletedBy) and (ToolAssembly/ClientJobId eq ${jobId}) and (JobToolId eq null)`
+      );
+      const bare = await odataGet(`ToolAssemblyItems?$filter=${filter}&$top=10`);
+      const rows = Array.isArray(bare) ? bare : [];
+      const candidates = new Set();
+      for (const r of rows) {
+        for (const [k, v] of Object.entries(r)) {
+          if (!/Id$/i.test(k) || ITEM_ID_KEYS_SKIP.test(k)) continue;
+          if (v === null || v === undefined || v === "" || v === 0) continue;
+          candidates.add(k.replace(/Id$/i, ""));
+        }
+      }
+      schema.itemNavs = [...candidates].map((name) => ({ name, type: name }));
+      if (!schema.source) schema.source = "probe";
+      schema.notes.push(`bare-item *Id candidates: ${[...candidates].join(", ") || "(none)"} from ${rows.length} rows`);
+    } catch (err) {
+      schema.notes.push(`bare-item probe failed: ${err.message}`);
+    }
+  }
+
+  // 3) Verify each nav actually expands (drop the ones the server rejects)
+  if (jobId && schema.itemNavs.length) {
+    const ok = [];
+    for (const nav of schema.itemNavs) {
+      try {
+        const filter = encodeURIComponent(`(ToolAssembly/ClientJobId eq ${jobId})`);
+        await odataGet(`ToolAssemblyItems?$expand=${nav.name}&$filter=${filter}&$top=1`);
+        ok.push(nav);
+      } catch (err) {
+        schema.notes.push(`$expand=${nav.name} rejected: ${err.message}`);
+      }
+    }
+    schema.itemNavs = ok;
+  }
+
+  chrome.storage.local.set({ [KEY_OTHER_TOOLS_SCHEMA]: schema });
+  return schema;
+};
+
+// First non-empty scalar whose key matches one of the regexes (in priority order).
+const pickByKey = (obj, ...regexes) => {
+  if (!obj || typeof obj !== "object") return "";
+  for (const re of regexes) {
+    for (const [k, v] of Object.entries(obj)) {
+      if (!re.test(k)) continue;
+      if (v === null || v === undefined || typeof v === "object") continue;
+      const s = String(v).trim();
+      if (s !== "") return s;
+    }
+  }
+  return "";
+};
+
+const otherToolSerial = (o) => pickByKey(o, /^SerialNumber$/i, /serial/i, /^MnfNumber$/i);
+const otherToolName   = (o) => pickByKey(o, /^(ItemName|ToolName|Name|Description|ToolDescription|ItemDescription)$/i, /desc|name|title/i);
+const otherToolCode   = (o) => pickByKey(o, /^(ItemCode|ToolCode|Code|PartNumber|Model)$/i, /code|part|model/i);
+const otherToolKind   = (o) => pickByKey(o, /^(SubCategory|Category|ToolType|Type|Vendor|Supplier|Company|Owner)$/i, /type|vendor|supplier|categor|owner/i);
+const otherToolHours  = (o) => {
+  const s = pickByKey(o, /^(HrsSinceService|HoursSinceService|TotalHours|Hours|JobHours|RunHours)$/i, /hour|hrs/i);
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const itemHasKnownSerial = (it) =>
+  !!(it?.JobTool?.ItemSerial?.SerialNumber || it?.SerialNumber);
+
+const itemKey = (it) => it?.ToolAssemblyItemId ?? it?.Id ?? null;
+
+// Attach `OtherTool` (+ `OtherToolNav`) onto BHA items that have no JobTool.
+const attachOtherToolsToItems = async (items, jobId, schema) => {
+  const out = { attached: 0, navsUsed: [] };
+  const needy = (items ?? []).filter((it) => !itemHasKnownSerial(it));
+  if (!needy.length || !schema?.itemNavs?.length) return out;
+  const byId = new Map(needy.map((it) => [String(itemKey(it)), it]).filter(([k]) => k !== "null"));
+  if (!byId.size) return out;
+
+  for (const nav of schema.itemNavs) {
+    try {
+      const filter = encodeURIComponent(
+        `(null eq DeletedBy) and (ToolAssembly/ClientJobId eq ${jobId})`
+      );
+      const rows = await odataGetAll(`ToolAssemblyItems?$expand=${nav.name}&$filter=${filter}`);
+      let hit = 0;
+      for (const r of rows) {
+        const target = byId.get(String(itemKey(r)));
+        if (!target || target.OtherTool) continue;
+        const o = r[nav.name];
+        if (!o || typeof o !== "object") continue;
+        target.OtherTool = o;
+        target.OtherToolNav = nav.name;
+        hit++;
+      }
+      if (hit) { out.attached += hit; out.navsUsed.push(nav.name); }
+    } catch (_) {
+      // nav rejected at runtime — the others may still work
+    }
+  }
+  return out;
+};
+
+// Inventory rows (same columns as buildInventoryCsv) for the job's Other Tools.
+const fetchOtherToolsInventory = async (jobId, schema, bhaItems = []) => {
+  const rows = [];
+  const seen = new Set();
+  const push = (o, navHint) => {
+    const sn = otherToolSerial(o);
+    const nm = otherToolName(o);
+    if (!sn && !nm) return;
+    const key = (sn || nm).toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const tIn  = pickByKey(o, /^TransferInDate$/i, /in.?date|received|arriv/i);
+    const tOut = pickByKey(o, /^TransferOutDate$/i, /out.?date|returned|shipped/i);
+    rows.push({
+      ItemCode:        otherToolCode(o),
+      ItemName:        nm,
+      SerialNumber:    sn,
+      MnfNumber:       pickByKey(o, /^MnfNumber$/i, /manufactur|mfg/i),
+      Category:        OTHER_INVENTORY_TAG,
+      SubCategory:     otherToolKind(o) || navHint || "",
+      ShippingStatus:  tIn && !tOut ? "On Location" : (tOut ? "Shipped" : ""),
+      TransferInDate:  tIn ? toDateStr(tIn) : "",
+      TransferOutDate: tOut ? toDateStr(tOut) : "",
+      PlannedOutDate:  "",
+      HrsSinceService: otherToolHours(o),
+      IsActive:        pickByKey(o, /^IsActive$/i),
+    });
+  };
+
+  // a) job-scoped entity sets discovered from $metadata
+  for (const s of schema?.inventorySets ?? []) {
+    if (!s.jobKey) continue;
+    const filters = [
+      s.hasDeleted ? `(${s.jobKey} eq ${jobId}) and (null eq DeletedBy)` : null,
+      `(${s.jobKey} eq ${jobId})`,
+    ].filter(Boolean);
+    for (const f of filters) {
+      try {
+        const list = await odataGetAll(`${s.set}?$filter=${encodeURIComponent(f)}`);
+        for (const o of list) push(o, s.type);
+        break;
+      } catch (_) {
+        // try the next filter variant
+      }
+    }
+  }
+  // b) whatever the BHA items already resolved — guarantees BHA tools show up
+  for (const it of bhaItems ?? []) {
+    if (it?.OtherTool) push(it.OtherTool, it.OtherToolNav);
+  }
+  return rows;
+};
+
 // TotalHours1-N  = lifetime cumulative minutes (by activity type)
 // TotalHsls1-N   = minutes since last service (by activity type) — the maintenance-relevant metric
 // Only include slots that have at least one non-zero value across the fleet.
@@ -1484,7 +1745,7 @@ const shippingStatus = (jt) => {
   return "";
 };
 
-const buildInventoryCsv = (jobTools) => {
+const buildInventoryCsv = (jobTools, otherRows = []) => {
   // ── 1. Deduplicate by ItemSerialId — multiple JobTool records can reference
   //       the same physical serial (one per category sub-tab in FieldCap UI).
   const seen   = new Set();
@@ -1558,6 +1819,8 @@ const buildInventoryCsv = (jobTools) => {
     row["HrsSinceService"] = rawMins > 0 ? Number((rawMins / 60).toFixed(2)) : 0;
     rows.push(row);
   }
+  // ── 4. Other Tools (third-party) — same columns, Category = "Other Inventory"
+  for (const o of otherRows ?? []) rows.push(o);
   return buildCsvString(cols, rows);
 };
 
@@ -1890,12 +2153,24 @@ const BHA_COLUMNS = [
   "Serial #", "Item Code", "Description", "Sub Description",
   "Length", "Accum Length", "Top", "Bottom", "Max OD", "Min ID",
   "Job Hours", "HSLS", "Strapped", "Shipping Status", "Dispatched On", "Returned On",
+  "Source",
 ];
+
+const firstNonEmpty = (...vals) => {
+  for (const v of vals) {
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s !== "") return v;
+  }
+  return "";
+};
 
 const normalizeBhaRow = (assembly, item, jobTool) => {
   const assemblyPick = augmentAssemblyForPicking(assembly);
   const itemSerial = item?.JobTool?.ItemSerial;
   const itemRecord = item?.JobTool?.Item ?? itemSerial?.Item;
+  // Third-party component resolved from FieldCap's Other Tools table
+  const other = item?.OtherTool && typeof item.OtherTool === "object" ? item.OtherTool : null;
 
   // Tenant-specific fallback observed in this FieldCap instance:
   // ToolHours1=Rotate (minutes), ToolHours2=Slide (minutes),
@@ -1981,10 +2256,10 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
     "BHA Below Rot":   hrsBelowRot,
     "Activated On":    toDateStr(assemblyPick.ActivatedOn),
     "Completed On":    toDateStr(assemblyPick.CompletedOn),
-    "Serial #":        itemSerial?.SerialNumber ?? item?.SerialNumber ?? "",
-    "Item Code":       itemRecord?.ItemCode ?? item?.ItemCode ?? "",
-    "Description":     itemRecord?.ItemName ?? item?.Description ?? "",
-    "Sub Description": itemRecord?.Description ?? item?.SubDescription ?? item?.JobTool?.Notes ?? "",
+    "Serial #":        firstNonEmpty(itemSerial?.SerialNumber, item?.SerialNumber, other ? otherToolSerial(other) : ""),
+    "Item Code":       firstNonEmpty(itemRecord?.ItemCode, item?.ItemCode, other ? otherToolCode(other) : ""),
+    "Description":     firstNonEmpty(itemRecord?.ItemName, item?.Description, other ? otherToolName(other) : ""),
+    "Sub Description": firstNonEmpty(itemRecord?.Description, item?.SubDescription, item?.JobTool?.Notes, other ? otherToolKind(other) : ""),
     "Length":          toNum(item?.Length),
     "Accum Length":    toNum(item?.AccumulatedLength),
     "Top":             item?.TopConnection ?? "",
@@ -1997,6 +2272,7 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
     "Shipping Status": jobTool?.ShippingStatus ?? "",
     "Dispatched On":   toDateStr(jobTool?.DispatchedOn),
     "Returned On":     toDateStr(jobTool?.ReturnedOn),
+    "Source":          other ? OTHER_INVENTORY_TAG : "",
   };
 };
 
@@ -2086,6 +2362,16 @@ const fetchAll = async (
 ) => {
   const prog = (pct, label) => { try { onProgress?.(pct, label); } catch (_) {} };
   const results = {};
+  // Other Tools (third-party) discovery is shared by the BHA and Inventory steps
+  let otherSchema = null;
+  let bhaItemsForOther = [];
+  const getOtherSchema = async () => {
+    if (!otherSchema) {
+      try { otherSchema = await discoverOtherToolsSchema(jobId); }
+      catch (_) { otherSchema = { itemNavs: [], inventorySets: [], notes: [] }; }
+    }
+    return otherSchema;
+  };
 
   prog(10, "Job details…");
   if (flags.jobDetails) {
@@ -2114,6 +2400,14 @@ const fetchAll = async (
       new Promise((res) => chrome.storage.local.get([KEY_INTERCEPT, KEY_BHA_GRID], res)),
     ]);
     prog(60, "BHA components…");
+    // Resolve third-party components (no JobTool) from FieldCap's Other Tools table
+    try {
+      const otherRes = await attachOtherToolsToItems(items, jobId, await getOtherSchema());
+      results.otherToolsBhaRows = otherRes.attached;
+    } catch (_) {
+      results.otherToolsBhaRows = 0;
+    }
+    bhaItemsForOther = items;
     const assemblies = await enrichToolAssembliesFromDetail(assembliesList);
     const customAsmMap = await fetchToolAssemblyCustomValuesForJob(assemblies);
     prog(72, "Activity data…");
@@ -2165,7 +2459,14 @@ const fetchAll = async (
   prog(94, "Inventory…");
   if (flags.inventory) {
     const invTools = await fetchAllJobInventory(jobId);
-    results.inventoryCsv      = buildInventoryCsv(invTools);
+    let otherRows = [];
+    try {
+      otherRows = await fetchOtherToolsInventory(jobId, await getOtherSchema(), bhaItemsForOther);
+    } catch (_) {
+      otherRows = [];
+    }
+    results.otherToolsInvRows = otherRows.length;
+    results.inventoryCsv      = buildInventoryCsv(invTools, otherRows);
     results.inventoryRowCount = (results.inventoryCsv.split("\r\n").length - 1);
   }
 
@@ -2245,6 +2546,8 @@ chrome.runtime.onConnect.addListener((port) => {
         bhaCount:         results.bhaCount              ?? 0,
         slideByDayRows:   results.slideByDayRowCount    ?? 0,
         inventoryRows:    results.inventoryRowCount     ?? 0,
+        otherToolsInvRows: results.otherToolsInvRows    ?? 0,
+        otherToolsBhaRows: results.otherToolsBhaRows    ?? 0,
         ticketCostsRows:  results.ticketCostsRowCount   ?? 0,
         liveBhaRows:      liveData.bhaRows.length,
         liveActivityRows: liveData.activityRows.length,
@@ -2326,6 +2629,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           bhaCount:     results.bhaCount     ?? 0,
           slideByDayRows: results.slideByDayRowCount ?? 0,
           inventoryRows: results.inventoryRowCount ?? 0,
+          otherToolsInvRows: results.otherToolsInvRows ?? 0,
+          otherToolsBhaRows: results.otherToolsBhaRows ?? 0,
           ticketCostsRows: results.ticketCostsRowCount ?? 0,
           liveBhaRows:  liveData.bhaRows.length,
           liveActivityRows: liveData.activityRows.length,
@@ -2576,6 +2881,61 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "SNIFF_CLEAR") {
     chrome.storage.local.remove(KEY_SNIFF_LOG, () => sendResponse({ ok: true }));
+    return true;
+  }
+
+  // ── Other Tools probe — how third-party components are reachable for this tenant ──
+  if (message.type === "PROBE_OTHER_TOOLS") {
+    const jobId = parseInt(message.jobId, 10) || 0;
+    (async () => {
+      const schema = await discoverOtherToolsSchema(jobId, { force: true });
+      const report = {
+        source: schema.source || "none",
+        itemNavs: schema.itemNavs,
+        inventorySets: (schema.inventorySets ?? []).map((s) => ({
+          set: s.set, type: s.type, jobKey: s.jobKey, props: (s.props ?? []).slice(0, 40),
+        })),
+        notes: schema.notes ?? [],
+        bareItems: 0,
+        attached: 0,
+        navsUsed: [],
+        sample: null,
+        inventoryRows: 0,
+        inventorySample: null,
+      };
+      if (jobId) {
+        try {
+          const items = await fetchToolAssemblyItems(jobId);
+          const bare = items.filter((it) => !itemHasKnownSerial(it));
+          report.bareItems = bare.length;
+          if (bare[0]) {
+            report.bareItemKeys = Object.entries(bare[0])
+              .filter(([, v]) => v !== null && v !== undefined && v !== "" && typeof v !== "object")
+              .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`);
+          }
+          const res = await attachOtherToolsToItems(items, jobId, schema);
+          report.attached = res.attached;
+          report.navsUsed = res.navsUsed;
+          const first = items.find((it) => it.OtherTool);
+          if (first) {
+            report.sample = Object.fromEntries(
+              Object.entries(first.OtherTool)
+                .filter(([, v]) => v !== null && v !== undefined && v !== "" && typeof v !== "object")
+                .slice(0, 40)
+                .map(([k, v]) => [k, String(v).slice(0, 60)])
+            );
+          }
+          const inv = await fetchOtherToolsInventory(jobId, schema, items);
+          report.inventoryRows = inv.length;
+          report.inventorySample = inv.slice(0, 8).map((r) => `${r.SerialNumber} | ${r.ItemName} | ${r.SubCategory}`);
+        } catch (err) {
+          report.notes.push(`job probe failed: ${err.message}`);
+        }
+      } else {
+        report.notes.push("enter a Job ID to test $expand / inventory against a job");
+      }
+      sendResponse({ ok: true, report });
+    })().catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 

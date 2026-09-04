@@ -140,8 +140,10 @@ Public Sub RefreshData()
     On Error GoTo ErrHandler
     DayRoll_BackfillSlideMetrics
 
-    ' 3rd-party tool / motor Current Hours (Data R33:R55) from BHA total Q24
+    ' 3rd-party tools: seed "Other Inventory" serials from inventory.csv, then
+    ' tool / motor Current Hours (Data R33:R55) from BHA total Q24
     On Error Resume Next
+    ToolHours_SeedFromInventory
     ToolHours_Sync
     On Error GoTo ErrHandler
 

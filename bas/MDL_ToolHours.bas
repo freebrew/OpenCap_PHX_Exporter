@@ -25,17 +25,31 @@ Option Explicit
 ' Motor: the row in O42:O55 whose serial = C22 gets R = Q24. If C22 is blank the
 ' motor is taken from _OC_BHA (Description contains "Mud Motor") for BHA# = H3.
 '
+' Other Inventory: the OpenCap exporter (v3.2.0+) tags third-party tools with
+' Category = "Other Inventory" in inventory.csv and Source = "Other Inventory" in
+' bha-equipment.csv. ToolHours_SeedFromInventory drops any such serial that is not
+' already in O33:O38 into the first blank row (never clears / reorders rows).
+'
+' C31 "Previous Motor Hours" self-heals to VLOOKUP column 3 (Q previous); the
+' original pointed at column 4 (R current) and echoed C32.
+'
 ' Entry points:
-'   ToolHours_Sync          full recompute (RefreshData, Pason form, manual)
-'   ToolHours_OnDataChange  Data Worksheet_Change hook (cheap range gate)
+'   ToolHours_Sync                full recompute (RefreshData, Pason form, manual)
+'   ToolHours_OnDataChange        Data Worksheet_Change hook (cheap range gate)
+'   ToolHours_SeedFromInventory   RefreshData, after the CSV import
 ' ================================================================================
 
 Private Const SH_DATA As String = "Data"
 Private Const SH_BHA As String = "_OC_BHA"
+Private Const SH_INVENTORY As String = "_OC_Inventory"
+Private Const OTHER_INVENTORY_TAG As String = "Other Inventory"
 
 Private Const CELL_BHA As String = "H3"
 Private Const CELL_HOURS As String = "Q24"
 Private Const CELL_MOTOR As String = "C22"
+Private Const CELL_PREV_MOTOR As String = "C31"
+Private Const PREV_MOTOR_BAD As String = "$O$42:$S$55,4,"
+Private Const PREV_MOTOR_GOOD As String = "$O$42:$S$55,3,"
 Private Const RNG_PICKS As String = "D24:D32"
 Private Const RNG_HOURS_SRC As String = "P4:Q22"
 
@@ -120,6 +134,7 @@ Public Sub ToolHours_Sync()
     On Error GoTo FailProt
 
     FixTitleSpelling ws
+    FixPrevMotorHoursFormula ws
 
     ' 3rd-party tools: on this BHA if picked in D24:D32 or listed in _OC_BHA
     For r = toolsFirst To toolsLast
@@ -155,9 +170,104 @@ Fail:
     mBusy = False
 End Sub
 
+' Fill blank 3rd-party rows with "Other Inventory" serials from _OC_Inventory.
+Public Sub ToolHours_SeedFromInventory()
+    Dim ws As Worksheet, inv As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+    Dim cSn As Long, cCat As Long
+    Dim lastR As Long, r As Long
+    Dim toolsFirst As Long, toolsLast As Long
+    Dim motorFirst As Long, motorLast As Long
+    Dim existing As New Collection
+    Dim sn As String
+    Dim blankRow As Long
+
+    If mBusy Then Exit Sub
+    If Not SheetExistsTH(SH_DATA) Then Exit Sub
+    If Not SheetExistsTH(SH_INVENTORY) Then Exit Sub
+    Set ws = ThisWorkbook.Worksheets(SH_DATA)
+    Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
+
+    cSn = HeaderCol(inv, "SerialNumber")
+    cCat = HeaderCol(inv, "Category")
+    If cSn = 0 Or cCat = 0 Then Exit Sub
+
+    LocateTables ws, toolsFirst, toolsLast, motorFirst, motorLast
+    For r = toolsFirst To toolsLast
+        sn = SerialAt(ws, r)
+        If Len(sn) > 0 Then AddUnique existing, sn
+    Next r
+
+    mBusy = True
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    On Error GoTo Fail
+    wasProt = SheetUnprotectForVba(ws)
+    On Error GoTo FailProt
+
+    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    For r = 2 To lastR
+        If StrComp(Trim$(CStr(inv.Cells(r, cCat).Value & "")), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
+            sn = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
+            If Len(sn) > 0 Then
+                If Not InSet(existing, sn) Then
+                    blankRow = FirstBlankSerialRow(ws, toolsFirst, toolsLast)
+                    If blankRow = 0 Then Exit For
+                    SetSerialAt ws, blankRow, sn
+                    AddUnique existing, sn
+                End If
+            End If
+        End If
+    Next r
+
+    SheetReprotectAfterVba ws, wasProt
+    Application.EnableEvents = prevEvents
+    mBusy = False
+    Exit Sub
+
+FailProt:
+    On Error Resume Next
+    SheetReprotectAfterVba ws, wasProt
+Fail:
+    On Error Resume Next
+    Application.EnableEvents = prevEvents
+    mBusy = False
+End Sub
+
 ' ------------------------------------------------------------------------------
 '  Internals
 ' ------------------------------------------------------------------------------
+
+' C31 "Previous Motor Hours" must read the Q (previous) column, VLOOKUP col 3.
+Private Sub FixPrevMotorHoursFormula(ByVal ws As Worksheet)
+    Dim c As Range
+    Dim f As String
+    Set c = ws.Range(CELL_PREV_MOTOR)
+    f = CStr(c.Formula & "")
+    If InStr(1, f, "VLOOKUP", vbTextCompare) = 0 Then Exit Sub
+    If InStr(1, f, PREV_MOTOR_BAD, vbTextCompare) = 0 Then Exit Sub
+    c.Formula = Replace(f, PREV_MOTOR_BAD, PREV_MOTOR_GOOD, 1, 1, vbTextCompare)
+End Sub
+
+Private Function FirstBlankSerialRow(ByVal ws As Worksheet, ByVal firstRow As Long, _
+                                     ByVal lastRow As Long) As Long
+    Dim r As Long
+    FirstBlankSerialRow = 0
+    For r = firstRow To lastRow
+        If Len(SerialAt(ws, r)) = 0 Then
+            FirstBlankSerialRow = r
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sn As String)
+    Dim c As Range
+    Set c = ws.Cells(r, COL_SERIAL)
+    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    c.Value = sn
+End Sub
 
 ' Find both tables from their title text in column O so a row shift does not
 ' silently point us at the wrong cells. Falls back to the documented layout.

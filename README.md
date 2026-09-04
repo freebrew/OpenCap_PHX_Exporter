@@ -7,7 +7,7 @@
 **Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)  
 **Data Hub prospect notes:** [docs/FieldCap_Data_Hub_Prospect_Report.md](docs/FieldCap_Data_Hub_Prospect_Report.md)
 
-**Current Chrome extension revision:** `v3.1.8`
+**Current Chrome extension revision:** `v3.2.0`
 
 ---
 
@@ -244,7 +244,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.1.8
+    ├── chrome-extension/            ← Manifest V3, v3.2.0
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -281,6 +281,13 @@ PHX_FieldCap/
 - **Wellbore corridor** — sloping geo ribbon, plan path, corrected floor L/R orientation, back-wall TVD shadow only, Position of Wellbore numbers from gauge + geo window.
 - **Proximity gauge layout** — dial starts in AA into AB; GRAVITY/PTB metrics end in AC; Clear Ranges / Pipe Tally in `Z1:Z3` / `Z4:Z6`; caption clutter removed.
 - **Setup layout persistence** — section gap heights and notes box size encoded in `MDL_Setup` so Rebuild does not silently undo hand-tuned UI.
+
+### v3.2.0 — Other Tools (third-party) in the existing CSVs
+
+- **BHA components without a JobTool now resolve** — third-party / rental tools live in FieldCap's *Other Tools* table, so those rows exported with no serial or description. The exporter discovers the `ToolAssemblyItem` navigation property from OData `$metadata` (falls back to sniffing populated `*Id` keys on bare items), verifies it with a live `$expand`, and fills `Serial #` / `Item Code` / `Description` / `Sub Description`.
+- **No new CSV** — tagged in place: `bha-equipment.csv` gains a trailing `Source` column (`Other Inventory` or blank); `inventory.csv` appends the job's Other Tools with `Category = Other Inventory` (SubCategory = vendor / type when the table has one).
+- **Other Tools Probe** (footer button) — shows the discovered navs / entity sets, the bare BHA items, a sample resolved tool, and the rows that would be appended. Share its output if nothing resolves for a tenant.
+- **Slide Sheet Data** — Setup / Data **Refresh** seeds blank rows of *Enter any 3rd Party Tools/hours below* (`O33:O38`) with any `Other Inventory` serials not already listed; `MDL_ToolHours` then matches them to the selected BHA for `Current Hours`. `C31` *Previous Motor Hours* self-heals to VLOOKUP column 3 (Q, previous) — it pointed at column 4 (R, current) and echoed `C32`.
 
 ### v3.1.8 — Ticket Costs by Day Export
 
