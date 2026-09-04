@@ -312,6 +312,8 @@ Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sn As Stri
     Dim c As Range
     Set c = ws.Cells(r, COL_SERIAL)
     If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    ' serials are text - "0261" must not become 261
+    c.NumberFormat = "@"
     c.Value = sn
 End Sub
 
