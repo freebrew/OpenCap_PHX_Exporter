@@ -679,8 +679,17 @@
         }
         if (jobId) {
           lines.push("");
-          lines.push(`Job ${jobId}: ${r.bareItems} BHA component(s) without a JobTool serial; ${r.attached} resolved via ${r.navsUsed.join(", ") || "—"}`);
+          lines.push(`Job ${jobId}: ${r.itemLessJobTools ?? 0} BHA component(s) on item-less JobTools (Other Inventory)`);
+          if (r.itemLessSample) lines.push(`  ✓ sample: ${r.itemLessSample}`);
+          if (r.itemLessJobToolKeys?.length) lines.push(`  JobTool fields: ${r.itemLessJobToolKeys.join("  |  ")}`);
+          lines.push(`  ${r.bareItems} still unresolved; ${r.attached} resolved via separate table (${r.navsUsed.join(", ") || "—"})`);
           if (r.bareItemKeys?.length) lines.push(`  bare item fields: ${r.bareItemKeys.join("  |  ")}`);
+          if (r.bareJobToolExpanded) {
+            lines.push(`  bare item's JobTool (expanded): ${Array.isArray(r.bareJobToolExpanded) ? (r.bareJobToolExpanded.join("  |  ") || "(no scalar values)") : r.bareJobToolExpanded}`);
+          }
+          if (r.bareJobToolRaw) {
+            lines.push(`  bare item's JobTool (raw JobTools query): ${Array.isArray(r.bareJobToolRaw) ? (r.bareJobToolRaw.join("  |  ") || "(no scalar values)") : r.bareJobToolRaw}`);
+          }
           if (r.sample) {
             lines.push(`  ✓ sample Other Tool:`);
             for (const [k, v] of Object.entries(r.sample)) lines.push(`    ${k}: ${v}`);
@@ -699,7 +708,7 @@
         resultText.style.whiteSpace = "pre-wrap";
         resultText.style.fontSize   = "9px";
         resultText.textContent = lines.join("\n");
-        resultMeta.textContent = r.attached > 0
+        resultMeta.textContent = (r.attached > 0 || (r.itemLessJobTools ?? 0) > 0)
           ? "Other Tools resolve — Fetch & Save will tag them 'Other Inventory' in inventory.csv and bha-equipment.csv"
           : "Nothing resolved — share this output so the discovery rules can be extended";
       });

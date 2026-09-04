@@ -7,7 +7,7 @@
 **Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)  
 **Data Hub prospect notes:** [docs/FieldCap_Data_Hub_Prospect_Report.md](docs/FieldCap_Data_Hub_Prospect_Report.md)
 
-**Current Chrome extension revision:** `v3.2.0`
+**Current Chrome extension revision:** `v3.2.1`
 
 ---
 
@@ -244,7 +244,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.2.0
+    ├── chrome-extension/            ← Manifest V3, v3.2.1
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -281,6 +281,12 @@ PHX_FieldCap/
 - **Wellbore corridor** — sloping geo ribbon, plan path, corrected floor L/R orientation, back-wall TVD shadow only, Position of Wellbore numbers from gauge + geo window.
 - **Proximity gauge layout** — dial starts in AA into AB; GRAVITY/PTB metrics end in AC; Clear Ranges / Pipe Tally in `Z1:Z3` / `Z4:Z6`; caption clutter removed.
 - **Setup layout persistence** — section gap heights and notes box size encoded in `MDL_Setup` so Rebuild does not silently undo hand-tuned UI.
+
+### v3.2.1 — Other Tools are item-less JobTools
+
+- Probe on job 21782 showed the blank BHA rows each carry a `JobToolId` — the third-party tools are ordinary JobTools with no `Item` / `ItemSerial` link, their serial and description typed straight onto the JobTool. v3.2.0 only looked for a separate table.
+- `normalizeBhaRow` now reads serial / code / description from the JobTool's own fields when it has no Item link (`Source = Other Inventory`); `buildInventoryCsv` keeps those JobTools instead of dropping them as placeholders and tags them `Category = Other Inventory`. Key picking skips `*Id` / GUID / timestamp fields.
+- Probe reports the item-less JobTools it recognised plus the raw JobTool behind any still-unresolved item; `$metadata` parser tolerates namespace-prefixed tags.
 
 ### v3.2.0 — Other Tools (third-party) in the existing CSVs
 

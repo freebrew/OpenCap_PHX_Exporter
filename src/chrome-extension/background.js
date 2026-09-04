@@ -1495,21 +1495,22 @@ const shortType = (t) => String(t ?? "").replace(/^Collection\(|\)$/g, "").split
 const parseEdmMetadata = (xml) => {
   const types = {};
   const sets = {};
-  const typeRe = /<EntityType\b([^>]*)>([\s\S]*?)<\/EntityType>/g;
+  // Tags may carry a namespace prefix (<edm:EntityType>) depending on the server.
+  const typeRe = /<(?:\w+:)?EntityType\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?EntityType>/g;
   let m;
   while ((m = typeRe.exec(xml))) {
     const name = xmlAttr(m[1], "Name");
     if (!name) continue;
     const body = m[2];
-    const props = [...body.matchAll(/<Property\b([^>]*)\/?>/g)].map((x) => xmlAttr(x[1], "Name")).filter(Boolean);
-    const navs = [...body.matchAll(/<NavigationProperty\b([^>]*)\/?>/g)].map((x) => ({
+    const props = [...body.matchAll(/<(?:\w+:)?Property\b([^>]*)\/?>/g)].map((x) => xmlAttr(x[1], "Name")).filter(Boolean);
+    const navs = [...body.matchAll(/<(?:\w+:)?NavigationProperty\b([^>]*)\/?>/g)].map((x) => ({
       name: xmlAttr(x[1], "Name"),
       type: shortType(xmlAttr(x[1], "Type")),
       collection: /^Collection\(/.test(xmlAttr(x[1], "Type")),
     })).filter((n) => n.name);
     types[name] = { props, navs };
   }
-  const setRe = /<EntitySet\b([^>]*)\/?>/g;
+  const setRe = /<(?:\w+:)?EntitySet\b([^>]*)\/?>/g;
   while ((m = setRe.exec(xml))) {
     const name = xmlAttr(m[1], "Name");
     const type = shortType(xmlAttr(m[1], "EntityType"));
@@ -1554,7 +1555,9 @@ const discoverOtherToolsSchema = async (jobId, { force = false } = {}) => {
       schema.itemNavs = (named.length ? named : unknown).map((n) => ({ name: n.name, type: n.type }));
       schema.notes.push(`ToolAssemblyItem navs: ${itemType.navs.map((n) => n.name).join(", ") || "(none)"}`);
     } else {
-      schema.notes.push("ToolAssemblyItem entity type not found in $metadata");
+      const names = Object.keys(edm.types);
+      const toolish = names.filter((n) => /tool|item|serial/i.test(n));
+      schema.notes.push(`ToolAssemblyItem entity type not found in $metadata (${names.length} types; tool-ish: ${toolish.join(", ") || "none"})`);
     }
     const navTypes = new Set(schema.itemNavs.map((n) => n.type));
     for (const [set, type] of Object.entries(edm.sets)) {
@@ -1619,21 +1622,40 @@ const discoverOtherToolsSchema = async (jobId, { force = false } = {}) => {
 };
 
 // First non-empty scalar whose key matches one of the regexes (in priority order).
+// Skips foreign keys / GUIDs / timestamps so "ItemSerialId" never wins /serial/.
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_LIKE_KEY_RE = /(Id|By)$|^(ClientSyncTime|LastClientSyncTime|CreatedOn|LastModifiedOn|DeletedOn|LineNumber)$/i;
 const pickByKey = (obj, ...regexes) => {
   if (!obj || typeof obj !== "object") return "";
   for (const re of regexes) {
     for (const [k, v] of Object.entries(obj)) {
-      if (!re.test(k)) continue;
+      if (!re.test(k) || ID_LIKE_KEY_RE.test(k)) continue;
       if (v === null || v === undefined || typeof v === "object") continue;
       const s = String(v).trim();
-      if (s !== "") return s;
+      if (s === "" || GUID_RE.test(s)) continue;
+      return s;
     }
   }
   return "";
 };
 
+// A JobTool with no Item / ItemSerial link but with its own name or serial is a
+// third-party tool typed straight onto the job (FieldCap "Other Tools").
+const jobToolLooksOther = (jt) => {
+  if (!jt || typeof jt !== "object") return false;
+  if (jt.ItemSerial?.SerialNumber || jt.Item?.ItemName || jt.Item?.ItemCode) return false;
+  return !!(otherToolSerial(jt) || otherToolName(jt));
+};
+
+// The object that describes a BHA item's third-party tool, or null.
+const otherToolOf = (item) => {
+  if (item?.OtherTool && typeof item.OtherTool === "object") return item.OtherTool;
+  if (jobToolLooksOther(item?.JobTool)) return item.JobTool;
+  return null;
+};
+
 const otherToolSerial = (o) => pickByKey(o, /^SerialNumber$/i, /serial/i, /^MnfNumber$/i);
-const otherToolName   = (o) => pickByKey(o, /^(ItemName|ToolName|Name|Description|ToolDescription|ItemDescription)$/i, /desc|name|title/i);
+const otherToolName   = (o) => pickByKey(o, /^(ItemName|ToolName|Name|Description|ToolDescription|ItemDescription|OtherToolName|OtherTool)$/i, /desc|name|title|^notes?$/i);
 const otherToolCode   = (o) => pickByKey(o, /^(ItemCode|ToolCode|Code|PartNumber|Model)$/i, /code|part|model/i);
 const otherToolKind   = (o) => pickByKey(o, /^(SubCategory|Category|ToolType|Type|Vendor|Supplier|Company|Owner)$/i, /type|vendor|supplier|categor|owner/i);
 const otherToolHours  = (o) => {
@@ -1643,7 +1665,7 @@ const otherToolHours  = (o) => {
 };
 
 const itemHasKnownSerial = (it) =>
-  !!(it?.JobTool?.ItemSerial?.SerialNumber || it?.SerialNumber);
+  !!(it?.JobTool?.ItemSerial?.SerialNumber || it?.SerialNumber || jobToolLooksOther(it?.JobTool));
 
 const itemKey = (it) => it?.ToolAssemblyItemId ?? it?.Id ?? null;
 
@@ -1726,8 +1748,10 @@ const fetchOtherToolsInventory = async (jobId, schema, bhaItems = []) => {
     }
   }
   // b) whatever the BHA items already resolved — guarantees BHA tools show up
+  //    (separate-table nav, or an item-less JobTool carrying its own serial/name)
   for (const it of bhaItems ?? []) {
-    if (it?.OtherTool) push(it.OtherTool, it.OtherToolNav);
+    const o = otherToolOf(it);
+    if (o) push(o, it.OtherToolNav ?? "");
   }
   return rows;
 };
@@ -1753,8 +1777,9 @@ const buildInventoryCsv = (jobTools, otherRows = []) => {
   for (const jt of jobTools ?? []) {
     const serial = jt.ItemSerial ?? {};
     const key    = serial.ItemSerialId ?? jt.ItemSerialId ?? null;
-    // Also skip rows with no identifying info at all (planning placeholders)
-    const hasId  = !!(item_code(jt) || serial.SerialNumber || serial.MnfNumber);
+    // Also skip rows with no identifying info at all (planning placeholders) —
+    // but keep item-less JobTools that carry their own serial / name (Other Tools)
+    const hasId  = !!(item_code(jt) || serial.SerialNumber || serial.MnfNumber || jobToolLooksOther(jt));
     if (!hasId) continue;
     if (key && seen.has(key)) continue;
     if (key) seen.add(key);
@@ -1792,13 +1817,14 @@ const buildInventoryCsv = (jobTools, otherRows = []) => {
   for (const jt of unique) {
     const item   = jt.Item       ?? {};
     const serial = jt.ItemSerial ?? {};
+    const isOther = jobToolLooksOther(jt);
     const row = {
-      ItemCode:       item.ItemCode   ?? "",
-      ItemName:       item.ItemName   ?? "",
-      SerialNumber:   serial.SerialNumber ?? jt.SerialNumber ?? "",
+      ItemCode:       item.ItemCode   ?? (isOther ? otherToolCode(jt) : ""),
+      ItemName:       item.ItemName   ?? (isOther ? otherToolName(jt) : ""),
+      SerialNumber:   serial.SerialNumber ?? (isOther ? otherToolSerial(jt) : (jt.SerialNumber ?? "")),
       MnfNumber:      serial.MnfNumber    ?? jt.MnfNumber    ?? "",
-      Category:       (jt.Category    ?? "").replace(/\|/g, "").trim(),
-      SubCategory:    jt.SubCategory  ?? "",
+      Category:       isOther ? OTHER_INVENTORY_TAG : (jt.Category ?? "").replace(/\|/g, "").trim(),
+      SubCategory:    jt.SubCategory  ?? (isOther ? otherToolKind(jt) : ""),
       ShippingStatus: shippingStatus(jt),
       TransferInDate:  jt.TransferInDate  ? toDateStr(jt.TransferInDate)  : "",
       TransferOutDate: jt.TransferOutDate ? toDateStr(jt.TransferOutDate) : "",
@@ -1819,8 +1845,15 @@ const buildInventoryCsv = (jobTools, otherRows = []) => {
     row["HrsSinceService"] = rawMins > 0 ? Number((rawMins / 60).toFixed(2)) : 0;
     rows.push(row);
   }
-  // ── 4. Other Tools (third-party) — same columns, Category = "Other Inventory"
-  for (const o of otherRows ?? []) rows.push(o);
+  // ── 4. Other Tools (third-party) — same columns, Category = "Other Inventory".
+  //       Skip serials already present (item-less JobTools were kept in step 1).
+  const present = new Set(rows.map((r) => String(r.SerialNumber || r.ItemName || "").toUpperCase()).filter(Boolean));
+  for (const o of otherRows ?? []) {
+    const key = String(o.SerialNumber || o.ItemName || "").toUpperCase();
+    if (!key || present.has(key)) continue;
+    present.add(key);
+    rows.push(o);
+  }
   return buildCsvString(cols, rows);
 };
 
@@ -2169,8 +2202,8 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
   const assemblyPick = augmentAssemblyForPicking(assembly);
   const itemSerial = item?.JobTool?.ItemSerial;
   const itemRecord = item?.JobTool?.Item ?? itemSerial?.Item;
-  // Third-party component resolved from FieldCap's Other Tools table
-  const other = item?.OtherTool && typeof item.OtherTool === "object" ? item.OtherTool : null;
+  // Third-party component: separate Other Tools table, or an item-less JobTool
+  const other = otherToolOf(item);
 
   // Tenant-specific fallback observed in this FieldCap instance:
   // ToolHours1=Rotate (minutes), ToolHours2=Slide (minutes),
@@ -2401,11 +2434,12 @@ const fetchAll = async (
     ]);
     prog(60, "BHA components…");
     // Resolve third-party components (no JobTool) from FieldCap's Other Tools table
+    results.otherToolsBhaRows = items.filter((it) => jobToolLooksOther(it.JobTool)).length;
     try {
       const otherRes = await attachOtherToolsToItems(items, jobId, await getOtherSchema());
-      results.otherToolsBhaRows = otherRes.attached;
+      results.otherToolsBhaRows += otherRes.attached;
     } catch (_) {
-      results.otherToolsBhaRows = 0;
+      // discovery is best-effort
     }
     bhaItemsForOther = items;
     const assemblies = await enrichToolAssembliesFromDetail(assembliesList);
@@ -2905,13 +2939,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       };
       if (jobId) {
         try {
+          const scalars = (o) => Object.entries(o ?? {})
+            .filter(([, v]) => v !== null && v !== undefined && v !== "" && typeof v !== "object")
+            .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`);
           const items = await fetchToolAssemblyItems(jobId);
+          // Item-less JobTools that carry their own serial / name (the common case)
+          const itemLess = items.filter((it) => jobToolLooksOther(it.JobTool));
+          report.itemLessJobTools = itemLess.length;
+          if (itemLess[0]) {
+            const jt = itemLess[0].JobTool;
+            report.itemLessSample = `${otherToolSerial(jt)} | ${otherToolName(jt)} | ${otherToolKind(jt)}`;
+            report.itemLessJobToolKeys = scalars(jt);
+          }
           const bare = items.filter((it) => !itemHasKnownSerial(it));
           report.bareItems = bare.length;
           if (bare[0]) {
-            report.bareItemKeys = Object.entries(bare[0])
-              .filter(([, v]) => v !== null && v !== undefined && v !== "" && typeof v !== "object")
-              .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`);
+            report.bareItemKeys = scalars(bare[0]);
+            // What does the JobTool behind this bare item look like?
+            const jt = bare[0].JobTool;
+            report.bareJobToolExpanded = jt && typeof jt === "object" ? scalars(jt) : `JobTool=${String(jt)}`;
+            const jtId = bare[0].JobToolId;
+            if (jtId) {
+              for (const lit of [`${jtId}`, `'${jtId}'`]) {
+                try {
+                  const raw = await odataGet(`JobTools?$filter=${encodeURIComponent(`JobToolId eq ${lit}`)}`);
+                  const rows = Array.isArray(raw) ? raw : [];
+                  report.bareJobToolRaw = rows[0] ? scalars(rows[0]) : "JobTools query returned 0 rows (deleted or hidden?)";
+                  break;
+                } catch (err) {
+                  report.bareJobToolRaw = `JobTools lookup failed: ${err.message}`;
+                }
+              }
+            }
           }
           const res = await attachOtherToolsToItems(items, jobId, schema);
           report.attached = res.attached;
