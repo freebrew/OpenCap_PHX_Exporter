@@ -28,7 +28,7 @@ Option Explicit
 ' Other Inventory: the OpenCap exporter (v3.2.1+) tags third-party tools with
 ' Category = "Other Inventory" in inventory.csv and Source = "Other Inventory" in
 ' bha-equipment.csv. ToolHours_SeedFromInventory takes the selected BHA's tagged
-' serials (skipping drill bits / tubulars) and drops any not already in O33:O38
+' serials (skipping MWD kit, drill bits, tubulars) and drops any not in O33:O38
 ' into the first blank row (never clears / reorders rows). Serial matching
 ' ignores spaces, dashes and case ("HMJ 625 62" = "HMJ-625-62").
 '
@@ -204,7 +204,9 @@ Public Sub ToolHours_SeedFromInventory()
     cSrc = HeaderCol(bhaWs, "Source")
     If cNum = 0 Or cSn = 0 Or cSrc = 0 Then Exit Sub   ' pre-v3.2 export: nothing tagged
 
-    Set skipKinds = InventorySerialsOfKind("drill bit", "tubular")
+    ' inventory SubCategory is "<Category> <SubCategory>": "DD other", "MWD other",
+    ' "DD drill bit", "DD tubular" - skip MWD kit, bits and tubulars
+    Set skipKinds = InventorySerialsOfKind("MWD", "drill bit", "tubular")
 
     LocateTables ws, toolsFirst, toolsLast, motorFirst, motorLast
     For r = toolsFirst To toolsLast
@@ -265,7 +267,8 @@ Private Sub FixPrevMotorHoursFormula(ByVal ws As Worksheet)
     c.Formula = Replace(f, PREV_MOTOR_BAD, PREV_MOTOR_GOOD, 1, 1, vbTextCompare)
 End Sub
 
-' Serials from _OC_Inventory whose SubCategory is one of the given kinds.
+' Serials from _OC_Inventory whose SubCategory contains one of the given kinds
+' (whole-word, case-insensitive).
 Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collection
     Dim col As New Collection
     Dim inv As Worksheet
@@ -282,9 +285,9 @@ Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collec
 
     lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
     For r = 2 To lastR
-        sub_ = Trim$(CStr(inv.Cells(r, cSub).Value & ""))
+        sub_ = " " & Trim$(CStr(inv.Cells(r, cSub).Value & "")) & " "
         For k = LBound(kinds) To UBound(kinds)
-            If StrComp(sub_, CStr(kinds(k)), vbTextCompare) = 0 Then
+            If InStr(1, sub_, " " & CStr(kinds(k)) & " ", vbTextCompare) > 0 Then
                 sn = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
                 If Len(sn) > 0 Then AddUnique col, sn
                 Exit For

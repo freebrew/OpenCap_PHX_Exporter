@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": ".OpenCap Data Exporter",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "description": "Export job details, crew, BHA equipment (incl. third-party Other Tools), inventory, and daily slide/rotate metres from FieldCap to CSV via OData API using your active session.",
   "permissions": [
     "downloads",

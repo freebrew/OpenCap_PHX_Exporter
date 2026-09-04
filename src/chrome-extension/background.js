@@ -1657,8 +1657,14 @@ const otherToolOf = (item) => {
 const otherToolSerial = (o) => pickByKey(o, /^SerialNumber$/i, /serial/i, /^MnfNumber$/i);
 const otherToolName   = (o) => pickByKey(o, /^(ItemName|ToolName|Name|Description|ToolDescription|ItemDescription|OtherToolName|OtherTool)$/i, /desc|name|title|^notes?$/i);
 const otherToolCode   = (o) => pickByKey(o, /^(ItemCode|ToolCode|Code|PartNumber|Model)$/i, /code|part|model/i);
-// SubCategory ("other", "drill bit", "tubular") before the pipe-wrapped Category ("|DD|")
-const otherToolKind   = (o) => pickByKey(o, /^SubCategory$/i, /^(ToolType|Type|Vendor|Supplier|Company|Owner)$/i, /^Category$/i, /type|vendor|supplier|categor|owner/i).replace(/\|/g, "").trim();
+// "DD other", "MWD other", "DD drill bit", "DD tubular": FieldCap's pipe-wrapped
+// Category (|DD| / |MWD|) plus SubCategory, so the Slide Sheet can skip MWD kit,
+// bits and tubulars when seeding the 3rd-party hours table.
+const otherToolKind   = (o) => {
+  const cat = pickByKey(o, /^Category$/i).replace(/\|/g, "").trim();
+  const sub = pickByKey(o, /^SubCategory$/i, /^(ToolType|Type|Vendor|Supplier|Company|Owner)$/i, /type|vendor|supplier|owner/i).replace(/\|/g, "").trim();
+  return [cat, sub].filter(Boolean).join(" ");
+};
 const otherToolHours  = (o) => {
   const s = pickByKey(o, /^(HrsSinceService|HoursSinceService|TotalHours|Hours|JobHours|RunHours)$/i, /hour|hrs/i);
   const n = Number(s);
@@ -1825,7 +1831,7 @@ const buildInventoryCsv = (jobTools, otherRows = []) => {
       SerialNumber:   serial.SerialNumber ?? (isOther ? otherToolSerial(jt) : (jt.SerialNumber ?? "")),
       MnfNumber:      serial.MnfNumber    ?? jt.MnfNumber    ?? "",
       Category:       isOther ? OTHER_INVENTORY_TAG : (jt.Category ?? "").replace(/\|/g, "").trim(),
-      SubCategory:    jt.SubCategory  ?? (isOther ? otherToolKind(jt) : ""),
+      SubCategory:    isOther ? otherToolKind(jt) : (jt.SubCategory ?? ""),
       ShippingStatus: shippingStatus(jt),
       TransferInDate:  jt.TransferInDate  ? toDateStr(jt.TransferInDate)  : "",
       TransferOutDate: jt.TransferOutDate ? toDateStr(jt.TransferOutDate) : "",
