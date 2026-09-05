@@ -22,10 +22,10 @@ Option Explicit
 '                carried the serial, with the selected BHA using live Q24
 '   S Total    = Q + R
 '
-' Bits / MWD / tubulars are never seeded. Serial compare ignores spaces/dashes.
-' Official FieldCap BHA CSVs have no Source column — 3rd-party also matches
-' inventory Category "Other Inventory" or a Rental description.
-' Orbit RSS and iCruise seed into the Motors table, not 3rd-party.
+' Only FieldCap Other Tools on the selected BHA (H3): Source/Category
+' "Other Inventory"/"Other Tools", or SubCategory "DD other".
+' DD inventory (crossovers, rentals, MWD), drill bits, and tubulars stay out.
+' Orbit RSS and iCruise seed into Motors.
 ' ================================================================================
 
 Private Const SH_DATA As String = "Data"
@@ -33,6 +33,7 @@ Private Const SH_BHA As String = "_OC_BHA"
 Private Const SH_INVENTORY As String = "_OC_Inventory"
 Private Const SH_TRACK As String = "_TH_Hours"
 Private Const OTHER_INVENTORY_TAG As String = "Other Inventory"
+Private Const OTHER_TOOLS_TAG As String = "Other Tools"
 Private Const KIND_TOOL As String = "Tool"
 Private Const KIND_MOTOR As String = "Motor"
 
@@ -287,10 +288,10 @@ End Sub
 
 Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
     Dim bhaWs As Worksheet
-    Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long
+    Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long, cSub As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, src As String, desc As String
-    Dim cat As String, subCat As String, itemName As String
+    Dim sn As String, src As String, desc As String, subDesc As String
+    Dim cat As String, subCat As String, itemName As String, ship As String
 
     PurgeBadTrackerRows tr
     DedupTracker tr
@@ -301,6 +302,7 @@ Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
         cSn = HeaderCol(bhaWs, "Serial #")
         cSrc = HeaderCol(bhaWs, "Source")
         cDesc = HeaderCol(bhaWs, "Description")
+        cSub = HeaderCol(bhaWs, "Sub Description")
         If cSn > 0 Then
             lastR = bhaWs.Cells(bhaWs.Rows.Count, cSn).End(xlUp).Row
             For r = 2 To lastR
@@ -308,9 +310,12 @@ Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
                 If LooksLikeSerial(sn) Then
                     src = ""
                     desc = ""
+                    subDesc = ""
                     If cSrc > 0 Then src = CStr(bhaWs.Cells(r, cSrc).Value & "")
                     If cDesc > 0 Then desc = CStr(bhaWs.Cells(r, cDesc).Value & "")
-                    InventoryMeta sn, cat, subCat, itemName
+                    If cSub > 0 Then subDesc = CStr(bhaWs.Cells(r, cSub).Value & "")
+                    InventoryMeta sn, cat, subCat, itemName, ship
+                    If Len(Trim$(subCat)) = 0 Then subCat = subDesc
                     If IsMotorLike(sn, desc, cat, subCat, itemName) Then
                         TrackerUpsert tr, sn, KIND_MOTOR
                     ElseIf IsThirdPartySeed(src, sn, desc, cat, subCat, itemName) Then
@@ -642,10 +647,10 @@ End Sub
 Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
     Dim col As New Collection
     Dim ws As Worksheet
-    Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long
+    Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long, cSub As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, src As String, desc As String
-    Dim cat As String, subCat As String, itemName As String
+    Dim sn As String, src As String, desc As String, subDesc As String
+    Dim cat As String, subCat As String, itemName As String, ship As String
 
     Set ActiveBhaToolSerials = col
     If bha <= 0 Then Exit Function
@@ -655,6 +660,7 @@ Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
     cSn = HeaderCol(ws, "Serial #")
     cSrc = HeaderCol(ws, "Source")
     cDesc = HeaderCol(ws, "Description")
+    cSub = HeaderCol(ws, "Sub Description")
     If cNum = 0 Or cSn = 0 Then Exit Function
     lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
     For r = 2 To lastR
@@ -663,9 +669,12 @@ Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
             If LooksLikeSerial(sn) Then
                 src = ""
                 desc = ""
+                subDesc = ""
                 If cSrc > 0 Then src = CStr(ws.Cells(r, cSrc).Value & "")
                 If cDesc > 0 Then desc = CStr(ws.Cells(r, cDesc).Value & "")
-                InventoryMeta sn, cat, subCat, itemName
+                If cSub > 0 Then subDesc = CStr(ws.Cells(r, cSub).Value & "")
+                InventoryMeta sn, cat, subCat, itemName, ship
+                If Len(Trim$(subCat)) = 0 Then subCat = subDesc
                 If IsThirdPartySeed(src, sn, desc, cat, subCat, itemName) Then
                     AddUnique col, sn
                 End If
@@ -930,15 +939,17 @@ Private Function BhaMotorSerial(ByVal bha As Long) As String
 End Function
 
 Private Function InventoryMeta(ByVal sn As String, ByRef cat As String, _
-                               ByRef subCat As String, ByRef itemName As String) As Boolean
+                               ByRef subCat As String, ByRef itemName As String, _
+                               ByRef ship As String) As Boolean
     Dim inv As Worksheet
-    Dim cSn As Long, cCat As Long, cSub As Long, cName As Long
+    Dim cSn As Long, cCat As Long, cSub As Long, cName As Long, cShip As Long
     Dim lastR As Long, r As Long
     Dim want As String
 
     cat = ""
     subCat = ""
     itemName = ""
+    ship = ""
     InventoryMeta = False
     want = NormSerial(sn)
     If Len(want) = 0 Then Exit Function
@@ -950,6 +961,7 @@ Private Function InventoryMeta(ByVal sn As String, ByRef cat As String, _
     cSub = HeaderCol(inv, "SubCategory")
     cName = HeaderCol(inv, "ItemName")
     If cName = 0 Then cName = HeaderCol(inv, "Description")
+    cShip = HeaderCol(inv, "ShippingStatus")
     If cSn = 0 Then Exit Function
     lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
     For r = 2 To lastR
@@ -957,6 +969,7 @@ Private Function InventoryMeta(ByVal sn As String, ByRef cat As String, _
             If cCat > 0 Then cat = CStr(inv.Cells(r, cCat).Value & "")
             If cSub > 0 Then subCat = CStr(inv.Cells(r, cSub).Value & "")
             If cName > 0 Then itemName = CStr(inv.Cells(r, cName).Value & "")
+            If cShip > 0 Then ship = CStr(inv.Cells(r, cShip).Value & "")
             InventoryMeta = True
             Exit Function
         End If
@@ -984,10 +997,7 @@ Private Function IsMotorLike(ByVal sn As String, ByVal desc As String, _
         IsMotorLike = True
         Exit Function
     End If
-    If StrComp(Trim$(subCat), "motor", vbTextCompare) = 0 Then
-        IsMotorLike = True
-        Exit Function
-    End If
+    ' Bare SubCategory "Motor" is a FieldCap Other Tools type — not a mud motor.
     IsMotorLike = IsSteerMotorText(desc) Or IsSteerMotorText(itemName)
 End Function
 
@@ -999,7 +1009,12 @@ Private Function IsSkippedToolKind(ByVal cat As String, ByVal subCat As String, 
         IsSkippedToolKind = True
         Exit Function
     End If
-    If InStr(1, blob, "mwd kit", vbTextCompare) > 0 Then
+    If InStr(1, blob, "mwd kit", vbTextCompare) > 0 _
+       Or InStr(1, blob, "mwd other", vbTextCompare) > 0 Then
+        IsSkippedToolKind = True
+        Exit Function
+    End If
+    If InStr(1, blob, "dd tubular", vbTextCompare) > 0 Then
         IsSkippedToolKind = True
         Exit Function
     End If
@@ -1021,6 +1036,64 @@ Private Function IsSkippedToolKind(ByVal cat As String, ByVal subCat As String, 
     IsSkippedToolKind = False
 End Function
 
+Private Function IsOtherToolsCategory(ByVal cat As String) As Boolean
+    Dim c As String
+    c = Trim$(cat)
+    IsOtherToolsCategory = (StrComp(c, OTHER_INVENTORY_TAG, vbTextCompare) = 0) _
+                        Or (StrComp(c, OTHER_TOOLS_TAG, vbTextCompare) = 0) _
+                        Or (StrComp(c, "Other", vbTextCompare) = 0)
+End Function
+
+' FieldCap Other Tools types on the selected BHA. "Motor" / "Other" are exact Type/SubCategory only.
+Private Function IsOtherToolType(ByVal cat As String, ByVal subCat As String, _
+                                 ByVal desc As String, ByVal itemName As String, _
+                                 Optional ByVal toolType As String = "") As Boolean
+    Dim blob As String
+    Dim subT As String
+    Dim typeT As String
+    blob = Trim$(cat) & " " & Trim$(subCat) & " " & Trim$(desc) & " " & Trim$(itemName) & " " & Trim$(toolType)
+    subT = Trim$(subCat)
+    typeT = Trim$(toolType)
+    If ContainsTypeToken(blob, "Agitator") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Bit Sub") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Crossover") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Digger") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Exciter") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Hole Opener") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Jar") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "OBL Sub") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Reamer") Then IsOtherToolType = True: Exit Function
+    If ContainsTypeToken(blob, "Shock Sub") Then IsOtherToolType = True: Exit Function
+    If StrComp(subT, "Motor", vbTextCompare) = 0 Or StrComp(typeT, "Motor", vbTextCompare) = 0 Then
+        IsOtherToolType = True
+        Exit Function
+    End If
+    If StrComp(subT, "Other", vbTextCompare) = 0 Or StrComp(typeT, "Other", vbTextCompare) = 0 Then
+        IsOtherToolType = True
+        Exit Function
+    End If
+    ' Chrome tags FieldCap Other Tools as "DD other" (not the word Other alone).
+    If InStr(1, subT, "other", vbTextCompare) > 0 _
+       And InStr(1, subT, "mwd", vbTextCompare) = 0 Then
+        IsOtherToolType = True
+        Exit Function
+    End If
+    If InStr(1, typeT, "other", vbTextCompare) > 0 _
+       And InStr(1, typeT, "mwd", vbTextCompare) = 0 Then
+        IsOtherToolType = True
+        Exit Function
+    End If
+    If IsOtherToolsCategory(cat) And Len(subT) = 0 And Len(typeT) = 0 Then
+        IsOtherToolType = True
+        Exit Function
+    End If
+    IsOtherToolType = False
+End Function
+
+Private Function ContainsTypeToken(ByVal blob As String, ByVal token As String) As Boolean
+    ContainsTypeToken = (InStr(1, blob, token, vbTextCompare) > 0)
+End Function
+
 Private Function IsThirdPartySeed(ByVal src As String, ByVal sn As String, _
                                   ByVal desc As String, ByVal cat As String, _
                                   ByVal subCat As String, ByVal itemName As String) As Boolean
@@ -1028,18 +1101,29 @@ Private Function IsThirdPartySeed(ByVal src As String, ByVal sn As String, _
     If Not LooksLikeSerial(sn) Then Exit Function
     If IsMotorLike(sn, desc, cat, subCat, itemName) Then Exit Function
     If IsSkippedToolKind(cat, subCat, desc, itemName) Then Exit Function
+
+    IsThirdPartySeed = IsOtherToolsFamily(src, cat, subCat)
+End Function
+
+' FieldCap Other Tools table only — not PHX DD/MWD inventory.
+Private Function IsOtherToolsFamily(ByVal src As String, ByVal cat As String, _
+                                    ByVal subCat As String) As Boolean
+    Dim subT As String
+    subT = Trim$(subCat)
     If StrComp(Trim$(src), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
-        IsThirdPartySeed = True
+        IsOtherToolsFamily = True
         Exit Function
     End If
-    If StrComp(Trim$(cat), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
-        IsThirdPartySeed = True
+    If IsOtherToolsCategory(cat) Then
+        IsOtherToolsFamily = True
         Exit Function
     End If
-    If InStr(1, desc, "Rental", vbTextCompare) > 0 _
-       Or InStr(1, itemName, "Rental", vbTextCompare) > 0 Then
-        IsThirdPartySeed = True
+    If InStr(1, subT, "other", vbTextCompare) > 0 _
+       And InStr(1, subT, "mwd", vbTextCompare) = 0 Then
+        IsOtherToolsFamily = True
+        Exit Function
     End If
+    IsOtherToolsFamily = False
 End Function
 
 Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collection

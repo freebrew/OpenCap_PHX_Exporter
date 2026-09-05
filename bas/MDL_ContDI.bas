@@ -858,11 +858,9 @@ Private Sub ApplyLookupsAndRates(ByVal ws As Worksheet)
     h.Range("U7").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "U8:U44<>"""")," & cd & "U8:U44),"""")"
     h.Range("V7").Formula = "=IFERROR(ROUND(LOOKUP(2,1/(" & cd & "V8:V44<>"""")," & cd & "V8:V44),2),"""")"
 
-    ' V1 = BRR to the next named plan station. On a landing station (Inc >=
-    ' 88) this is the TVD-arc rate that reaches the station's Inc exactly at
-    ' its TVD (ProjLandingBurr); on intermediate stations it is the Slidesheet
-    ' 3D-dogleg-over-plan-MD rate. V2/V4 = yellow box. V3 = 3D dogleg to the
-    ' same yellow box as V2 (land), not a hypot of V1.
+    ' V1 = TVD-target BRR (ProjLandingBurr: circular arc to the landing
+    ' station's TVD). V3 = measured-target DLR (3D dogleg to the yellow box
+    ' INC/AZM over remaining MD). V2/V4 stay yellow-box TRR / TFR.
     ws.Range("V1").Formula = "=IFERROR(ROUND(ProjLandingBurr(ContDI_Data!T1,ContDI_Data!T4,ContDI_Data!U4,ContDI_Data!V1,IF(ISNUMBER(ContDI_Data!X1),ContDI_Data!X1,19.2),ProjTargets_MD,ProjTargets_INC,ProjTargets_AZM,ProjTargets_TVD),2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
     ws.Range("V2").Formula = "=IFERROR(ROUND(ABS(MOD(T3-ContDI_Data!U4+180,360)-180)/ContDI_Data!U1*30,2),"""")"
     ws.Range("V3").Formula = "=IFERROR(ROUND(ProjDoglegDeg(ContDI_Data!T4,ContDI_Data!U4,T2,T3)/ContDI_Data!U1*30,2),"""")"

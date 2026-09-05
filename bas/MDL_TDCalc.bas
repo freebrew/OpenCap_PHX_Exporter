@@ -9,20 +9,19 @@ Option Explicit
 '                         INC/AZM from survey (or bit W/X if present)
 '                         NS/EW/TVD via minimum-curvature integration
 '    Planned TD  I54:M54  written by Import Plan from the last _OC_Survey station
-'    Actual TD   I55:M55  original sheet formula (merged MD): current MD
-'                         + remaining NS/EW distance * RF from heading vs
-'                         remaining-vector azimuth. Not a copy of Planned TD.
+'    Actual TD   I55:M55  3D min-curve vs the plan at the same MD:
+'                         Planned TD + (inv_actual→TD − inv_plan@MD→TD).
+'                         On plan this equals Planned TD. The old I55 formula
+'                         was a 2D NS/EW chord (azimuth RF only) and came up
+'                         short through the build.
 ' ================================================================================
 
 Private Const SS_SHEET As String = "Slidesheet"
 Private Const PLAN_SHEET As String = "_OC_Survey"
-Private Const PLANSEC_SHEET As String = "_OC_PlanSec"
 Private Const DATA_SHEET As String = "Data"
 
 Private Const SURV_ROW_FIRST As Long = 13
 Private Const SURV_ROW_LAST As Long = 320
-Private Const TGT_FIRST As Long = 2
-Private Const TGT_LAST As Long = 5
 
 Private Const SS_COL_BIT_MD As Long = 4    ' D
 Private Const SS_COL_MD As Long = 5        ' E
@@ -41,13 +40,9 @@ Private Const SURVEY_BLOCK As String = "Slidesheet!$D$13:$AQ$320"
 Private Const TGT_BLOCK As String = "Slidesheet!$T$2:$Y$5"
 Private Const PLANNED_BLOCK As String = "Data!$I$54:$M$54"
 
-' Recovered from Field/Demo before TdEstFinal overwrote I55 (merged I55:M55).
+' I55: 3D min-curve offset from the remaining plan (not a 2D NS/EW chord).
 Private Const ACTUAL_TD_FORMULA As String = _
-    "=ROUND($I$53+SQRT(($L$54-$L$53)^2+($M$54-$M$53)^2)*LET(" & _
-    "dN,$L$54-$L$53,dE,$M$54-$M$53," & _
-    "AZt,IF(dN=0,IF(dE>=0,PI()/2,3*PI()/2),MOD(ATAN(dE/dN)+IF(dN<0,PI(),0)+2*PI(),2*PI()))," & _
-    "dAZ,MOD(AZt-($K$53*PI()/180)+PI(),2*PI())-PI()," & _
-    "DL,ABS(dAZ),IF(DL=0,1,DL/(2*SIN(DL/2)))),2)"
+    "=IFERROR(ROUND(TdEstFinal(""MD""," & SURVEY_BLOCK & "," & TGT_BLOCK & "," & PLANNED_BLOCK & "),2),"""")"
 
 Private Const PI_ As Double = 3.14159265358979
 Private Const EPS As Double = 0.0000001
@@ -86,19 +81,21 @@ Public Function TdActualBit(ByVal field As String, _
     End Select
 End Function
 
-' Estimated final TD after min-curve: bit -> next named T2:Y5 target -> Planned TD.
+' Planned TD MD plus the 3D min-curve difference between the bit and the
+' plan station at the same MD (both inverted to Planned TD). On plan the
+' two inverses match so Actual TD = Planned TD. Off plan (high/low/left/
+' right) the 3D chord × RF moves TD out or in. Does not floor to plan ΔMD
+' and does not use a 2D NS/EW-only chord.
 Public Function TdEstFinal(ByVal field As String, _
                            Optional ByVal surveyBlock As Range, _
                            Optional ByVal tgtBlock As Range, _
                            Optional ByVal plannedBlock As Range) As Variant
     Dim aMd As Double, aInc As Double, aAzm As Double
     Dim aN As Double, aE As Double, aV As Double
-    Dim tMd As Double, tInc As Double, tAzm As Double
-    Dim tN As Double, tE As Double, tv As Double
     Dim pMD As Double, pInc As Double, pAzm As Double
     Dim pN As Double, pE As Double, pV As Double
-    Dim hasTgt As Boolean
-    Dim c1 As Double, c2 As Double
+    Dim qInc As Double, qAzm As Double, qN As Double, qE As Double, qV As Double
+    Dim actualInv As Double, planInv As Double
     Dim estMd As Double
 
     If Not surveyBlock Is Nothing Then
@@ -119,16 +116,14 @@ Public Function TdEstFinal(ByVal field As String, _
     pV = PlanTvdAtMd(pMD)
     If pV = 0# And aV <> 0# Then pV = aV
 
-    hasTgt = NextNamedTarget(aMd, tMd, tInc, tAzm, tN, tE, tv)
-    If hasTgt And tMd > aMd + 0.005 Then
-        If tv = 0# Then tv = PlanTvdAtMd(tMd)
-        c1 = CourseBetween(aMd, aInc, aAzm, aN, aE, aV, tMd, tInc, tAzm, tN, tE, tv)
-        c2 = CourseBetween(tMd, tInc, tAzm, tN, tE, tv, pMD, pInc, pAzm, pN, pE, pV)
-        estMd = aMd + c1 + c2
+    actualInv = InverseCourse(aInc, aAzm, aN, aE, aV, pInc, pAzm, pN, pE, pV)
+    If PlanAtMd(aMd, qInc, qAzm, qN, qE, qV) Then
+        planInv = InverseCourse(qInc, qAzm, qN, qE, qV, pInc, pAzm, pN, pE, pV)
+        estMd = pMD + (actualInv - planInv)
     Else
-        c2 = CourseBetween(aMd, aInc, aAzm, aN, aE, aV, pMD, pInc, pAzm, pN, pE, pV)
-        estMd = aMd + c2
+        estMd = aMd + actualInv
     End If
+    If estMd < aMd Then estMd = aMd
 
     Select Case UCase$(Trim$(field))
         Case "MD":         TdEstFinal = estMd
@@ -167,7 +162,7 @@ Public Sub InstallTdActualFormulas()
     Next i
 
     ws.Range("J55:M55").ClearContents
-    ws.Range("I55").Formula2 = ACTUAL_TD_FORMULA
+    ws.Range("I55").Formula = ACTUAL_TD_FORMULA
     ws.Range("I55:M55").Merge
 
     SheetReprotectAfterVba ws, wasProt
@@ -321,81 +316,6 @@ NextSurvey:
     LastActualAtBit = True
 End Function
 
-Private Function NextNamedTarget(ByVal bitMd As Double, _
-        ByRef tMd As Double, ByRef tInc As Double, ByRef tAzm As Double, _
-        ByRef tN As Double, ByRef tE As Double, ByRef tv As Double) As Boolean
-    Dim ss As Worksheet
-    Dim r As Long
-    Dim vMd As Variant, vNm As String
-
-    NextNamedTarget = False
-    On Error Resume Next
-    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
-    On Error GoTo 0
-    If ss Is Nothing Then Exit Function
-
-    For r = TGT_FIRST To TGT_LAST
-        vMd = ss.Cells(r, "U").Value2
-        vNm = Trim$(CStr(ss.Cells(r, "Y").Value2 & ""))
-        If Len(vNm) = 0 Then GoTo NextTgt
-        If Not IsNumeric(vMd) Then GoTo NextTgt
-        If CDbl(vMd) <= bitMd + 0.005 Then GoTo NextTgt
-        tMd = CDbl(vMd)
-        tInc = NumOr(ss.Cells(r, "V").Value2, 0#)
-        tAzm = NumOr(ss.Cells(r, "W").Value2, 0#)
-        tv = NumOr(ss.Cells(r, "X").Value2, 0#)
-        If Not TargetCoords(tMd, tN, tE, tv) Then
-            tN = 0#: tE = 0#
-        End If
-        NextNamedTarget = True
-        Exit Function
-NextTgt:
-    Next r
-End Function
-
-Private Function TargetCoords(ByVal md As Double, ByRef n As Double, _
-        ByRef e As Double, ByRef tvd As Double) As Boolean
-    Dim ps As Worksheet
-    Dim lastR As Long, r As Long
-    Dim vMd As Variant
-    Dim bestR As Long
-    Dim bestD As Double, d As Double
-
-    TargetCoords = False
-    On Error Resume Next
-    Set ps = ThisWorkbook.Worksheets(PLANSEC_SHEET)
-    On Error GoTo 0
-    If Not ps Is Nothing Then
-        lastR = ps.Cells(ps.Rows.Count, 1).End(xlUp).Row
-        bestD = 1E+30: bestR = 0
-        For r = 3 To lastR
-            vMd = ps.Cells(r, 1).Value2
-            If IsNumeric(vMd) Then
-                d = Abs(CDbl(vMd) - md)
-                If d < bestD Then
-                    bestD = d
-                    bestR = r
-                End If
-            End If
-        Next r
-        If bestR > 0 And bestD < 1.5 Then
-            n = NumOr(ps.Cells(bestR, 5).Value2, 0#)
-            e = NumOr(ps.Cells(bestR, 6).Value2, 0#)
-            If tvd = 0# Then tvd = NumOr(ps.Cells(bestR, 4).Value2, 0#)
-            TargetCoords = True
-            Exit Function
-        End If
-    End If
-
-    TargetCoords = PlanCoordsAtMd(md, n, e, tvd)
-End Function
-
-Private Function PlanCoordsAtMd(ByVal md As Double, ByRef n As Double, _
-        ByRef e As Double, ByRef tvd As Double) As Boolean
-    Dim inc As Double, azm As Double
-    PlanCoordsAtMd = PlanAtMd(md, inc, azm, n, e, tvd)
-End Function
-
 Private Function PlanTvdAtMd(ByVal md As Double) As Double
     Dim inc As Double, azm As Double, n As Double, e As Double, v As Double
     If PlanAtMd(md, inc, azm, n, e, v) Then
@@ -499,25 +419,18 @@ Private Function ReadPlannedTd(ByRef md As Double, ByRef inc As Double, _
     ReadPlannedTd = True
 End Function
 
-' Inverse min-curve: MD course from two positions + attitudes.
-Private Function CourseBetween(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
+' Inverse min-curve MD between two stations (3D chord × RF). No plan-ΔMD floor.
+Private Function InverseCourse(ByVal i1 As Double, ByVal a1 As Double, _
         ByVal n1 As Double, ByVal e1 As Double, ByVal v1 As Double, _
-        ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
+        ByVal i2 As Double, ByVal a2 As Double, _
         ByVal n2 As Double, ByVal e2 As Double, ByVal v2 As Double) As Double
-    Dim chord As Double, beta As Double, inv As Double, planD As Double
+    Dim chord As Double, beta As Double
     chord = Sqr((n2 - n1) ^ 2 + (e2 - e1) ^ 2 + (v2 - v1) ^ 2)
     beta = Deg2Rad(DoglegAngleDeg(i1, a1, i2, a2))
     If beta > EPS Then
-        inv = chord * beta / (2# * Sin(beta / 2#))
+        InverseCourse = chord * beta / (2# * Sin(beta / 2#))
     Else
-        inv = chord
-    End If
-    planD = md2 - md1
-    If planD < 0# Then planD = 0#
-    If inv < planD Then
-        CourseBetween = planD
-    Else
-        CourseBetween = inv
+        InverseCourse = chord
     End If
 End Function
 
