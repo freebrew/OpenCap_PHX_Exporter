@@ -473,7 +473,9 @@
       }
       if (flags.bha) {
         setBadge(badgeBha, `${msg.bhaRows} rows`, "ok");
-        metaBha.textContent = `fieldcap-job-${jobId}-bha-equipment.csv · ${msg.bhaCount} BHAs`;
+        const otherBha = Number(msg.otherToolsBhaRows ?? 0);
+        metaBha.textContent = `fieldcap-job-${jobId}-bha-equipment.csv · ${msg.bhaCount} BHAs`
+          + (otherBha > 0 ? ` · ${otherBha} Other Inventory` : "");
       }
       const slideDayRows = Number(msg.slideByDayRows ?? 0);
       if (flags.slideDay) {
@@ -489,7 +491,9 @@
       if (flags.inventory) {
         if (inventoryRows > 0) {
           setBadge(badgeInventory, `${inventoryRows} rows`, "ok");
-          metaInventory.textContent = `fieldcap-job-${jobId}-inventory.csv`;
+          const otherInv = Number(msg.otherToolsInvRows ?? 0);
+          metaInventory.textContent = `fieldcap-job-${jobId}-inventory.csv`
+            + (otherInv > 0 ? ` · ${otherInv} Other Inventory` : "");
         } else {
           setBadge(badgeInventory, "0 rows", "warn");
           metaInventory.textContent = "No JobTools found for this job.";
@@ -643,6 +647,70 @@
         resultText.style.fontSize   = "9px";
         resultText.textContent = lines.join("\n");
         resultMeta.textContent = "Review fields above — share output to plan the full inventory export";
+      });
+    });
+  }
+
+  // ── Other Tools Probe ─────────────────────────────────────────────────────
+  const btnOtherToolsProbe = document.getElementById("btnOtherToolsProbe");
+  if (btnOtherToolsProbe) {
+    btnOtherToolsProbe.addEventListener("click", () => {
+      const jobId = parseInt(jobIdInput.value, 10) || 0;
+      btnOtherToolsProbe.disabled = true;
+      showInfo("Probing Other Tools ($metadata → ToolAssemblyItem navs → $expand → inventory)…");
+
+      chrome.runtime.sendMessage({ type: "PROBE_OTHER_TOOLS", jobId }, (res) => {
+        btnOtherToolsProbe.disabled = false;
+        if (chrome.runtime.lastError) { showErr(chrome.runtime.lastError.message); return; }
+        if (!res?.ok) { showErr(res?.error ?? "Other Tools probe failed"); return; }
+
+        const r = res.report;
+        const lines = [];
+        lines.push(`Schema source: ${r.source}`);
+        lines.push(`ToolAssemblyItem navs to expand: ${r.itemNavs.length ? r.itemNavs.map((n) => `${n.name} (${n.type})`).join("  |  ") : "(none found)"}`);
+        if (r.inventorySets.length) {
+          lines.push(`Candidate inventory sets:`);
+          for (const s of r.inventorySets) {
+            lines.push(`  ${s.set} → ${s.type}  jobKey=${s.jobKey ?? "none"}`);
+            lines.push(`    fields: ${s.props.join(", ")}`);
+          }
+        } else {
+          lines.push(`Candidate inventory sets: (none matched)`);
+        }
+        if (jobId) {
+          lines.push("");
+          lines.push(`Job ${jobId}: ${r.itemLessJobTools ?? 0} BHA component(s) on item-less JobTools (Other Inventory)`);
+          if (r.itemLessSample) lines.push(`  ✓ sample: ${r.itemLessSample}`);
+          if (r.itemLessJobToolKeys?.length) lines.push(`  JobTool fields: ${r.itemLessJobToolKeys.join("  |  ")}`);
+          lines.push(`  ${r.bareItems} still unresolved; ${r.attached} resolved via separate table (${r.navsUsed.join(", ") || "—"})`);
+          if (r.bareItemKeys?.length) lines.push(`  bare item fields: ${r.bareItemKeys.join("  |  ")}`);
+          if (r.bareJobToolExpanded) {
+            lines.push(`  bare item's JobTool (expanded): ${Array.isArray(r.bareJobToolExpanded) ? (r.bareJobToolExpanded.join("  |  ") || "(no scalar values)") : r.bareJobToolExpanded}`);
+          }
+          if (r.bareJobToolRaw) {
+            lines.push(`  bare item's JobTool (raw JobTools query): ${Array.isArray(r.bareJobToolRaw) ? (r.bareJobToolRaw.join("  |  ") || "(no scalar values)") : r.bareJobToolRaw}`);
+          }
+          if (r.sample) {
+            lines.push(`  ✓ sample Other Tool:`);
+            for (const [k, v] of Object.entries(r.sample)) lines.push(`    ${k}: ${v}`);
+          }
+          lines.push(`  Other Inventory rows that would be appended to inventory.csv: ${r.inventoryRows}`);
+          for (const s of r.inventorySample ?? []) lines.push(`    ${s}`);
+        }
+        if (r.notes?.length) {
+          lines.push("");
+          lines.push("Notes:");
+          for (const n of r.notes) lines.push(`  · ${n}`);
+        }
+
+        resultArea.classList.add("visible");
+        resultText.className = "meta";
+        resultText.style.whiteSpace = "pre-wrap";
+        resultText.style.fontSize   = "9px";
+        resultText.textContent = lines.join("\n");
+        resultMeta.textContent = (r.attached > 0 || (r.itemLessJobTools ?? 0) > 0)
+          ? "Other Tools resolve — Fetch & Save will tag them 'Other Inventory' in inventory.csv and bha-equipment.csv"
+          : "Nothing resolved — share this output so the discovery rules can be extended";
       });
     });
   }

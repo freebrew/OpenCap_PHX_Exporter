@@ -1,0 +1,53 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "Sheet48"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = True
+Option Explicit
+
+Private Sub Worksheet_Activate()
+    On Error Resume Next
+    ResizeSlidesheetClearButton
+    MDL_PlanGauge.RenderPlanGauge
+    On Error GoTo 0
+End Sub
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    ' Events off for the whole handler: RefreshSlideComments / RenderPlanGauge
+    ' write cells, and with events on each write cascaded fresh Change /
+    ' Calculate events - one survey entry re-ran the 300-row comment refresh
+    ' ~8 times (minutes per keystroke on field laptops).
+    Dim prevEvents As Boolean
+    prevEvents = Application.EnableEvents
+    On Error Resume Next
+    Application.EnableEvents = False
+    If Not Intersect(Target, Me.Range("AA:AB")) Is Nothing Then
+        ResizeSlidesheetClearButton
+    End If
+    If Not Intersect(Target, Me.Range("Y2:Y5")) Is Nothing Then
+        RememberPlanTargetOverride Target
+    End If
+    ' Y comments only when this Slidesheet edit has AR/AO (or leftover auto Y).
+    ' Other workbook tabs never reach here — Calculate used to, and that is
+    ' what flashed the sheet black on every Data / Setup keystroke.
+    If Not Intersect(Target, Me.Range("D13:G305,T13:U305,U2:X5")) Is Nothing Then
+        If SlideCommentsNeedRefresh(Target) Then RefreshSlideComments
+    End If
+    ' Z = C − T on this row. Independent of Y / BURR so a T edit on a
+    ' vertical stand still updates leftover rotate.
+    If Not Intersect(Target, Me.Range("C13:D305,T13:T305")) Is Nothing Then
+        RefreshRotateMetres Target
+    End If
+    ' Plan proximity gauge: surveys, targets, geo half-width (AB14), and
+    ' sail waypoints (AC14:AD33). Without waypoints/AB14 here the red/green
+    ' geo bands go stale after manual waypoint edits.
+    If Not Intersect(Target, Me.Range("D13:G320,U2:X5,AB14,AC14:AD33")) Is Nothing Then
+        MDL_PlanGauge.RenderPlanGauge
+    End If
+    Application.EnableEvents = prevEvents
+    On Error GoTo 0
+End Sub

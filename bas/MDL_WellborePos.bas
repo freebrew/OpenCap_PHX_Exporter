@@ -4,14 +4,22 @@ Option Explicit
 ' Sync Data "Position of Wellbore (as of last survey)":
 '   R/L from Plan     <- gauge frame X (ax): >=0 Right, <0 Left
 '   Above/Below Plan  <- gauge frame Y (ay): plan TVD - as-drilled TVD (>=0 Above/UP, <0 Below/DN)
-'   Distance from Geo <- Slidesheet GEO Window column AB on the last survey row
-'                       (skip AB14 header; >=0 Above geo, <0 Below geo)
+'   Distance from Geo
+'     Vertical / curve (Inc < ~90 or MD before sail waypoints AC14:AD33):
+'       hypot(E/W, N/S) from plan — there is no geo target yet.
+'     Lateral (Inc >= 80 and MD at/after first sail waypoint):
+'       Slidesheet GEO Window column AB on the last survey row
+'       (skip AB14 header; >=0 Above geo, <0 Below geo)
 
 Private Const SH_DATA As String = "Data"
 Private Const SH_SS As String = "Slidesheet"
 Private Const SURV_FIRST As Long = 13
 Private Const SURV_LAST As Long = 320
 Private Const COL_GEO_AB As Long = 28  ' AB GEO Window (skip AB14)
+Private Const COL_SAIL_MD As Long = 29 ' AC sail / way-point MD
+Private Const SAIL_ROW1 As Long = 14
+Private Const SAIL_ROW2 As Long = 33
+Private Const INC_LATERAL As Double = 80#  ' ~90 lateral; below this use plan hypot
 
 Private Const ROW_RL As Long = 13
 Private Const ROW_AB As Long = 14
@@ -23,7 +31,9 @@ Private Const COL_DIR As Long = 6         ' F
 ' survRow: Slidesheet row of last real survey (from ActualAtLastSurvey); 0 = scan.
 Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean, _
                                   ByVal planUpM As Double, ByVal hasPlanUp As Boolean, _
-                                  Optional ByVal survRow As Long = 0)
+                                  Optional ByVal survRow As Long = 0, _
+                                  Optional ByVal sMD As Double = -1#, _
+                                  Optional ByVal sInc As Double = -1#)
     Dim wsD As Worksheet
     Dim wasProt As Boolean
     Dim latAbs As Double
@@ -37,7 +47,15 @@ Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean,
 
     Set wsD = ThisWorkbook.Worksheets(SH_DATA)
 
-    hasGeo = GeoWindowAtSurvey(survRow, geoM)
+    If UseSailGeoWindow(sMD, sInc) Then
+        hasGeo = GeoWindowAtSurvey(survRow, geoM)
+    ElseIf hasLat And hasPlanUp Then
+        geoM = Sqr(latM * latM + planUpM * planUpM)
+        If planUpM < 0# Then geoM = -geoM
+        hasGeo = True
+    Else
+        hasGeo = False
+    End If
 
     wasProt = SheetUnprotectForVba(wsD)
     On Error GoTo FailWrite
@@ -77,6 +95,35 @@ Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean,
 FailWrite:
     SheetReprotectAfterVba wsD, wasProt
 End Sub
+
+' Geo target exists only once we are in the lateral at/after the sail table MD.
+Private Function UseSailGeoWindow(ByVal sMD As Double, ByVal sInc As Double) As Boolean
+    Dim sailMd As Double
+    UseSailGeoWindow = False
+    If sInc < INC_LATERAL Then Exit Function
+    If Not FirstSailMd(sailMd) Then Exit Function
+    If sMD + 0.0001 >= sailMd Then UseSailGeoWindow = True
+End Function
+
+Private Function FirstSailMd(ByRef sailMd As Double) As Boolean
+    Dim ws As Worksheet
+    Dim r As Long
+    Dim v As Variant
+    FirstSailMd = False
+    sailMd = 0#
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(SH_SS)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+    For r = SAIL_ROW1 To SAIL_ROW2
+        v = ws.Cells(r, COL_SAIL_MD).Value2
+        If IsNumeric(v) And Len(CStr(v & "")) > 0 Then
+            sailMd = CDbl(v)
+            FirstSailMd = True
+            Exit Function
+        End If
+    Next r
+End Function
 
 ' GEO Window (AB) on the gauge's last survey row; fallback = last real survey with numeric AB.
 Private Function GeoWindowAtSurvey(ByVal survRow As Long, ByRef geoM As Double) As Boolean
@@ -130,3 +177,7 @@ Private Function ReadNumericAb(ws As Worksheet, ByVal r As Long, ByRef geoM As D
     geoM = CDbl(v)
     ReadNumericAb = True
 End Function
+
+
+
+

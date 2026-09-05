@@ -12,8 +12,15 @@ Option Explicit
 '  to the rim) so outside-circle markers can still sit in green. MAG: no band.
 '
 '  Frames (plan = origin):
-'    GRAVITY  (Inc >= 5 deg)
-'      Plan at same MD. Y = planTVD - actualTVD (+ = UP). X = LT/RT of plan Azm.
+'    GRAVITY  (Inc >= 5 deg), no sail corridor active
+'      Well Seeker convention: perpendicular offset from the plan line,
+'      decomposed in the plan borehole frame at the same MD.
+'      Y = high-side component (+ = UP), X = right-side component (+ = RT).
+'      (Along-tangent lead/lag is projected out, so numbers match the office
+'      software's "distance from plan" exactly.)
+'    GRAVITY, sail-calculator mode (waypoint corridor active at this MD)
+'      Y = planTVD - actualTVD (+ = UP): the geo window is TVD-defined, so the
+'      dial and green band speak true TVD while steering the corridor.
 '    MAGNETIC (Inc <  5 deg)
 '      Plan foot at actual TVD. Y = ahead/back, X = right/left; PRP = hypot.
 '
@@ -76,7 +83,7 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
                    ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
                    ByRef dv As Double, ByRef dN As Double, ByRef dE As Double)
     Dim r1 As Double, r2 As Double, b1 As Double, b2 As Double
-    Dim cosDL As Double, beta As Double, H As Double
+    Dim cosDL As Double, beta As Double, h As Double
     r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
     b1 = Deg2Rad(a1): b2 = Deg2Rad(a2)
 
@@ -86,13 +93,13 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     beta = WorksheetFunction.Acos(cosDL)
 
     If beta > 0.0000001 Then
-        H = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
+        h = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
     Else
-        H = (md2 - md1) / 2#
+        h = (md2 - md1) / 2#
     End If
-    dv = H * (Cos(r1) + Cos(r2))
-    dN = H * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
-    dE = H * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
+    dv = h * (Cos(r1) + Cos(r2))
+    dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
+    dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
 
 ' --------------------------------------------------------------------------------
@@ -315,7 +322,7 @@ End Function
 
 Private Function ActualAtLastSurvey(ws As Worksheet, _
         ByRef sMD As Double, ByRef sInc As Double, ByRef sAzi As Double, _
-        ByRef sn As Double, ByRef sE As Double, ByRef sV As Double, _
+        ByRef sn As Double, ByRef se As Double, ByRef sV As Double, _
         ByRef lastRow As Long) As Long
     Dim n As Long: n = 0
     Dim prevMD As Double, prevInc As Double, prevAzi As Double
@@ -327,18 +334,18 @@ Private Function ActualAtLastSurvey(ws As Worksheet, _
     For r = SURV_ROW_FIRST To SURV_ROW_LAST
         If IsSurveySummaryRow(ws, r) Then GoTo NextSurveyRow
 
-        Dim vMD As Variant, vInc As Variant, vAzi As Variant
-        vMD = ws.Cells(r, 5).Value2
+        Dim vMd As Variant, vInc As Variant, vAzi As Variant
+        vMd = ws.Cells(r, 5).Value2
         vInc = ws.Cells(r, 6).Value2
         vAzi = ws.Cells(r, 7).Value2
 
-        If Not (IsNumeric(vMD) And IsNumeric(vInc) And IsNumeric(vAzi) _
-                And Len(CStr(vMD & "")) > 0 And Len(CStr(vInc & "")) > 0 _
+        If Not (IsNumeric(vMd) And IsNumeric(vInc) And IsNumeric(vAzi) _
+                And Len(CStr(vMd & "")) > 0 And Len(CStr(vInc & "")) > 0 _
                 And Len(CStr(vAzi & "")) > 0) Then
             GoTo NextSurveyRow
         End If
 
-        Dim mdv As Double: mdv = CDbl(vMD)
+        Dim mdv As Double: mdv = CDbl(vMd)
         If mdv <= prevMD Then GoTo NextSurveyRow
 
         Dim dv As Double, dN As Double, dE As Double
@@ -351,19 +358,23 @@ NextSurveyRow:
     Next r
 
     sMD = prevMD: sInc = prevInc: sAzi = prevAzi
-    sn = curN: sE = curE: sV = curV
+    sn = curN: se = curE: sV = curV
     ActualAtLastSurvey = n
 End Function
 
 Private Sub FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Double, _
         ByVal dN As Double, ByVal dE As Double, ByVal dTvdUp As Double, _
-        ByRef x As Double, ByRef y As Double)
+        ByRef x As Double, ByRef y As Double, _
+        Optional ByVal planInc As Double = 90#)
     Dim right As Double, along As Double
     right = dE * Cos(Deg2Rad(planAzi)) - dN * Sin(Deg2Rad(planAzi))
     along = dN * Cos(Deg2Rad(planAzi)) + dE * Sin(Deg2Rad(planAzi))
     If gravityMode Then
+        ' Perpendicular high-side component (Well Seeker "distance from plan"):
+        ' project the offset onto the plan high-side axis at plan inclination.
+        ' planInc = 90 (default) degenerates to y = dTvdUp, the old TVD delta.
         x = right
-        y = dTvdUp
+        y = along * Cos(Deg2Rad(planInc)) + dTvdUp * Sin(Deg2Rad(planInc))
     Else
         x = right
         y = along
@@ -403,9 +414,9 @@ Private Sub RenderPlanGaugeCore()
     Dim nPlan As Long
     nPlan = LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
     Dim sMD As Double, sInc As Double, sAzi As Double
-    Dim sn As Double, sE As Double, sV As Double
+    Dim sn As Double, se As Double, sV As Double
     Dim lastRow As Long, nSurv As Long
-    nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sn, sE, sV, lastRow)
+    nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sn, se, sV, lastRow)
 
     If nPlan < 2 Or nSurv < 1 Then
         DrawGauge ws, False, 0, 0, "", False, 0, 0, _
@@ -426,17 +437,30 @@ Private Sub RenderPlanGaugeCore()
 
     Dim dN As Double, dE As Double, dTvdUp As Double
     dN = sn - plN
-    dE = sE - plE
+    dE = se - plE
     dTvdUp = plV - actTvd
 
+    ' Sail-calculator mode: the waypoint geo corridor is active. The window is
+    ' TVD-defined, so UP/DN stays a true TVD delta there (frameInc 90 makes the
+    ' perpendicular frame degenerate to it). Outside the corridor, use the
+    ' Well Seeker perpendicular high-side frame so numbers match the office.
+    Dim halfW As Double: halfW = WaypointHalfWidth(ws)
+    Dim wpTvd As Double
+    Dim sailMode As Boolean: sailMode = False
+    If gravityMode And halfW > 0# Then
+        If WaypointTvdAtMd(ws, sMD, wpTvd) Then sailMode = True
+    End If
+    Dim frameInc As Double
+    If sailMode Then frameInc = 90# Else frameInc = plInc
+
     Dim ax As Double, ay As Double
-    FrameComponents gravityMode, plAzi, dN, dE, dTvdUp, ax, ay
+    FrameComponents gravityMode, plAzi, dN, dE, dTvdUp, ax, ay, frameInc
     Dim showPtb As Boolean: showPtb = False
     Dim bx As Double, by As Double
     Dim tarStart As Variant: tarStart = ws.Range("U2").Value2
-    Dim bitMD As Variant: bitMD = ws.Cells(lastRow, 4).Value2
-    If IsNumeric(tarStart) And IsNumeric(bitMD) Then
-        If sMD >= CDbl(tarStart) And CDbl(bitMD) > sMD Then
+    Dim bitMd As Variant: bitMd = ws.Cells(lastRow, 4).Value2
+    If IsNumeric(tarStart) And IsNumeric(bitMd) Then
+        If sMD >= CDbl(tarStart) And CDbl(bitMd) > sMD Then
             Dim incB As Double, azB As Double
             Dim vW As Variant: vW = ws.Cells(lastRow, 23).Value2
             Dim vX As Variant: vX = ws.Cells(lastRow, 24).Value2
@@ -444,47 +468,48 @@ Private Sub RenderPlanGaugeCore()
             If IsNumeric(vX) And Len(CStr(vX & "")) > 0 Then azB = CDbl(vX) Else azB = sAzi
 
             Dim stepV As Double, stepN As Double, stepE As Double
-            McStep sMD, sInc, sAzi, CDbl(bitMD), incB, azB, stepV, stepN, stepE
+            McStep sMD, sInc, sAzi, CDbl(bitMd), incB, azB, stepV, stepN, stepE
 
             Dim bitTvd As Double: bitTvd = actTvd + stepV
             Dim pbN As Double, pbE As Double, pbV As Double, pbAzi As Double, pbInc As Double
             If gravityMode Then
-                PlanAt CDbl(bitMD), nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, pbN, pbE, pbV, pbAzi, pbInc
+                PlanAt CDbl(bitMd), nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, pbN, pbE, pbV, pbAzi, pbInc
             Else
                 PlanAtTvd bitTvd, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, pbN, pbE, pbV, pbAzi, pbInc
             End If
 
             Dim bDN As Double, bDE As Double, bUp As Double
             bDN = (sn + stepN) - pbN
-            bDE = (sE + stepE) - pbE
+            bDE = (se + stepE) - pbE
             bUp = pbV - bitTvd
-            FrameComponents gravityMode, pbAzi, bDN, bDE, bUp, bx, by
+            ' PTB rides the same frame as the survey marker (sail = TVD).
+            Dim frameIncB As Double
+            If sailMode Then frameIncB = 90# Else frameIncB = pbInc
+            FrameComponents gravityMode, pbAzi, bDN, bDE, bUp, bx, by, frameIncB
             showPtb = True
         End If
     End If
-    Dim halfW As Double: halfW = WaypointHalfWidth(ws)
     Dim hasBand As Boolean: hasBand = False
     Dim yTop As Double, yBot As Double
     Dim scaleS As Double: scaleS = 0#
-    Dim wpTvd As Double
 
-    If gravityMode And halfW > 0# Then
-        If WaypointTvdAtMd(ws, sMD, wpTvd) Then
-            Dim yWp As Double
-            yWp = plV - wpTvd
-            yTop = yWp + halfW
-            yBot = yWp - halfW
-            hasBand = True
-            ' Fit corridor in the circle (band may sit off plan centre).
-            scaleS = halfW
-            If Abs(yTop) > scaleS Then scaleS = Abs(yTop)
-            If Abs(yBot) > scaleS Then scaleS = Abs(yBot)
-            ' Do NOT pin band edges to the rim — that erased the red OUT caps and
-            ' made a top-of-window breach look green. Leave margin so green is
-            ' always surrounded by red (above + below) inside the dial.
-            scaleS = scaleS * 1.35
-            If scaleS < 0.5 Then scaleS = 0.5
-        End If
+    If sailMode Then
+        ' Band only exists in sail mode, where the frame is pure TVD, so the
+        ' corridor edges are plain TVD offsets from plan.
+        Dim yWp As Double
+        yWp = plV - wpTvd
+        yTop = yWp + halfW
+        yBot = yWp - halfW
+        hasBand = True
+        ' Fit corridor in the circle (band may sit off plan centre).
+        scaleS = halfW
+        If Abs(yTop) > scaleS Then scaleS = Abs(yTop)
+        If Abs(yBot) > scaleS Then scaleS = Abs(yBot)
+        ' Do NOT pin band edges to the rim — that erased the red OUT caps and
+        ' made a top-of-window breach look green. Leave margin so green is
+        ' always surrounded by red (above + below) inside the dial.
+        scaleS = scaleS * 1.35
+        If scaleS < 0.5 Then scaleS = 0.5
     End If
 
     If Not hasBand Then
@@ -501,9 +526,9 @@ Private Sub RenderPlanGaugeCore()
     DrawGauge ws, True, ax, ay, IIf(gravityMode, "GRAV", "MAG"), showPtb, bx, by, _
               "", hasBand, yTop, yBot, scaleS
 
-    ' Data "Position of Wellbore": gauge LT/RT + gauge UP/DN (plan) + GEO Window AB
+    ' Data "Position of Wellbore": LT/RT + UP/DN from plan; geo = hypot until lateral
     On Error Resume Next
-    UpdateWellborePosition ax, True, ay, True, lastRow
+    UpdateWellborePosition ax, True, ay, True, lastRow, sMD, sInc
     On Error GoTo 0
 End Sub
 
@@ -523,15 +548,15 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
         If Left$(ws.Shapes(i).name, Len(SHP_PREFIX)) = SHP_PREFIX Then ws.Shapes(i).Delete
     Next i
     Dim area As Range: Set area = ws.Range(GAUGE_RANGE)
-    Dim l As Double, t As Double, w As Double, H As Double
-    l = area.Left: t = area.Top: w = area.Width: H = area.Height
+    Dim l As Double, t As Double, w As Double, h As Double
+    l = area.Left: t = area.Top: w = area.Width: h = area.Height
 
     ' Dial hugs the left edge (AA into AB) and grows with the AA1:AC7 height
     ' (rows 1-7 at 15 pt). Tight metrics column sits to its right, ending at AC.
     Dim textW As Double: textW = 72#
     Dim gap As Double: gap = 3#
     Dim r As Double
-    r = (H - 4#) / 2#
+    r = (h - 4#) / 2#
     Dim dialLeft As Double: dialLeft = l + 1#
     If dialLeft + 2# * r > l + w - textW - gap - 1# Then _
         r = (l + w - textW - gap - 1# - dialLeft) / 2#
@@ -539,7 +564,7 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
 
     Dim cx As Double, cy As Double
     cx = dialLeft + r
-    cy = t + H / 2#
+    cy = t + h / 2#
 
     Dim textX As Double: textX = l + w - textW - 1#
     If textX < dialLeft + 2# * r + gap Then textX = dialLeft + 2# * r + gap
@@ -549,7 +574,7 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
     boxT = t + 1#
     boxR = textX - 1#
     If boxR < dialLeft + 2# * r + 1# Then boxR = dialLeft + 2# * r + 1#
-    boxB = t + H - 1#
+    boxB = t + h - 1#
 
     If Not hasData Then
         DrawCombinedDial ws, cx, cy, r, modeTxt, scaleS, False, 0, 0, False, 0, 0, _
@@ -629,7 +654,7 @@ Private Sub DrawCombinedDial(ws As Worksheet, _
 
     Set shp = ws.Shapes.AddShape(msoShapeOval, cx - r, cy - r, 2# * r, 2# * r)
     StyleGaugeShape shp, SHP_PREFIX & "Circle"
-    shp.Fill.Visible = msoFalse
+    shp.fill.Visible = msoFalse
     shp.line.ForeColor.RGB = cAxis(): shp.line.Weight = 1.75
 
     Set shp = ws.Shapes.AddLine(cx - r, cy, cx + r, cy)
@@ -653,7 +678,7 @@ Private Sub DrawCombinedDial(ws As Worksheet, _
 
     Set shp = ws.Shapes.AddShape(msoShapeOval, cx - 3, cy - 3, 6, 6)
     StyleGaugeShape shp, SHP_PREFIX & "Plan"
-    shp.Fill.ForeColor.RGB = cPlan(): shp.line.Visible = msoFalse
+    shp.fill.ForeColor.RGB = cPlan(): shp.line.Visible = msoFalse
 
     If Not live Then Exit Sub
     If scaleS <= 0# Then scaleS = 1#
@@ -729,14 +754,14 @@ Private Sub DrawWaypointBand(ws As Worksheet, ByVal cx As Double, ByVal cy As Do
 End Sub
 
 Private Sub AddBandRect(ws As Worksheet, ByVal tag As String, _
-        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal H As Double, _
+        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal h As Double, _
         ByVal clr As Long, ByVal transparency As Double)
-    If w < 1# Or H < 1# Then Exit Sub
+    If w < 1# Or h < 1# Then Exit Sub
     Dim shp As Shape
-    Set shp = ws.Shapes.AddShape(msoShapeRectangle, x, y, w, H)
+    Set shp = ws.Shapes.AddShape(msoShapeRectangle, x, y, w, h)
     StyleGaugeShape shp, SHP_PREFIX & tag
-    shp.Fill.ForeColor.RGB = clr
-    shp.Fill.transparency = transparency
+    shp.fill.ForeColor.RGB = clr
+    shp.fill.transparency = transparency
     shp.line.Visible = msoFalse
 End Sub
 
@@ -761,7 +786,7 @@ Private Sub DrawMarker(ws As Worksheet, ByVal tag As String, _
     If mag <= 0.005 Then
         Set shp = ws.Shapes.AddShape(msoShapeOval, cx - 6, cy - 6, 12, 12)
         StyleGaugeShape shp, SHP_PREFIX & "Dot" & tag
-        shp.Fill.Visible = msoFalse
+        shp.fill.Visible = msoFalse
         shp.line.ForeColor.RGB = clr: shp.line.Weight = 2#
         Exit Sub
     End If
@@ -791,10 +816,10 @@ Private Sub DrawMarker(ws As Worksheet, ByVal tag As String, _
     Set shp = ws.Shapes.AddShape(msoShapeOval, dx - 4.5, dy - 4.5, 9, 9)
     StyleGaugeShape shp, SHP_PREFIX & "Dot" & tag
     If hollow Then
-        shp.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        shp.fill.ForeColor.RGB = RGB(255, 255, 255)
         shp.line.ForeColor.RGB = clr: shp.line.Weight = 2#
     Else
-        shp.Fill.ForeColor.RGB = clr
+        shp.fill.ForeColor.RGB = clr
         shp.line.Visible = msoFalse
     End If
 End Sub
@@ -827,12 +852,12 @@ Private Sub StyleGaugeShape(shp As Shape, ByVal nm As String)
 End Sub
 
 Private Sub AddGaugeText(ws As Worksheet, ByVal nm As String, _
-        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal H As Double, _
+        ByVal x As Double, ByVal y As Double, ByVal w As Double, ByVal h As Double, _
         ByVal txt As String, ByVal clr As Long, ByVal sz As Single, ByVal bold As Boolean)
     Dim shp As Shape
-    Set shp = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, x, y, w, H)
+    Set shp = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, x, y, w, h)
     StyleGaugeShape shp, nm
-    shp.Fill.Visible = msoFalse
+    shp.fill.Visible = msoFalse
     shp.line.Visible = msoFalse
     With shp.TextFrame2
         .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
@@ -842,7 +867,7 @@ Private Sub AddGaugeText(ws As Worksheet, ByVal nm As String, _
             .Font.name = "Consolas"
             .Font.Size = sz
             .Font.bold = IIf(bold, msoTrue, msoFalse)
-            .Font.Fill.ForeColor.RGB = clr
+            .Font.fill.ForeColor.RGB = clr
         End With
     End With
 End Sub
@@ -899,8 +924,9 @@ End Sub
 
 Public Sub PG_FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Double, _
                               ByVal dN As Double, ByVal dE As Double, ByVal dTvdUp As Double, _
-                              ByRef x As Double, ByRef y As Double)
-    FrameComponents gravityMode, planAzi, dN, dE, dTvdUp, x, y
+                              ByRef x As Double, ByRef y As Double, _
+                              Optional ByVal planInc As Double = 90#)
+    FrameComponents gravityMode, planAzi, dN, dE, dTvdUp, x, y, planInc
 End Sub
 
 Public Function PG_WaypointTvdAtMd(ws As Worksheet, ByVal md As Double, _
@@ -915,3 +941,8 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
+
+
+

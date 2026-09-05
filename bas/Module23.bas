@@ -83,7 +83,8 @@ End Sub
 
 Public Sub RefreshData()
     ' Unified refresh: all OpenCap CSVs (incl. costs) + DD Tools dashboard.
-    ' CSV discovery is always relative to ThisWorkbook.Path.
+    ' CSV hunt matches Setup REFRESH CSVs (OpenCap\, workbook folder,
+    ' remembered job folder, Setup path list).
     Dim wbPath As String
     wbPath = ThisWorkbook.Path
 
@@ -111,9 +112,9 @@ Public Sub RefreshData()
 
     ' 2) DD Tools hidden sheets + dashboard (same CSV tokens)
     Dim fJob As String, fCrew As String, fBha As String
-    fJob = FindLatestCsvPathByToken(wbPath, "job-details")
-    fCrew = FindLatestCsvPathByToken(wbPath, "crew")
-    fBha = FindLatestCsvPathByToken(wbPath, "bha-equipment")
+    fJob = FindOpenCapCsv("job-details")
+    fCrew = FindOpenCapCsv("crew")
+    fBha = FindOpenCapCsv("bha-equipment")
 
     SetupDataSheets
 
@@ -131,6 +132,20 @@ Public Sub RefreshData()
     EnsureDataBhaMirrorUnlocked
     On Error GoTo ErrHandler
 
+    ' Recalc mirror formulas, then fill blank Sliding Meters / Time Sliding on
+    ' Data daily rows (e.g. End of Run) from remaining BHA totals delta.
+    Application.StatusBar = "Refresh: backfilling Data slide metrics..."
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo ErrHandler
+    DayRoll_BackfillSlideMetrics
+
+    ' 3rd-party / motor hours: hidden _TH_Hours tracker + active-BHA front tables
+    On Error Resume Next
+    ToolHours_SeedFromInventory
+    ToolHours_Sync
+    On Error GoTo ErrHandler
+
     On Error Resume Next
     prevSheet.Activate
     prevSheet.Range(prevCellAddr).Select
@@ -144,9 +159,10 @@ Public Sub RefreshData()
     If fBha = "" Then missing = missing & vbLf & "  *bha-equipment*.csv"
     If missing <> "" Then
         MsgBox "Refresh finished, but DD Tools is incomplete. Missing:" & missing & vbLf & vbLf & _
-               "Scanned:" & vbLf & _
+               "Scanned the same folders as Setup REFRESH CSVs:" & vbLf & _
                wbPath & Application.PathSeparator & "OpenCap" & vbLf & _
-               wbPath, _
+               wbPath & vbLf & _
+               "(plus remembered job folder OC_CsvRoot and Setup path list)", _
                vbExclamation, "Refresh"
     End If
     Exit Sub
@@ -267,49 +283,6 @@ Private Sub ImportCSVToSheet(filePath As String, ws As Worksheet)
 
     Close #fileNum
 End Sub
-
-Private Function FindLatestCsvPathByToken(folderPath As String, token As String) As String
-    ' Relative to workbook only: <workbook>\OpenCap\, then workbook root.
-    Dim ocFolder As String
-    ocFolder = folderPath & Application.PathSeparator & "OpenCap"
-    FindLatestCsvPathByToken = FindLatestCsvPathByTokenInFolder(ocFolder, token)
-    If FindLatestCsvPathByToken = "" Then
-        FindLatestCsvPathByToken = FindLatestCsvPathByTokenInFolder(folderPath, token)
-    End If
-End Function
-
-Private Function FindLatestCsvPathByTokenInFolder(folderPath As String, token As String) As String
-    FindLatestCsvPathByTokenInFolder = ""
-    If folderPath = "" Then Exit Function
-
-    Dim newestStamp As Date
-    newestStamp = 0
-
-    Dim fName As String
-    On Error Resume Next
-    fName = Dir(folderPath & Application.PathSeparator & "*.csv")
-    On Error GoTo 0
-    Do While fName <> ""
-        Dim lname As String
-        lname = LCase(fName)
-        If InStr(lname, LCase(token)) > 0 Then
-            Dim full As String
-            full = folderPath & Application.PathSeparator & fName
-            On Error Resume Next
-            Dim stamp As Date
-            stamp = FileDateTime(full)
-            If Err.Number = 0 Then
-                If stamp >= newestStamp Then
-                    newestStamp = stamp
-                    FindLatestCsvPathByTokenInFolder = full
-                End If
-            End If
-            Err.Clear
-            On Error GoTo 0
-        End If
-        fName = Dir()
-    Loop
-End Function
 
 Private Function ParseCSVLine(ByVal line As String) As String()
     Dim result(200) As String
@@ -778,7 +751,7 @@ Private Sub StyleBtn(btn As Button, caption As String, fillColor As Long, lineCo
     btn.Font.Size = 9
     btn.Font.bold = isBold
     btn.Font.Color = textColor
-    btn.ShapeRange.Fill.ForeColor.RGB = fillColor
+    btn.ShapeRange.fill.ForeColor.RGB = fillColor
     btn.ShapeRange.line.ForeColor.RGB = lineColor
     btn.ShapeRange.line.Weight = 0.75
     On Error GoTo 0
@@ -1703,6 +1676,14 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
+
+
+
+
+
+
 
 
 

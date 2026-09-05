@@ -31,7 +31,7 @@ try {
 $wb = $null
 foreach ($w in @($xl.Workbooks)) {
     $n = [string]$w.Name
-    if ($n -like "*34801*" -or $n -like "Slide Sheet*" -or $n -like "OpenCap*") {
+    if ($n -like "*35780*" -or $n -like "*34801*" -or $n -like "Slide Sheet*" -or $n -like "OpenCap*") {
         $wb = $w
         break
     }

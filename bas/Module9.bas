@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module9"
 Sub NEW_SS()
-Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' NEW_SS Macro
 '
@@ -12,7 +11,7 @@ Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
         
     Application.GoTo Reference:="Print_Area"
 
-    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, FileName:=name, _
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=name, _
     Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
     Range("B7:B25").Select
@@ -95,3 +94,6 @@ Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
     Range("B11").Select
     
 End Sub
+
+
+

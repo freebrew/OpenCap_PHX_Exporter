@@ -18,7 +18,7 @@ Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
 $demoPath = Join-Path $root "Slide Sheet - Demo.xlsm"
-$fieldPath = Join-Path $root "Slide Sheet - 34801.xlsm"
+$fieldPath = Join-Path $root "Slide Sheet - 35780.xlsm"
 $backups = Join-Path $root "backups"
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
@@ -27,20 +27,37 @@ if (-not (Test-Path -LiteralPath $fieldPath)) { throw "missing Field: $fieldPath
 New-Item -ItemType Directory -Force -Path $backups | Out-Null
 
 $bakDemo = Join-Path $backups ("Slide Sheet - Demo.xlsm.bak_dual_mirror_" + $stamp)
-$bakField = Join-Path $backups ("Slide Sheet - 34801.xlsm.bak_dual_mirror_" + $stamp)
+$bakField = Join-Path $backups ("Slide Sheet - 35780.xlsm.bak_dual_mirror_" + $stamp)
 Copy-Item -LiteralPath $demoPath -Destination $bakDemo -Force
 Copy-Item -LiteralPath $fieldPath -Destination $bakField -Force
 "backup demo : $bakDemo"
 "backup field: $bakField"
 
 function Get-ExportBody([string]$ExportPath) {
+    # Strip the full export header. .bas files only have Attribute lines, but
+    # .cls (document) and .frm exports start with VERSION / BEGIN...END blocks;
+    # leaving those in injects non-compiling junk into the target CodeModule.
     $lines = @(Get-Content -LiteralPath $ExportPath)
     $start = 0
-    while ($start -lt $lines.Count -and ($lines[$start] -match '^Attribute VB_' -or $lines[$start].Trim() -eq "")) {
-        $start++
+    while ($start -lt $lines.Count) {
+        $ln = $lines[$start]
+        if ($ln -match '^\s*VERSION\s+') { $start++; continue }
+        if ($ln -match '^\s*BEGIN\s*$') { $start++; continue }
+        if ($ln -match '^\s*Begin\s+\{') {
+            $start++
+            while ($start -lt $lines.Count -and $lines[$start] -notmatch '^\s*End\s*$') { $start++ }
+            if ($start -lt $lines.Count) { $start++ }
+            continue
+        }
+        if ($ln -match '^\s*MultiUse\s*=') { $start++; continue }
+        if ($ln -match '^\s*END\s*$') { $start++; continue }
+        if ($ln -match '^\s*Attribute\s+') { $start++; continue }
+        if ($ln.Trim() -eq "") { $start++; continue }
+        break
     }
     if ($start -ge $lines.Count) { return "" }
-    return (($lines[$start..($lines.Count - 1)]) -join "`r`n")
+    $body = @($lines[$start..($lines.Count - 1)] | Where-Object { $_ -notmatch '^\s*Attribute\s+' })
+    return ($body -join "`r`n")
 }
 
 function Get-FieldMailHeaders([object]$CodeModule) {
@@ -97,6 +114,9 @@ function Open-WithRetry([object]$Excel, [string]$Path, [bool]$ReadOnly) {
 try {
     $wbDemo = Open-WithRetry $xl $tmpDemo $true
     $wbField = Open-WithRetry $xl $fieldPath $false
+    # If Field is open in the user's Excel it opens read-only here and Save is
+    # a silent no-op that looks like a successful mirror. Fail loudly instead.
+    if ($wbField.ReadOnly) { throw "Field opened READ-ONLY (close it in Excel and re-run the mirror)" }
     $demoProj = $wbDemo.VBProject
     $fieldProj = $wbField.VBProject
 
@@ -183,7 +203,15 @@ $xl2.AutomationSecurity = 1
 $wb2 = $null
 try {
     $wb2 = $xl2.Workbooks.Open($fieldPath, 0, $true)
-    $c = [int]$wb2.VBProject.VBComponents.Count
+    # VBProject can come back as an empty stub right after Open while Excel
+    # is still loading the project - poll until components appear.
+    $c = 0
+    for ($try = 1; $try -le 15; $try++) {
+        try { $c = [int]$wb2.VBProject.VBComponents.Count } catch { $c = 0 }
+        if ($c -gt 0) { break }
+        "waiting for Field VBProject to load (attempt $try)..."
+        Start-Sleep -Seconds 2
+    }
     "reopen Field: project=$($wb2.VBProject.Name) comps=$c"
     if ($c -lt 50) { throw "Field VBA collapsed after save - restore $bakField immediately" }
 }

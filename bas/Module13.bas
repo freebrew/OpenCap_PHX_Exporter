@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module13"
 Sub yesOrNo()
-Attribute yesOrNo.VB_ProcData.VB_Invoke_Func = "q\n14"
 
 CarryOn = MsgBox("Have you completly filled out the Data sheet for the end of the run?", vbYesNo, "NEW SLIDESHEET")
 If CarryOn = vbYes Then
@@ -13,7 +12,7 @@ If CarryOn = vbYes Then
         
     Application.GoTo Reference:="Print_Area"
 
-    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, FileName:=name, _
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=name, _
     Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
     Range("B7:B25").Select
@@ -190,4 +189,7 @@ If CarryOn = vbYes Then
     
 End If
 End Sub
+
+
+
 

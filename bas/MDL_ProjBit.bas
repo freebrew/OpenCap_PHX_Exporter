@@ -63,18 +63,18 @@ End Function
 Private Sub MinCurveStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
                          ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
                          ByRef dTvd As Double, ByRef dN As Double, ByRef dE As Double)
-    Dim beta As Double, H As Double, r1 As Double, r2 As Double, b1 As Double, b2 As Double
+    Dim beta As Double, h As Double, r1 As Double, r2 As Double, b1 As Double, b2 As Double
     beta = Deg2Rad(DoglegAngleDeg(i1, a1, i2, a2))
     If beta > 0.0000001 Then
-        H = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
+        h = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
     Else
-        H = (md2 - md1) / 2#
+        h = (md2 - md1) / 2#
     End If
     r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
     b1 = Deg2Rad(a1): b2 = Deg2Rad(a2)
-    dTvd = H * (Cos(r1) + Cos(r2))
-    dN = H * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
-    dE = H * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
+    dTvd = h * (Cos(r1) + Cos(r2))
+    dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
+    dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
 
 Private Function SafeNum(ByVal v As Variant, Optional ByVal defaultValue As Double = 0#) As Double
@@ -91,14 +91,110 @@ Private Function HasNum(ByVal v As Variant) As Boolean
     HasNum = (Not isError(v)) And IsNumeric(v) And Len(Trim$(CStr(v & ""))) > 0
 End Function
 
+' Last-5 numeric Q (motor output, °/30 m of slide) walking up this row.
+' A stand counts when Q is a real number > 0 — same five values you see in Q.
+' Need 2+ samples; else this-row Q if it is numeric > 0; else blank.
+' mRng is passed so Excel dirties this cell when metres-seen changes (Q = C×J/M).
+' qRng/mRng are the same-height columns ending on this row (Excel owns recalc).
+Public Function ProjRollingMotorOut(ByVal qRng As Range, ByVal mRng As Range) As Variant
+    Const N_WANT As Long = 5
+    Const Q_LO As Double = 0#
+    Dim n As Long
+    Dim qArr As Variant
+    Dim mArr As Variant
+    Dim i As Long
+    Dim taken As Long
+    Dim tot As Double
+    Dim qv As Variant
+    Dim mv As Variant
+    Dim thisOk As Boolean
+    Dim thisQ As Double
+
+    On Error GoTo Fail
+    If qRng Is Nothing Or mRng Is Nothing Then
+        ProjRollingMotorOut = ""
+        Exit Function
+    End If
+    n = qRng.Rows.Count
+    If n < 1 Or mRng.Rows.Count <> n Then
+        ProjRollingMotorOut = ""
+        Exit Function
+    End If
+
+    qArr = qRng.Value2
+    mArr = mRng.Value2
+    taken = 0
+    tot = 0#
+    thisOk = False
+    thisQ = 0#
+
+    For i = n To 1 Step -1
+        RollingSample qArr, mArr, i, n, qv, mv
+        If YieldSampleOk(qv, Q_LO) Then
+            tot = tot + CDbl(qv)
+            taken = taken + 1
+            If i = n Then
+                thisOk = True
+                thisQ = CDbl(qv)
+            End If
+            If taken >= N_WANT Then Exit For
+        End If
+    Next i
+
+    If taken >= 2 Then
+        ProjRollingMotorOut = tot / CDbl(taken)
+    ElseIf thisOk Then
+        ProjRollingMotorOut = thisQ
+    Else
+        ProjRollingMotorOut = ""
+    End If
+    Exit Function
+Fail:
+    ProjRollingMotorOut = CVErr(xlErrNum)
+End Function
+
+Private Sub RollingSample(ByVal qArr As Variant, ByVal mArr As Variant, _
+                          ByVal i As Long, ByVal n As Long, _
+                          ByRef qv As Variant, ByRef mv As Variant)
+    If n = 1 And Not IsArray(qArr) Then
+        qv = qArr
+        mv = mArr
+    Else
+        qv = qArr(i, 1)
+        mv = mArr(i, 1)
+    End If
+End Sub
+
+Private Function YieldSampleOk(ByVal qv As Variant, ByVal qLo As Double) As Boolean
+    YieldSampleOk = False
+    If Not HasNum(qv) Then Exit Function
+    If CDbl(qv) <= qLo Then Exit Function
+    YieldSampleOk = True
+End Function
+
+' Dogleg below survey from rolling motor output (°/30 m of slide).
+' This-row M < 2 m → 0 (interpolated / no seen slide: stay on survey attitude).
+Private Function DoglegBelowYield(ByVal motorOut As Double, _
+                                  ByVal mSeen As Double, _
+                                  ByVal mBelow As Double) As Double
+    If motorOut <= EPS Or mSeen + 0.0000001 < 2# Or Abs(mBelow) < EPS Then
+        DoglegBelowYield = 0#
+    Else
+        DoglegBelowYield = motorOut / 30# * mBelow
+    End If
+End Function
+
 ' --- public UDFs ---------------------------------------------------------------
 
-' Parse toolface text: 190M (magnetic deg), R/L highside, -30 left, 30 right
+' Parse toolface text: 190M (magnetic deg), R/L highside, -30 left, 30 right.
+' Highside accepts both R40 / L40 and the sheet's usual 40R / 40L.
+' Unparseable text -> #VALUE! so W/X stop instead of silently projecting TF 0.
 Public Function ProjParseTF(ByVal tfText As Variant) As Variant
     Dim s As String, n As Double
     On Error GoTo Fail
     If isError(tfText) Then ProjParseTF = CVErr(xlErrValue): Exit Function
     s = UCase$(Trim$(Replace(CStr(tfText & ""), Chr$(160), " ")))
+    s = Replace(s, " ", "")
     If Len(s) = 0 Then ProjParseTF = "": Exit Function
 
     If right$(s, 1) = "M" Then
@@ -119,6 +215,16 @@ Public Function ProjParseTF(ByVal tfText As Variant) As Variant
     If Left$(s, 1) = "L" And IsNumeric(mid$(s, 2)) Then
         ProjParseTF = -Abs(CDbl(mid$(s, 2)))
         Exit Function
+    End If
+    If Len(s) > 1 Then
+        If right$(s, 1) = "R" And IsNumeric(Left$(s, Len(s) - 1)) Then
+            ProjParseTF = Abs(CDbl(Left$(s, Len(s) - 1)))
+            Exit Function
+        End If
+        If right$(s, 1) = "L" And IsNumeric(Left$(s, Len(s) - 1)) Then
+            ProjParseTF = -Abs(CDbl(Left$(s, Len(s) - 1)))
+            Exit Function
+        End If
     End If
 
     If IsNumeric(s) Then
@@ -141,17 +247,92 @@ Private Function DoglegBelow(ByVal dls As Double, ByVal course As Double, _
     End If
 End Function
 
+' ISCWSA constant-TF fill-in (ebook §8.2):
+'   ΔInc = dB · cos(TF)
+'   ΔAzm = dB · sin(TF) / sin(Inc)
+' dB is the same DoglegBelow (seen yield) used by INC@BIT.
+' Inc < 5° (magnetic): /sin(I) is unstable — planar walk dB·sin(TF) only.
+Private Function AzmWalkDeg(ByVal survInc As Double, ByVal dB As Double, ByVal tf As Double) As Double
+    Dim sI As Double
+    If Abs(dB) < EPS Then
+        AzmWalkDeg = 0#
+        Exit Function
+    End If
+    sI = Sin(Deg2Rad(survInc))
+    If survInc >= 5# And Abs(sI) > EPS Then
+        AzmWalkDeg = dB * Sin(Deg2Rad(tf)) / sI
+    Else
+        AzmWalkDeg = dB * Sin(Deg2Rad(tf))
+    End If
+End Function
+
+' Last surveyed course TF: N = degrees, O = L / R (HS / Mag → no walk).
+Private Function SignedSeenTf(ByVal seenTf As Variant, ByVal seenLR As Variant) As Double
+    Dim n As Double, lr As String
+    If Not HasNum(seenTf) Then
+        SignedSeenTf = 0#
+        Exit Function
+    End If
+    n = Abs(CDbl(seenTf))
+    lr = UCase$(Trim$(CStr(seenLR & "")))
+    If lr = "L" Then
+        SignedSeenTf = -n
+    ElseIf lr = "R" Then
+        SignedSeenTf = n
+    Else
+        SignedSeenTf = 0#
+    End If
+End Function
+
+' Walk TF for the azm-at-bit projection, calibrated by demonstrated results.
+' The dial TF (U/AK) is what the DD set; N/O is the effective TF the hole
+' actually carved last course (reactive torque + rotary dilution eat the
+' difference — a stated 30R has delivered ~5-27R effective on this well).
+' Projecting the dial literally overshot the walk up to 10 deg/stand at low
+' inc (/sin(I) magnifies), flipping the AT recommendation to the wrong side.
+'   same sign     -> smaller magnitude of dial vs demonstrated (never project
+'                    more turn than the hole has shown it delivers)
+'   opposite sign / no N -> dial (demonstrated TF is rotary noise; trust intent)
+'   dial 0 / HS   -> 0 walk (high side turns nothing)
+' A BLANK dial never reaches here: ProjAzmAtBit / ProjIncAtBit treat a blank
+' U as a pure rotary stand (bit attitude = survey attitude, no build, no walk).
+' N/O arrive as arguments so Excel owns the recalc dependency — never read
+' via Application.Caller (no dependency edge → stale AZM on recalc).
+Private Function ResolveWalkTf(ByVal tfDeg As Variant, _
+                               ByVal seenTf As Variant, ByVal seenLR As Variant) As Double
+    Dim tfD As Double, tfE As Double
+    tfD = SafeNum(tfDeg)
+    tfE = SignedSeenTf(seenTf, seenLR)
+    If Abs(tfE) < 0.05 Then
+        ResolveWalkTf = tfD
+    ElseIf tfD * tfE > 0# And Abs(tfE) < Abs(tfD) Then
+        ResolveWalkTf = tfE
+    Else
+        ResolveWalkTf = tfD
+    End If
+End Function
+
+' tfDeg is the parsed dial (Slidesheet AK). Blank = no slide entered on this
+' stand = PURE ROTARY: the bit is projected on the survey attitude (no build,
+' no walk). An error (unparseable U text) is passed through so W/X show it.
 Public Function ProjIncAtBit(ByVal survInc As Variant, ByVal dls As Variant, _
                              ByVal course As Variant, ByVal mSeen As Variant, _
-                             ByVal mBelow As Variant, ByVal tfDeg As Variant) As Variant
+                             ByVal mBelow As Variant, ByVal tfDeg As Variant, _
+                             Optional ByVal motorOut As Variant) As Variant
     Dim ci As Double, dg As Double, co As Double, ms As Double, mb As Double, tf As Double
     Dim dB As Double
     On Error GoTo Fail
     If Not HasNum(survInc) Then ProjIncAtBit = "": Exit Function
     ci = CDbl(survInc)
+    If isError(tfDeg) Then ProjIncAtBit = tfDeg: Exit Function
+    If Not HasNum(tfDeg) Then ProjIncAtBit = ci: Exit Function
     dg = SafeNum(dls): co = SafeNum(course): ms = SafeNum(mSeen)
     mb = SafeNum(mBelow): tf = SafeNum(tfDeg)
-    dB = DoglegBelow(dg, co, ms, mb)
+    If HasNum(motorOut) Then
+        dB = DoglegBelowYield(CDbl(motorOut), ms, mb)
+    Else
+        dB = DoglegBelow(dg, co, ms, mb)
+    End If
     ProjIncAtBit = ci + dB * Cos(Deg2Rad(tf))
     Exit Function
 Fail:
@@ -161,25 +342,27 @@ End Function
 Public Function ProjAzmAtBit(ByVal survInc As Variant, ByVal survAzm As Variant, _
                              ByVal dls As Variant, ByVal course As Variant, _
                              ByVal mSeen As Variant, ByVal mBelow As Variant, _
-                             ByVal tfDeg As Variant) As Variant
-    Dim ca As Double, dg As Double, mb As Double, tf As Double
-    Dim dbWalk As Double, aB As Double
+                             ByVal tfDeg As Variant, _
+                             Optional ByVal seenTf As Variant, _
+                             Optional ByVal seenLR As Variant, _
+                             Optional ByVal motorOut As Variant) As Variant
+    Dim ci As Double, ca As Double, dg As Double, co As Double, ms As Double, mb As Double, tf As Double
+    Dim dB As Double
     On Error GoTo Fail
     If Not HasNum(survInc) Or Not HasNum(survAzm) Then ProjAzmAtBit = "": Exit Function
+    ci = CDbl(survInc)
     ca = CDbl(survAzm)
-    dg = SafeNum(dls)
-    mb = SafeNum(mBelow): tf = SafeNum(tfDeg)
-
-    ' Walk/AZM: slide MD below the survey at DLS/30m × sin(user TF).
-    ' (INC@BIT still uses DoglegBelow / motor-yield scaling separately.)
-    If mb > EPS And dg > EPS Then
-        dbWalk = dg * mb / 30#
+    If isError(tfDeg) Then ProjAzmAtBit = tfDeg: Exit Function
+    If Not HasNum(tfDeg) Then ProjAzmAtBit = ca: Exit Function   ' blank U = pure rotary
+    dg = SafeNum(dls): co = SafeNum(course): ms = SafeNum(mSeen)
+    mb = SafeNum(mBelow)
+    tf = ResolveWalkTf(tfDeg, seenTf, seenLR)
+    If HasNum(motorOut) Then
+        dB = DoglegBelowYield(CDbl(motorOut), ms, mb)
     Else
-        dbWalk = 0#
+        dB = DoglegBelow(dg, co, ms, mb)
     End If
-    ' No /sin(I) on walk — matches field ΔAzm (e.g. ~33°) for required TF.
-    aB = Wrap360(ca + dbWalk * Sin(Deg2Rad(tf)))
-    ProjAzmAtBit = aB
+    ProjAzmAtBit = Wrap360(ca + AzmWalkDeg(ci, dB, tf))
     Exit Function
 Fail:
     ProjAzmAtBit = CVErr(xlErrNum)
@@ -187,18 +370,18 @@ End Function
 
 Public Function ProjTvdAtBit(ByVal survMd As Variant, ByVal survInc As Variant, _
                              ByVal survAzm As Variant, ByVal survTvd As Variant, _
-                             ByVal bitMD As Variant, ByVal incBit As Variant, _
+                             ByVal bitMd As Variant, ByVal incBit As Variant, _
                              ByVal azmBit As Variant) As Variant
     Dim dt As Double, dN As Double, dE As Double
     On Error GoTo Fail
     If Not HasNum(survMd) Or Not HasNum(survInc) Or Not HasNum(survAzm) Or Not HasNum(survTvd) Then
         ProjTvdAtBit = "": Exit Function
     End If
-    If Not HasNum(bitMD) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
+    If Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
         ProjTvdAtBit = "": Exit Function
     End If
     MinCurveStep CDbl(survMd), CDbl(survInc), CDbl(survAzm), _
-                 CDbl(bitMD), CDbl(incBit), CDbl(azmBit), dt, dN, dE
+                 CDbl(bitMd), CDbl(incBit), CDbl(azmBit), dt, dN, dE
     ProjTvdAtBit = CDbl(survTvd) + dt
     Exit Function
 Fail:
@@ -306,27 +489,27 @@ Private Function LoadTargets(ByVal mdR As Range, ByVal incR As Range, ByVal azmR
     LoadTargets = n
 End Function
 
-' Skip a plan station that is still ahead in MD but no longer a usable aim:
-' tiny remaining MD/TVD with meaningful INC still to go → BURR singularity.
-' Never applied to the last plan station (caller keeps that as the final aim).
-Private Function TargetIsExhausted(ByVal bitMD As Double, ByVal incBit As Double, _
+' A station is used up only when its inclination is already made.
+' Tiny leftover MD is not a reason to jump to the next (hold) station —
+' ComputeAim then uses the current stand length as the BURR distance.
+Private Function TargetIsExhausted(ByVal bitMd As Double, ByVal incBit As Double, _
                                    ByVal tgtMd As Double, ByVal tgtInc As Double, _
                                    ByVal tgtTvd As Double, ByVal tvdBit As Variant) As Boolean
     Dim dist As Double, dTvd As Double
     TargetIsExhausted = False
-    dist = tgtMd - bitMD
-    If dist <= EPS Then
-        TargetIsExhausted = True
-        Exit Function
-    End If
-    If dist < MIN_AIM_MD And Abs(tgtInc - incBit) > MIN_AIM_DINC Then
-        TargetIsExhausted = True
-        Exit Function
-    End If
-    If HasNum(tvdBit) Then
-        dTvd = tgtTvd - CDbl(tvdBit)
-        If dTvd > 0# And dTvd < MIN_AIM_TVD And Abs(tgtInc - incBit) > MIN_AIM_DINC Then
+    If incBit + MIN_AIM_DINC >= tgtInc Then
+        dist = tgtMd - bitMd
+        If dist <= EPS Then
             TargetIsExhausted = True
+            Exit Function
+        End If
+        If dist < MIN_AIM_MD Then
+            TargetIsExhausted = True
+            Exit Function
+        End If
+        If HasNum(tvdBit) Then
+            dTvd = tgtTvd - CDbl(tvdBit)
+            If dTvd > 0# And dTvd < MIN_AIM_TVD Then TargetIsExhausted = True
         End If
     End If
 End Function
@@ -349,14 +532,16 @@ Private Function PastFinalTarget(ByVal survInc As Double, ByVal survTvd As Varia
 End Function
 
 ' First usable plan index with m(k) > bitMd (skips exhausted intermediate targets).
-' The last plan station is never skipped by exhaustion — only by MD past or PastFinalTarget.
+' Stations already behind the bit are never the aim — even if their Inc is
+' not yet made. The last plan station is never skipped by exhaustion — only
+' by MD past or PastFinalTarget.
 Private Function FirstAimIndex(ByRef m() As Double, ByRef i() As Double, _
                                ByRef tv() As Double, ByVal n As Long, _
-                               ByVal bitMD As Double, ByVal incBit As Double, _
+                               ByVal bitMd As Double, ByVal incBit As Double, _
                                ByVal tvdBit As Variant) As Long
     Dim k As Long
     k = 1
-    Do While k <= n And m(k) <= bitMD
+    Do While k <= n And m(k) <= bitMd
         k = k + 1
     Loop
     Do While k <= n
@@ -364,7 +549,7 @@ Private Function FirstAimIndex(ByRef m() As Double, ByRef i() As Double, _
             FirstAimIndex = k
             Exit Function
         End If
-        If Not TargetIsExhausted(bitMD, incBit, m(k), i(k), tv(k), tvdBit) Then
+        If Not TargetIsExhausted(bitMd, incBit, m(k), i(k), tv(k), tvdBit) Then
             FirstAimIndex = k
             Exit Function
         End If
@@ -374,11 +559,11 @@ Private Function FirstAimIndex(ByRef m() As Double, ByRef i() As Double, _
 End Function
 
 ' Active target MD ahead of bit (first MD > bitMd), or blank. Legacy MD-only picker.
-Public Function ProjActiveTargetMd(ByVal bitMD As Variant, ByVal tgtMd As Range) As Variant
+Public Function ProjActiveTargetMd(ByVal bitMd As Variant, ByVal tgtMd As Range) As Variant
     Dim r As Long, bm As Double, v As Variant
     On Error GoTo Fail
-    If Not HasNum(bitMD) Then ProjActiveTargetMd = "": Exit Function
-    bm = CDbl(bitMD)
+    If Not HasNum(bitMd) Then ProjActiveTargetMd = "": Exit Function
+    bm = CDbl(bitMd)
     For r = 1 To tgtMd.Rows.Count
         v = tgtMd.Cells(r, 1).Value
         If HasNum(v) Then
@@ -396,7 +581,7 @@ End Function
 
 ' Active target MD with full target table (skips exhausted near stations).
 ' Optional survInc/survTvd gate the "past final target" stop (survey F/H).
-Public Function ProjActiveTargetMdEx(ByVal bitMD As Variant, ByVal incBit As Variant, _
+Public Function ProjActiveTargetMdEx(ByVal bitMd As Variant, ByVal incBit As Variant, _
                                      ByVal tvdBit As Variant, ByVal tgtMd As Range, _
                                      ByVal tgtInc As Range, ByVal tgtAzm As Range, _
                                      ByVal tgtTvd As Range, _
@@ -406,8 +591,8 @@ Public Function ProjActiveTargetMdEx(ByVal bitMD As Variant, ByVal incBit As Var
     Dim n As Long, k As Long, bm As Double, ib As Double
     Dim gateInc As Double, gateTvd As Variant
     On Error GoTo Fail
-    If Not HasNum(bitMD) Then ProjActiveTargetMdEx = "": Exit Function
-    bm = CDbl(bitMD)
+    If Not HasNum(bitMd) Then ProjActiveTargetMdEx = "": Exit Function
+    bm = CDbl(bitMd)
     ib = SafeNum(incBit)
     n = LoadTargets(tgtMd, tgtInc, tgtAzm, tgtTvd, m, i, a, tv)
     If n < 1 Then ProjActiveTargetMdEx = "": Exit Function
@@ -437,7 +622,7 @@ End Function
 
 ' Aim walk to next achievable plan target; returns False if none
 ' reqDls = full dogleg rate (°/30m); burr = build-up rate (°/30m); reqTf = TF bit→aim
-Private Function ComputeAim(ByVal bitMD As Double, ByVal incBit As Double, _
+Private Function ComputeAim(ByVal bitMd As Double, ByVal incBit As Double, _
                             ByVal azmBit As Double, ByVal motorOut As Double, _
                             ByVal course As Double, ByVal tgtMd As Range, _
                             ByVal tgtInc As Range, ByVal tgtAzm As Range, _
@@ -458,13 +643,19 @@ Private Function ComputeAim(ByVal bitMD As Double, ByVal incBit As Double, _
     If n < 1 Then Exit Function
     ' Past-final stop is applied in ProjActiveTargetMdEx (survey F/H); AO blanks AR/AS/AT.
 
-    k = FirstAimIndex(m, i, tv, n, bitMD, incBit, tvdBit)
+    k = FirstAimIndex(m, i, tv, n, bitMd, incBit, tvdBit)
     If k > n Then Exit Function
 
     q = m(k)
     ti = i(k)
     ta = a(k)
-    dist = q - bitMD
+    dist = q - bitMd
+    ' Same BURR formula as a normal stand: ΔI×30/dMD.
+    ' When dMD is shorter than this stand (or the bit has passed the
+    ' station MD) use course length from the sheet — not a made-up floor.
+    If dist < course And incBit + MIN_AIM_DINC < ti Then
+        If course > EPS Then dist = course
+    End If
     If dist <= EPS Then Exit Function
     beta = DoglegAngleDeg(incBit, azmBit, ti, ta)
     reqDls = beta * 30# / dist
@@ -475,7 +666,7 @@ Private Function ComputeAim(ByVal bitMD As Double, ByVal incBit As Double, _
             q = q + course
             If q > m(n) Then q = m(n)
             PlanAtt m, i, a, n, q, ti, ta
-            dist = q - bitMD
+            dist = q - bitMd
             If dist <= EPS Then Exit Do
             beta = DoglegAngleDeg(incBit, azmBit, ti, ta)
             reqDls = beta * 30# / dist
@@ -508,10 +699,12 @@ Private Function TfMotorFactor(ByVal tfDeg As Variant, ByVal reqTf As Double) As
     End If
 End Function
 
-' Meters to slide: (|BURR| / motorOut) * course
-' BURR matches ProjBurr (no aim walk; TVD arc rate when tvdBit supplied).
-' Required-TF cosine correction is applied in ProjSlideComment, not here.
-Public Function ProjMetersToSlide(ByVal bitMD As Variant, ByVal incBit As Variant, _
+' Meters to slide: (|reqDLS| / motorOut) * course
+' reqDLS is the 3D dogleg °/30 m to the next plan station ahead of the bit.
+' incBit / azmBit are the PROJECTED bit attitude (Slidesheet W / X) — the
+' same start point ProjRequiredTf uses, so Y's metres and TF agree.
+' Y comment uses this AS value as-is (no required-TF cosine inflate).
+Public Function ProjMetersToSlide(ByVal bitMd As Variant, ByVal incBit As Variant, _
                                   ByVal azmBit As Variant, ByVal motorOut As Variant, _
                                   ByVal course As Variant, ByVal tgtMd As Range, _
                                   ByVal tgtInc As Range, ByVal tgtAzm As Range, _
@@ -519,13 +712,13 @@ Public Function ProjMetersToSlide(ByVal bitMD As Variant, ByVal incBit As Varian
                                   Optional ByVal tvdBit As Variant) As Variant
     Dim bm As Double, ib As Double, aB As Double, mo As Double, co As Double
     Dim dist As Double, req As Double, burr As Double, reqTf As Double
-    Dim aimInc As Double, aimTvd As Double, dTvd As Double
+    Dim aimInc As Double, aimTvd As Double
     On Error GoTo Fail
 
-    If Not HasNum(bitMD) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
+    If Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
         ProjMetersToSlide = "": Exit Function
     End If
-    bm = CDbl(bitMD): ib = CDbl(incBit): aB = CDbl(azmBit)
+    bm = CDbl(bitMd): ib = CDbl(incBit): aB = CDbl(azmBit)
     mo = SafeNum(motorOut): co = SafeNum(course)
     If mo <= EPS Or co <= EPS Then ProjMetersToSlide = "": Exit Function
 
@@ -534,20 +727,14 @@ Public Function ProjMetersToSlide(ByVal bitMD As Variant, ByVal incBit As Varian
         ProjMetersToSlide = "": Exit Function
     End If
 
-    ' TVD-arc BURR when enough TVD remains; tiny dTVD → keep MD BURR (avoids singularity).
-    If HasNum(tvdBit) Then
-        dTvd = aimTvd - CDbl(tvdBit)
-        If dTvd >= MIN_AIM_TVD Then
-            burr = Rad2Deg(Sin(Deg2Rad(aimInc)) - Sin(Deg2Rad(ib))) / dTvd * 30#
-        End If
-    End If
-
-    If Abs(burr) <= EPS Then
+    If Abs(req) <= EPS Then
         ProjMetersToSlide = 0#
         Exit Function
     End If
 
-    ProjMetersToSlide = Abs(burr) / mo * co
+    ' 3D dogleg required (°/30 m) / motor × this stand. Cannot slide more than C.
+    ProjMetersToSlide = Abs(req) / mo * co
+    If ProjMetersToSlide > co Then ProjMetersToSlide = co
     Exit Function
 Fail:
     ProjMetersToSlide = CVErr(xlErrNum)
@@ -555,7 +742,7 @@ End Function
 
 ' Meters remain to rotate in the current drill set (course length, col C):
 '   max(0, courseLen - metersToSlide)
-Public Function ProjMetersRemainToRotate(ByVal bitMD As Variant, ByVal incBit As Variant, _
+Public Function ProjMetersRemainToRotate(ByVal bitMd As Variant, ByVal incBit As Variant, _
                                          ByVal azmBit As Variant, ByVal motorOut As Variant, _
                                          ByVal course As Variant, ByVal tgtMd As Range, _
                                          ByVal tgtInc As Range, ByVal tgtAzm As Range, _
@@ -571,7 +758,7 @@ Public Function ProjMetersRemainToRotate(ByVal bitMD As Variant, ByVal incBit As
         ProjMetersRemainToRotate = "": Exit Function
     End If
 
-    slide = ProjMetersToSlide(bitMD, incBit, azmBit, motorOut, course, _
+    slide = ProjMetersToSlide(bitMd, incBit, azmBit, motorOut, course, _
                               tgtMd, tgtInc, tgtAzm, tgtTvd, tvdBit)
     If isError(slide) Then
         ProjMetersRemainToRotate = slide
@@ -589,29 +776,23 @@ Fail:
     ProjMetersRemainToRotate = CVErr(xlErrNum)
 End Function
 
-' Build-up rate required (°/30m) to the next plan target ahead of the bit.
-'
-' The aim is NOT walked forward: BURR answers "what build rate does the next
-' target demand", even when the motor cannot deliver it. Meters To Slide uses
-' the same BURR (|BURR|/motor*course).
-'
-' With tvdBit supplied this is the constant-build (circular arc) rate that lands the
-' target inclination at the target TVD:  (sin Itgt - sin Ibit) / dTVD, in °/30m.
-' Without it, falls back to the older linear-with-measured-depth rate.
-Public Function ProjBurr(ByVal bitMD As Variant, ByVal incBit As Variant, _
+' 3D dogleg required (°/30 m) to the next plan station ahead of the bit.
+' Same rate Meters To Slide uses: |reqDLS| / motor × course.
+' Aim is not walked forward. Inc-only / TVD-arc build is not this number.
+Public Function ProjBurr(ByVal bitMd As Variant, ByVal incBit As Variant, _
                          ByVal azmBit As Variant, ByVal motorOut As Variant, _
                          ByVal course As Variant, ByVal tgtMd As Range, _
                          ByVal tgtInc As Range, ByVal tgtAzm As Range, _
                          ByVal tgtTvd As Range, Optional ByVal tvdBit As Variant) As Variant
     Dim bm As Double, ib As Double, aB As Double, mo As Double, co As Double
     Dim dist As Double, req As Double, burr As Double, reqTf As Double
-    Dim aimInc As Double, aimTvd As Double, dTvd As Double
+    Dim aimInc As Double, aimTvd As Double
     On Error GoTo Fail
 
-    If Not HasNum(bitMD) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
+    If Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
         ProjBurr = "": Exit Function
     End If
-    bm = CDbl(bitMD): ib = CDbl(incBit): aB = CDbl(azmBit)
+    bm = CDbl(bitMd): ib = CDbl(incBit): aB = CDbl(azmBit)
     mo = SafeNum(motorOut): co = SafeNum(course)
 
     If Not ComputeAim(bm, ib, aB, mo, co, tgtMd, tgtInc, tgtAzm, tgtTvd, _
@@ -619,39 +800,108 @@ Public Function ProjBurr(ByVal bitMD As Variant, ByVal incBit As Variant, _
         ProjBurr = "": Exit Function
     End If
 
-    ' TVD-arc BURR when enough TVD remains; tiny dTVD → keep MD BURR (avoids singularity).
-    If HasNum(tvdBit) Then
-        dTvd = aimTvd - CDbl(tvdBit)
-        If dTvd >= MIN_AIM_TVD Then
-            burr = Rad2Deg(Sin(Deg2Rad(aimInc)) - Sin(Deg2Rad(ib))) / dTvd * 30#
-        End If
-    End If
-
-    ProjBurr = burr
+    ProjBurr = req
     Exit Function
 Fail:
     ProjBurr = CVErr(xlErrNum)
 End Function
 
-Private Function RoundQuarterM(ByVal m As Double) As Double
-    RoundQuarterM = Application.WorksheetFunction.Round(m / 0.25, 0) * 0.25
+' Build rate (°/30 m) to LAND on the next plan station's TVD (Cont DI BRR).
+'
+' When the aim station is a landing (Inc >= landInc, default 88°) the number
+' that matters is the circular arc that reaches the station's inclination
+' exactly at its TVD - MD is a by-product:
+'     dTVD = R * (sin I_tgt - sin I_bit)      ->   BUR = (30 * 180/pi) / R
+' ProjBurr's 3D-dogleg-over-plan-MD rate answers "match the plan's attitude
+' by the plan's MD" instead; when the bit is behind plan that lands high
+' (4.07 vs 3.74 at 2870 m on 35780: 11 m above target TVD).
+' Intermediate (non-landing) stations, or a bit already at / below the
+' station's Inc or TVD, fall back to ProjBurr so the cell never goes blank
+' mid-curve.
+Public Function ProjLandingBurr(ByVal bitMd As Variant, ByVal incBit As Variant, _
+                                ByVal azmBit As Variant, ByVal tvdBit As Variant, _
+                                ByVal course As Variant, ByVal tgtMd As Range, _
+                                ByVal tgtInc As Range, ByVal tgtAzm As Range, _
+                                ByVal tgtTvd As Range, _
+                                Optional ByVal landInc As Variant) As Variant
+    Dim m() As Double, i() As Double, a() As Double, tv() As Double
+    Dim n As Long, k As Long
+    Dim bm As Double, ib As Double, tb As Double, li As Double
+    Dim dTvd As Double, dSin As Double, radius As Double
+    On Error GoTo Fail
+
+    If Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(tvdBit) Then
+        ProjLandingBurr = "": Exit Function
+    End If
+    bm = CDbl(bitMd): ib = CDbl(incBit): tb = CDbl(tvdBit)
+    li = SafeNum(landInc, 88#)
+
+    n = LoadTargets(tgtMd, tgtInc, tgtAzm, tgtTvd, m, i, a, tv)
+    If n < 1 Then ProjLandingBurr = "": Exit Function
+    k = FirstAimIndex(m, i, tv, n, bm, ib, tvdBit)
+    If k > n Then ProjLandingBurr = "": Exit Function
+
+    If i(k) >= li Then
+        dTvd = tv(k) - tb
+        dSin = Sin(Deg2Rad(i(k))) - Sin(Deg2Rad(ib))
+        If dTvd > EPS And dSin > EPS Then
+            radius = dTvd / dSin
+            ProjLandingBurr = Rad2Deg(30# / radius)
+            Exit Function
+        End If
+    End If
+
+    ' Not a landing aim (or geometry already past it): plan-MD dogleg rate.
+    ProjLandingBurr = ProjBurr(bitMd, incBit, azmBit, 0, course, _
+                               tgtMd, tgtInc, tgtAzm, tgtTvd, tvdBit)
+    Exit Function
+Fail:
+    ProjLandingBurr = CVErr(xlErrNum)
+End Function
+
+' Hole metres to put in the Y comment: AS = |reqDLS| / Q_avg × C, hard-capped
+' at this stand's C. Two-decimal sheet precision — never 0.25 rounding.
+Public Function ProjInstructedSlideM(ByVal metersToSlide As Variant, ByVal tfText As Variant, _
+                                     Optional ByVal maxSlide As Variant) As Double
+    Dim m As Double, cap As Double
+
+    m = 0#
+    If HasNum(metersToSlide) Then
+        m = CDbl(metersToSlide)
+        If m < 0# Then m = 0#
+    End If
+
+    cap = 0#
+    If HasNum(maxSlide) Then
+        cap = CDbl(maxSlide)
+        If cap < 0# Then cap = 0#
+    End If
+
+    If cap > 0# And m > cap Then m = cap
+
+    m = Application.WorksheetFunction.Round(m, 2)
+    If cap > 0# Then
+        cap = Application.WorksheetFunction.Round(cap, 2)
+        If m > cap Then m = cap
+    End If
+    ProjInstructedSlideM = m
 End Function
 
 ' Bit Northing = survey CumN + min-curve ΔN (surv → bit)
 Public Function ProjBitN(ByVal survMd As Variant, ByVal survInc As Variant, _
                          ByVal survAzm As Variant, ByVal cumN As Variant, _
-                         ByVal bitMD As Variant, ByVal incBit As Variant, _
+                         ByVal bitMd As Variant, ByVal incBit As Variant, _
                          ByVal azmBit As Variant) As Variant
     Dim dt As Double, dN As Double, dE As Double
     On Error GoTo Fail
     If Not HasNum(survMd) Or Not HasNum(survInc) Or Not HasNum(survAzm) Then
         ProjBitN = "": Exit Function
     End If
-    If Not HasNum(cumN) Or Not HasNum(bitMD) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
+    If Not HasNum(cumN) Or Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
         ProjBitN = "": Exit Function
     End If
     MinCurveStep CDbl(survMd), CDbl(survInc), CDbl(survAzm), _
-                 CDbl(bitMD), CDbl(incBit), CDbl(azmBit), dt, dN, dE
+                 CDbl(bitMd), CDbl(incBit), CDbl(azmBit), dt, dN, dE
     ProjBitN = CDbl(cumN) + dN
     Exit Function
 Fail:
@@ -661,18 +911,18 @@ End Function
 ' Bit Easting = survey CumE + min-curve ΔE (surv → bit)
 Public Function ProjBitE(ByVal survMd As Variant, ByVal survInc As Variant, _
                          ByVal survAzm As Variant, ByVal cumE As Variant, _
-                         ByVal bitMD As Variant, ByVal incBit As Variant, _
+                         ByVal bitMd As Variant, ByVal incBit As Variant, _
                          ByVal azmBit As Variant) As Variant
     Dim dt As Double, dN As Double, dE As Double
     On Error GoTo Fail
     If Not HasNum(survMd) Or Not HasNum(survInc) Or Not HasNum(survAzm) Then
         ProjBitE = "": Exit Function
     End If
-    If Not HasNum(cumE) Or Not HasNum(bitMD) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
+    If Not HasNum(cumE) Or Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
         ProjBitE = "": Exit Function
     End If
     MinCurveStep CDbl(survMd), CDbl(survInc), CDbl(survAzm), _
-                 CDbl(bitMD), CDbl(incBit), CDbl(azmBit), dt, dN, dE
+                 CDbl(bitMd), CDbl(incBit), CDbl(azmBit), dt, dN, dE
     ProjBitE = CDbl(cumE) + dE
     Exit Function
 Fail:
@@ -681,18 +931,24 @@ End Function
 
 ' Required toolface to intercept the next plan target.
 '
-' 1) Project INC/AZM at bit from the survey using the USER toolface (tfText),
-'    so the bit attitude reflects the slide already drilled below the survey.
-' 2) From that bit attitude to the next target:
-'       dMD     = targetMD - bitMD
-'       incPerM = (targetINC - bitINC) / dMD
-'       azmPerM = Wrap180(targetAZM - bitAZM) / dMD
-'       TF      = Atan2(incPerM, azmPerM)   ' Excel Atan2(x,y); 0=HS, ±90=walk
+' 1) Start from the PROJECTED bit attitude (Inc@Bit / Azm@Bit, W/X), which
+'    already embeds the slide drilled below the survey at the user toolface.
+' 2) Aim at the NEXT NAMED PLAN TARGET ahead of the bit (ProjTargets_*,
+'    FirstAimIndex) — the same station BURR (AR) and Metres To Slide (AS)
+'    aim at, so the three numbers in Y describe one manoeuvre. Aiming the TF
+'    at a 15 m _OC_Survey plan station instead (Aug-30 change) told the DD to
+'    turn left onto a station the projected bit had already passed while the
+'    slide metres were still sized for the named target to the right.
+' 3) From bit attitude to aim attitude, use the industry-standard
+'    (Well Seeker) spherical toolface — the angle from high side to the
+'    dogleg plane that carries (incBit, azmBit) onto (aimInc, aimAzm):
+'       TF = Atan2( sinI2·cosI1·cosΔA − sinI1·cosI2 ,  sinI2·sinΔA )
+'    (ToolfaceBetweenDeg). A degree of azimuth walk only moves the bit
+'    sin(Inc) as far as a degree of build, so raw Atan2(ΔInc, ΔAzm) is wrong —
+'    it over-weights the turn (~2.4x at Inc 25°) and disagreed with the office.
 '
 ' Display: Gravity → R## / L## / 0 ; Magnetic (low inc) → ###M
-' Required TF from bit → next target, using projected Inc@Bit / Azm@Bit
-' (those already embed the user toolface via ProjIncAtBit / ProjAzmAtBit).
-Public Function ProjRequiredTf(ByVal bitMD As Variant, _
+Public Function ProjRequiredTf(ByVal bitMd As Variant, _
                                ByVal incAtBit As Variant, ByVal azmAtBit As Variant, _
                                ByVal tgtMd As Range, ByVal tgtInc As Range, _
                                ByVal tgtAzm As Range, ByVal tgtTvd As Range, _
@@ -701,14 +957,14 @@ Public Function ProjRequiredTf(ByVal bitMD As Variant, _
     Dim bm As Double, ib As Double, aB As Double
     Dim m() As Double, i() As Double, a() As Double, tv() As Double
     Dim n As Long, k As Long
-    Dim dMd As Double, dInc As Double, dAzm As Double
-    Dim incPerM As Double, azmPerM As Double, reqTf As Double
+    Dim ti As Double, ta As Double
+    Dim reqTf As Double
     On Error GoTo Fail
 
-    If Not HasNum(bitMD) Or Not HasNum(incAtBit) Or Not HasNum(azmAtBit) Then
+    If Not HasNum(bitMd) Or Not HasNum(incAtBit) Or Not HasNum(azmAtBit) Then
         ProjRequiredTf = "": Exit Function
     End If
-    bm = CDbl(bitMD)
+    bm = CDbl(bitMd)
     ib = CDbl(incAtBit)
     aB = CDbl(azmAtBit)
 
@@ -716,37 +972,69 @@ Public Function ProjRequiredTf(ByVal bitMD As Variant, _
     If n < 1 Then
         ProjRequiredTf = "": Exit Function
     End If
-
     k = FirstAimIndex(m, i, tv, n, bm, ib, tvdBit)
     If k > n Then
         ProjRequiredTf = "": Exit Function
     End If
+    ti = i(k)
+    ta = a(k)
 
-    dMd = m(k) - bm
-    If dMd <= EPS Then
-        ProjRequiredTf = "": Exit Function
-    End If
-
-    dInc = i(k) - ib
-    dAzm = Wrap180(a(k) - aB)
-    incPerM = dInc / dMd
-    azmPerM = dAzm / dMd
-
-    If Abs(incPerM) < EPS And Abs(azmPerM) < EPS Then
-        reqTf = 0#
+    ' Spherical TF needs no MD: it is the direction of the dogleg plane from
+    ' bit attitude to aim attitude, exactly what Well Seeker tabulates.
+    If DoglegAngleDeg(ib, aB, ti, ta) < 0.000001 Then
+        reqTf = 0#   ' already pointed at the aim attitude
     Else
-        ' Excel Atan2(x, y): x = build rate, y = walk rate → 0° highside when pure build
-        reqTf = Rad2Deg(Application.WorksheetFunction.Atan2(incPerM, azmPerM))
+        reqTf = ToolfaceBetweenDeg(ib, aB, ti, ta)
     End If
 
-    ProjRequiredTf = FormatRequiredTfDisplay(reqTf, ib, thresholdDeg)
+    ProjRequiredTf = FormatRequiredTfDisplay(reqTf, ib, aB, thresholdDeg)
     Exit Function
 Fail:
     ProjRequiredTf = CVErr(xlErrNum)
 End Function
 
+' Cont DI tab: required toolface from a bit attitude straight to a target
+' attitude — the same spherical TF (ToolfaceBetweenDeg) and R##/L##/0/###M
+' display as Slidesheet AT, so the two tabs agree.
+Public Function ProjTfToTarget(ByVal incBit As Variant, ByVal azmBit As Variant, _
+                               ByVal tgtInc As Variant, ByVal tgtAzm As Variant, _
+                               Optional ByVal thresholdDeg As Variant) As Variant
+    Dim ib As Double, aB As Double, ti As Double, ta As Double, reqTf As Double
+    On Error GoTo Fail
+    If Not HasNum(incBit) Or Not HasNum(azmBit) Or Not HasNum(tgtInc) Or Not HasNum(tgtAzm) Then
+        ProjTfToTarget = "": Exit Function
+    End If
+    ib = CDbl(incBit): aB = CDbl(azmBit): ti = CDbl(tgtInc): ta = CDbl(tgtAzm)
+    If DoglegAngleDeg(ib, aB, ti, ta) < 0.000001 Then
+        reqTf = 0#
+    Else
+        reqTf = ToolfaceBetweenDeg(ib, aB, ti, ta)
+    End If
+    ProjTfToTarget = FormatRequiredTfDisplay(reqTf, ib, aB, thresholdDeg)
+    Exit Function
+Fail:
+    ProjTfToTarget = CVErr(xlErrNum)
+End Function
+
+' 3D dogleg angle (degrees) between two attitudes — the numerator of the
+' Slidesheet's required DLS (ProjBurr: beta × 30 / dMD).
+Public Function ProjDoglegDeg(ByVal inc1 As Variant, ByVal azm1 As Variant, _
+                              ByVal inc2 As Variant, ByVal azm2 As Variant) As Variant
+    On Error GoTo Fail
+    If Not HasNum(inc1) Or Not HasNum(azm1) Or Not HasNum(inc2) Or Not HasNum(azm2) Then
+        ProjDoglegDeg = "": Exit Function
+    End If
+    ProjDoglegDeg = DoglegAngleDeg(CDbl(inc1), CDbl(azm1), CDbl(inc2), CDbl(azm2))
+    Exit Function
+Fail:
+    ProjDoglegDeg = CVErr(xlErrNum)
+End Function
+
 ' Gravity highside: R/L/0. Magnetic: 0-359M (Wrap360 — left of north is e.g. 348M, not "Left").
+' Magnetic TF = bearing of the push: high side's horizontal projection points
+' along the hole azimuth, so bearing = azmBit + highside TF.
 Private Function FormatRequiredTfDisplay(ByVal tfDeg As Double, ByVal incBit As Double, _
+                                         ByVal azmBit As Double, _
                                          ByVal thresholdDeg As Variant) As String
     Dim mode As Variant
     Dim a As Double
@@ -754,7 +1042,7 @@ Private Function FormatRequiredTfDisplay(ByVal tfDeg As Double, ByVal incBit As 
     If isError(mode) Then mode = "Gravity"
 
     If CStr(mode) = "Magnetic" Then
-        a = Wrap360(tfDeg)
+        a = Wrap360(azmBit + tfDeg)
         FormatRequiredTfDisplay = Format$(Application.WorksheetFunction.Round(a, 0), "0") & "M"
     Else
         a = Application.WorksheetFunction.Round(Wrap180(tfDeg), 0)
@@ -790,6 +1078,12 @@ Public Function ProjTfMode(ByVal tfText As Variant, ByVal incBit As Variant, _
             ProjTfMode = "Gravity"
             Exit Function
         End If
+        If Len(s) > 1 Then
+            If (right$(s, 1) = "R" Or right$(s, 1) = "L") And IsNumeric(Left$(s, Len(s) - 1)) Then
+                ProjTfMode = "Gravity"
+                Exit Function
+            End If
+        End If
         If IsNumeric(s) Then
             ' Unsigned / signed number without M → highside (Gravity)
             ProjTfMode = "Gravity"
@@ -812,48 +1106,27 @@ Fail:
     ProjTfMode = CVErr(xlErrValue)
 End Function
 
-' Comments: returns left & Chr(1) & right for the caller to pad into the Y cell.
-'   left  = "Sliding <m rounded to 0.25> @ <TF>"  (0.00m when tangent / no slide)
-'   right = "BURR 0.00"   (always two decimals, no pipe)
-' Displayed slide metres = geometric metersToSlide / |cos(required TF)| so off-HS
-' toolface asks for more slide. Blank/zero meters still emit TF+BURR (tangent hold).
-' Plan-distance / Bit N-E coords intentionally omitted
+' Comments: left & Chr(1) & BURR for the Y cell.
+'   left  = "Sliding <this stand C, 2 dp> @ <TF>"
+'   right = "BURR 0.00"
+' Slide metres = ProjInstructedSlideM (capped at C). Leftover rotate is column Z = C − slide.
 Public Function ProjSlideComment(ByVal metersToSlide As Variant, ByVal tfText As Variant, _
                                  ByVal burr As Variant, _
-                                 Optional ByVal widthChars As Double = 0#) As Variant
+                                 Optional ByVal widthChars As Double = 0#, _
+                                 Optional ByVal maxSlide As Variant) As Variant
     Dim m As Double, tfShow As String, b As Double
     Dim leftPart As String, rightPart As String
-    Dim tfParsed As Variant
-    Dim c As Double
     On Error GoTo Fail
 
-    ' Blank/zero meters = tangent hold: still show TF + BURR from current bit projection.
-    If HasNum(metersToSlide) Then
-        m = CDbl(metersToSlide)
-        If m < 0# Then m = 0#
-    Else
-        m = 0#
-    End If
     If Not HasNum(burr) Then ProjSlideComment = "": Exit Function
     b = CDbl(burr)
+    m = ProjInstructedSlideM(metersToSlide, tfText, maxSlide)
 
     tfShow = Trim$(CStr(tfText & ""))
     If Len(tfShow) = 0 Then tfShow = "-"
 
-    ' Effective slide = geometric / |cos(TF)| using required TF text (AT).
-    If m > 0# And Len(tfShow) > 0 And tfShow <> "-" Then
-        tfParsed = ProjParseTF(tfShow)
-        If HasNum(tfParsed) Then
-            c = Abs(Cos(Deg2Rad(CDbl(tfParsed))))
-            If c >= 0.05 Then
-                m = m / c
-            End If
-        End If
-    End If
-
-    leftPart = "Sliding " & Format$(RoundQuarterM(m), "0.00") & "m @ " & tfShow
+    leftPart = "Sliding " & Format$(m, "0.00") & "m @ " & tfShow
     rightPart = "BURR " & Format$(b, "0.00")
-    ' Chr(1) delimiter — RefreshSlideComments pads to the Y cell width in points.
     ProjSlideComment = leftPart & Chr$(1) & rightPart
     Exit Function
 Fail:
@@ -899,4 +1172,18 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
 Fail:
     ProjSlideMetersBetween = CVErr(xlErrNum)
 End Function
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

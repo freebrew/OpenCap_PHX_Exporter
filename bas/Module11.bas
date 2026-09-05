@@ -36,7 +36,9 @@ Public Sub RTP_printW_Email()
     wsData.Range("B2:F55").Calculate
     On Error GoTo CleanFail
 
-    ' Corridor + ops PNG is an attachment only; the mail body is the B2:F55 HTML table.
+    ' Daily plot PNG: attach a visible file AND inline a CID copy under the
+    ' B2:F55 table. Outlook hides CID-referenced images from the paperclip
+    ' list, so the visible attach must NOT get a Content-ID. No daily PDF.
     tmpDir = Environ$("TEMP")
     reportPng = ""
     On Error Resume Next
@@ -55,14 +57,14 @@ Public Sub RTP_printW_Email()
     Set OutMail = OutApp.CreateItem(0)
 
     With OutMail
-        .To = "company.man@northwind.example"
-        .CC = "field@northwind.example;ops@demo-dd.example"
+        .To = MailToFromSheet(wsData)
+        .CC = MailCcFromSheet(wsData)
         .BCC = ""
-        .Subject = "Daily Drilling Summary - Apex-214 - demo-rig"
+        .Subject = DailyMailSubject()
 
         attachedCount = 0
         For Each c In wsData.Range("I29:I33")
-            filePath = Trim$(CStr(c.Value & ""))
+            filePath = StoredAttachPath(c)
             If Len(filePath) > 0 Then
                 If FileExistsFast(filePath) Then
                     .Attachments.Add filePath
@@ -71,19 +73,21 @@ Public Sub RTP_printW_Email()
             End If
         Next c
 
+        .HTMLBody = RangeToHTML(wsData.Range("B2:F55"))
+
         If Len(reportPng) > 0 Then
             If FileExistsFast(reportPng) Then
                 .Attachments.Add reportPng
                 attachedCount = attachedCount + 1
+                AttachDailyPngInline OutMail, reportPng
+                .HTMLBody = .HTMLBody & DailyPngHtml()
             End If
         End If
-
-        .HTMLBody = RangeToHTML(wsData.Range("B2:F55"))
     End With
 
-    ' I29:I32 are merged across columns; ClearContents on I29 alone fails.
-    ' Clear each MergeArea. Keep Attachement 5 (I33).
-    For r = 29 To 32
+    ' I29:I31 are one-shot. Keep Attachement 4 (I32) and 5 (I33) for every email.
+    ' Clear each MergeArea — ClearContents on I alone fails when I:J is merged.
+    For r = 29 To 31
         wsData.Range("I" & r).MergeArea.ClearContents
     Next r
 
@@ -174,6 +178,37 @@ Private Function IsOutlookDesktopRegistered() As Boolean
     progId = CStr(wsh.RegRead("HKLM\SOFTWARE\Classes\Outlook.Application\CLSID\"))
     IsOutlookDesktopRegistered = (Len(progId) > 0)
     On Error GoTo 0
+End Function
+
+' Second copy of the PNG, Content-ID only. Outlook hides this one from the
+' attachment well because the HTML body references cid:daily_report.png.
+' The visible paperclip file is the plain .Attachments.Add above.
+Private Sub AttachDailyPngInline(ByVal mail As Object, ByVal pngPath As String)
+    Dim att As Object
+    Dim inlinePath As String
+    Dim fso As Object
+
+    inlinePath = Environ$("TEMP") & "\daily_report_inline.png"
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(inlinePath) Then fso.DeleteFile inlinePath, True
+    fso.CopyFile pngPath, inlinePath, True
+    On Error GoTo 0
+    If Not FileExistsFast(inlinePath) Then inlinePath = pngPath
+
+    Set att = mail.Attachments.Add(inlinePath)
+    On Error Resume Next
+    att.PropertyAccessor.SetProperty _
+        "http://schemas.microsoft.com/mapi/proptag/0x3712001F", "daily_report.png"
+    att.PropertyAccessor.SetProperty _
+        "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B", True   ' PR_ATTACHMENT_HIDDEN
+    On Error GoTo 0
+End Sub
+
+Private Function DailyPngHtml() As String
+    DailyPngHtml = "<div style='margin-top:14px;background:#ffffff;'>" & _
+        "<img src='cid:daily_report.png' width='1023' alt='Daily wellbore plot' " & _
+        "style='display:block;max-width:100%;height:auto;border:0;'></div>"
 End Function
 
 Private Function FileExistsFast(ByVal filePath As String) As Boolean
@@ -400,6 +435,295 @@ Private Function HtmlEncode(ByVal s As String) As String
     out = Replace(out, vbCr, "<br>")
     HtmlEncode = out
 End Function
+
+Private Function DailyMailSubject() As String
+    Dim code As String, nm As String
+    On Error Resume Next
+    code = Trim$(MDL_Setup.OcJobField("Job Code", "Job ID"))
+    nm = Trim$(MDL_Setup.OcJobField("Job Name"))
+    On Error GoTo 0
+    If code = "" Then code = "Job"
+    If nm = "" Then
+        DailyMailSubject = "Daily Drilling Summary - " & code
+    Else
+        DailyMailSubject = "Daily Drilling Summary - " & code & " - " & nm
+    End If
+End Function
+
+Private Function MailToFromSheet(ByVal ws As Worksheet) As String
+    Dim r As Long, role As String, addr As String
+    MailToFromSheet = ""
+    For r = 29 To 33
+        role = UCase$(Trim$(CStr(ws.Cells(r, "K").Value2 & "")))
+        addr = Trim$(CStr(ws.Cells(r, "L").Value2 & ""))
+        If addr = "" Then GoTo NextTo
+        If role = "TO" Or role = "" Then
+            MailToFromSheet = addr
+            Exit Function
+        End If
+NextTo:
+    Next r
+    MailToFromSheet = Trim$(CStr(ws.Cells(29, "L").Value2 & ""))
+End Function
+
+Private Function MailCcFromSheet(ByVal ws As Worksheet) As String
+    Dim r As Long, role As String, addr As String
+    Dim acc As String
+    acc = ""
+    For r = 29 To 33
+        role = UCase$(Trim$(CStr(ws.Cells(r, "K").Value2 & "")))
+        addr = Trim$(CStr(ws.Cells(r, "L").Value2 & ""))
+        If addr = "" Then GoTo NextCc
+        If r = 29 And (role = "TO" Or role = "") Then GoTo NextCc
+        If role = "TO" Then GoTo NextCc
+        If acc <> "" Then acc = acc & "; "
+        acc = acc & addr
+NextCc:
+    Next r
+    MailCcFromSheet = acc
+End Function
+
+Public Function StoredAttachPath(ByVal cell As Range) As String
+    Dim s As String
+    StoredAttachPath = ""
+    If cell Is Nothing Then Exit Function
+    On Error Resume Next
+    If cell.Comment Is Nothing Then
+        s = ""
+    Else
+        s = Trim$(cell.Comment.text)
+    End If
+    On Error GoTo 0
+    If Len(s) > 0 Then
+        StoredAttachPath = s
+        Exit Function
+    End If
+    On Error Resume Next
+    If cell.Hyperlinks.Count > 0 Then
+        s = Trim$(cell.Hyperlinks(1).Address)
+    End If
+    On Error GoTo 0
+    If Len(s) > 0 Then
+        StoredAttachPath = s
+        Exit Function
+    End If
+    s = Trim$(CStr(cell.Value2 & ""))
+    If InStr(s, "\") > 0 Or InStr(s, "/") > 0 Then StoredAttachPath = s
+End Function
+
+Public Sub StoreAttachPath(ByVal cell As Range, ByVal fullPath As String)
+    Dim leaf As String
+    Dim ws As Worksheet
+    Dim dest As Range
+    Dim wasProt As Boolean
+
+    If cell Is Nothing Then Exit Sub
+    Set dest = cell.MergeArea.Cells(1, 1)
+    Set ws = dest.Worksheet
+    wasProt = SheetUnprotectForVba(ws)
+
+    fullPath = Trim$(fullPath)
+    If InStrRev(fullPath, "\") > 0 Then
+        leaf = mid$(fullPath, InStrRev(fullPath, "\") + 1)
+    ElseIf InStrRev(fullPath, "/") > 0 Then
+        leaf = mid$(fullPath, InStrRev(fullPath, "/") + 1)
+    Else
+        leaf = fullPath
+    End If
+
+    On Error Resume Next
+    dest.ClearComments
+    dest.Hyperlinks.Delete
+    On Error GoTo 0
+
+    dest.Value = leaf
+    If Len(fullPath) > 0 Then
+        On Error Resume Next
+        dest.AddComment fullPath
+        If Not dest.Comment Is Nothing Then
+            dest.Comment.Visible = False
+            dest.Comment.Shape.TextFrame.AutoSize = True
+        End If
+        ' '#' in a filename is a hyperlink fragment and raises 1004 (e.g. BHA # 2.pdf).
+        If InStr(1, fullPath, "#", vbBinaryCompare) = 0 Then
+            dest.Hyperlinks.Add anchor:=dest, Address:=fullPath, TextToDisplay:=leaf
+        End If
+        On Error GoTo 0
+    End If
+
+    If IsKeepAttachRow(dest.Row) Then
+        dest.MergeArea.Interior.Color = KeepAttachFill()
+    Else
+        dest.MergeArea.Interior.Color = RGB(255, 255, 255)
+    End If
+    dest.Font.Color = RGB(0, 0, 0)
+    dest.Font.Size = 8
+    dest.Font.name = "Calibri"
+    dest.HorizontalAlignment = xlLeft
+
+    SheetReprotectAfterVba ws, wasProt
+End Sub
+
+Private Function IsKeepAttachRow(ByVal r As Long) As Boolean
+    IsKeepAttachRow = (r = 32 Or r = 33)
+End Function
+
+Private Function KeepAttachFill() As Long
+    ' Amber pin: last two attachment slots survive EMAIL.
+    KeepAttachFill = RGB(255, 242, 204)
+End Function
+
+Private Sub ApplyKeepAttachStyle(ByVal ws As Worksheet)
+    ws.Range("I32").MergeArea.Interior.Color = KeepAttachFill()
+    ws.Range("I33").MergeArea.Interior.Color = KeepAttachFill()
+    ws.Range("H28:M33").BorderAround LineStyle:=xlContinuous, Weight:=xlThick, Color:=RGB(0, 0, 0)
+End Sub
+
+' Format only — does not change attachment paths or mail addresses.
+Public Sub StylePersistentAttachCells()
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    Dim prevSU As Boolean
+
+    On Error GoTo Fail
+    Set ws = ThisWorkbook.Worksheets("Data")
+    prevSU = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    wasProt = SheetUnprotectForVba(ws)
+    ApplyKeepAttachStyle ws
+    SheetReprotectAfterVba ws, wasProt
+    Application.ScreenUpdating = prevSU
+    Exit Sub
+Fail:
+    On Error Resume Next
+    SheetReprotectAfterVba ws, wasProt
+    Application.ScreenUpdating = True
+End Sub
+
+' Unmerge I28:M33, show filenames, hold full paths in comments, add To/CC emails.
+' Print-friendly: light gray headers, white body, no dark fills.
+Public Sub ApplyDataMailPanel()
+    Dim ws As Worksheet
+    Dim r As Long
+    Dim saved(29 To 33) As String
+    Dim hdr As Long, body As Long, toFill As Long
+    Dim wasProt As Boolean
+
+    On Error GoTo Fail
+    Set ws = ThisWorkbook.Worksheets("Data")
+    wasProt = False
+    On Error Resume Next
+    wasProt = ws.ProtectContents
+    ws.Unprotect
+    On Error GoTo Fail
+
+    For r = 29 To 33
+        saved(r) = StoredAttachPath(ws.Cells(r, "I"))
+        If saved(r) = "" Then saved(r) = Trim$(CStr(ws.Cells(r, "I").MergeArea.Cells(1, 1).Value2 & ""))
+    Next r
+
+    On Error Resume Next
+    ws.Range("I28:M33").UnMerge
+    On Error GoTo Fail
+
+    hdr = RGB(242, 242, 242)
+    body = RGB(255, 255, 255)
+    toFill = RGB(232, 244, 248)
+
+    ws.Range("H28").Value = "File"
+    ws.Range("I28").Value = "Attachment"
+    ws.Range("K28").Value = "Send"
+    ws.Range("L28").Value = "Email"
+    StyleMailHeader ws.Range("H28:I28"), hdr
+    StyleMailHeader ws.Range("K28:M28"), hdr
+
+    For r = 29 To 33
+        ws.Cells(r, "H").Value = "Attach " & CStr(r - 28)
+        ws.Cells(r, "H").Font.Size = 8
+        ws.Cells(r, "H").Font.bold = True
+        ws.Cells(r, "H").Interior.Color = hdr
+        ws.Cells(r, "H").Font.Color = RGB(0, 0, 0)
+
+        If r = 29 Then
+            ws.Cells(r, "K").Value = "To"
+            ws.Cells(r, "K").Interior.Color = toFill
+            ws.Cells(r, "L").Interior.Color = toFill
+            ws.Cells(r, "M").Interior.Color = toFill
+        Else
+            ws.Cells(r, "K").Value = "CC"
+            ws.Cells(r, "K").Interior.Color = body
+            ws.Cells(r, "L").Interior.Color = body
+            ws.Cells(r, "M").Interior.Color = body
+        End If
+        ws.Cells(r, "K").Font.Size = 8
+        ws.Cells(r, "K").Font.bold = True
+        ws.Cells(r, "K").HorizontalAlignment = xlCenter
+        ws.Cells(r, "L").Font.Size = 8
+        ws.Cells(r, "L").HorizontalAlignment = xlLeft
+        StoreAttachPath ws.Cells(r, "I"), saved(r)
+        On Error Resume Next
+        ws.Range(ws.Cells(r, "I"), ws.Cells(r, "J")).Merge
+        ws.Range(ws.Cells(r, "L"), ws.Cells(r, "M")).Merge
+        On Error GoTo Fail
+    Next r
+    On Error Resume Next
+    ws.Range("I28:J28").Merge
+    ws.Range("L28:M28").Merge
+    On Error GoTo Fail
+
+    SeedMailAddressesIfEmpty ws
+    ApplyKeepAttachStyle ws
+
+    If wasProt Then
+        On Error Resume Next
+        ws.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
+    End If
+    Exit Sub
+Fail:
+    On Error Resume Next
+    If wasProt Then ws.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
+End Sub
+
+Private Sub StyleMailHeader(ByVal rng As Range, ByVal fill As Long)
+    With rng
+        .Interior.Color = fill
+        .Font.bold = True
+        .Font.Size = 8
+        .Font.Color = RGB(0, 0, 0)
+        .HorizontalAlignment = xlCenter
+    End With
+End Sub
+
+Private Sub SeedMailAddressesIfEmpty(ByVal ws As Worksheet)
+    Dim raw As String, parts() As String, i As Long, em As String
+    Dim dest As Long
+    If Trim$(CStr(ws.Cells(29, "L").Value2 & "")) <> "" Then Exit Sub
+    On Error Resume Next
+    ws.Cells(29, "L").Value = Trim$(MDL_Setup.OcJobField("CompanyManEmail"))
+    raw = MDL_Setup.OcJobField("ClientEmail")
+    On Error GoTo 0
+    If Len(raw) = 0 Then Exit Sub
+    raw = Replace(Replace(raw, ",", ";"), " ", "")
+    parts = Split(raw, ";")
+    dest = 30
+    For i = LBound(parts) To UBound(parts)
+        If dest > 33 Then Exit For
+        em = LCase$(Trim$(parts(i)))
+        If em = "" Then GoTo NextSeed
+        If InStr(em, "@") < 2 Then GoTo NextSeed
+        If InStr(em, "phxtech.com") > 0 Then GoTo NextSeed
+        ws.Cells(dest, "L").Value = Trim$(parts(i))
+        dest = dest + 1
+NextSeed:
+    Next i
+End Sub
+
+
+
+
+
+
+
 
 
 
