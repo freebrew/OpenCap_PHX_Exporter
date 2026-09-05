@@ -65,7 +65,9 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 - **Plan proximity gauge** (Slidesheet `AA1:AC7`) — dial in AA→AB, GRAVITY/PTB metrics ending in AC; Clear Ranges / Pipe Tally parked in merged `Z1:Z3` / `Z4:Z6`. GRAVITY frame uses the **Well Seeker convention** (perpendicular offset from the plan line, high-side/right decomposition) so UP/DN·LT/RT match office software; when the sail waypoint corridor is active, UP/DN switches to true TVD so the dial agrees with the geo window.
 - **Daily report PNG** (`RenderCorridorPng`) — EMAIL attaches `daily_report.png` as a visible file and inlines a CID copy under the Data table. No daily report PDF is attached. Paper/print theme (white ground, thin strokes). **VERTICAL / BUILD:** three-wall shadow box (back, left, floor) — **plan** in the window, **as-drilled last 24 h** (tight camera on the report day; a long/stale 00:00 day zooms to the last ~150 m + look-ahead), named targets on the plan with a ring **perpendicular to the wellbore**, shadows on all three walls, GN arrow. No min-curve and no surface-to-TD. **LATERAL:** 3D room with geo ± (AB14) and AA14 L/R bands.
 - **Position of Wellbore** — R/L from plan, above/below plan (gauge), distance from current geo target.
-- **Pipe tally, day roll, costs form, TD calc, sheet protect** — supporting field ops macros.
+- **TD calculator** (Data `I53:M55`) — Actual is last Slidesheet survey projected to bit. Planned TD is the last imported plan station. Actual TD is the original remaining-NS/EW MD estimate (`SQRT` × ratio factor from heading vs remaining-vector azimuth), not a copy of Planned TD.
+- **Tool hours** — 3rd-party table seeds the active BHA’s (`H3`) rental / Other Inventory serials (works without a BHA `Source` column). MWD kit, bits, and tubulars stay out. **Orbit RSS** and **iCruise** seed into the Motors table. Hours follow BHA Total Hrs / live `Q24`.
+- **Pipe tally, day roll, costs form, sheet protect** — supporting field ops macros.
 
 Rendered sample: `docs/corridor_24h.png` (24 h shadow box). Older full-well still: `docs/corridor_live.png`.
 
@@ -253,6 +255,12 @@ PHX_FieldCap/
 
 ## Changelog
 
+### Slide Sheet — 2026-09-04
+
+- **Actual TD formula restored** — `TdEstFinal` had copied Planned TD (INC/AZM/NS/EW, and usually MD). `I55:M55` is again the merged original: current MD + remaining NS/EW distance × RF from heading vs remaining-vector azimuth. Planned TD values are unchanged.
+- **3rd-party tools seed without `Source`** — official FieldCap `bha-equipment.csv` has no `Source` column, so the old `Other Inventory` gate left the table empty. `MDL_ToolHours` now also matches inventory `Category = Other Inventory` or a **Rental** description/name on the selected BHA (`H3`). MWD is skipped by inventory **Category** (SubCategory is often blank). Slick/pony collars stay out as tubulars.
+- **Orbit RSS / iCruise → Motors** — those names seed into *Enter Motors & hours below* (and Motors On Location) with mud motors, not the 3rd-party table.
+
 ### Slide Sheet — 2026-08-30
 
 - **AZM-at-bit walk calibrated by results** — X projects the walk with the smaller of dial TF (U) vs demonstrated effective TF (N/O, same sign) instead of trusting the dial literally. Measured on this well: mean walk error 2.48° → 2.05°/stand, worst-case 9.9° → 5.4°, and the AT recommendation at MD 1670.49 lands on the correct side of the target (R13, was L26 from a bit-azm projection 10° hot).
@@ -287,14 +295,14 @@ PHX_FieldCap/
 - Probe on job 21782 showed the blank BHA rows each carry a `JobToolId` — the third-party tools are ordinary JobTools with no `Item` / `ItemSerial` link, their serial and description typed straight onto the JobTool. v3.2.0 only looked for a separate table.
 - `normalizeBhaRow` now reads serial / code / description from the JobTool's own fields when it has no Item link (`Source = Other Inventory`); `buildInventoryCsv` keeps those JobTools instead of dropping them as placeholders and tags them `Category = Other Inventory`. Key picking skips `*Id` / GUID / timestamp fields.
 - Probe reports the item-less JobTools it recognised plus the raw JobTool behind any still-unresolved item; `$metadata` parser tolerates namespace-prefixed tags. `Sub Description` / `SubCategory` carry FieldCap's Category + SubCategory (`DD other`, `MWD other`, `DD drill bit`, `DD tubular`).
-- **Slide Sheet seeding is BHA-scoped** — Refresh adds only the selected BHA's (`H3`) `Other Inventory` serials from `_OC_BHA`, in assembly order, skipping MWD kit, drill bits and tubulars, into blank `O33:O38` rows. Serial matching ignores spaces / dashes / case, so FieldCap's `HMJ 625 62` is your `HMJ-625-62`.
+- **Slide Sheet seeding is BHA-scoped** — Refresh fills *Enter any 3rd Party Tools/hours below* (`O31:O41`) from the selected BHA (`H3`): `Source` / `Category = Other Inventory`, or a Rental description. Skips MWD kit (by Category), drill bits, and tubulars. Serial matching ignores spaces / dashes / case. Orbit RSS and iCruise go to the Motors table (`O45:O55`).
 
 ### v3.2.0 — Other Tools (third-party) in the existing CSVs
 
 - **BHA components without a JobTool now resolve** — third-party / rental tools live in FieldCap's *Other Tools* table, so those rows exported with no serial or description. The exporter discovers the `ToolAssemblyItem` navigation property from OData `$metadata` (falls back to sniffing populated `*Id` keys on bare items), verifies it with a live `$expand`, and fills `Serial #` / `Item Code` / `Description` / `Sub Description`.
 - **No new CSV** — tagged in place: `bha-equipment.csv` gains a trailing `Source` column (`Other Inventory` or blank); `inventory.csv` appends the job's Other Tools with `Category = Other Inventory` (SubCategory = vendor / type when the table has one).
 - **Other Tools Probe** (footer button) — shows the discovered navs / entity sets, the bare BHA items, a sample resolved tool, and the rows that would be appended. Share its output if nothing resolves for a tenant.
-- **Slide Sheet Data** — Setup / Data **Refresh** seeds blank rows of *Enter any 3rd Party Tools/hours below* (`O33:O38`) with any `Other Inventory` serials not already listed; `MDL_ToolHours` then matches them to the selected BHA for `Current Hours`. `C31` *Previous Motor Hours* self-heals to VLOOKUP column 3 (Q, previous) — it pointed at column 4 (R, current) and echoed `C32`.
+- **Slide Sheet Data** — Setup / Data **Refresh** seeds *Enter any 3rd Party Tools/hours below* (`O31:O41`) from the selected BHA. Official FieldCap CSVs without `Source` still seed Rental / Other Inventory rows; Chrome exports that tag `Source` keep working. `MDL_ToolHours` matches them for `Current Hours`. `C31` *Previous Motor Hours* self-heals to VLOOKUP column 3 (Q, previous) — it pointed at column 4 (R, current) and echoed `C32`.
 
 ### v3.1.8 — Ticket Costs by Day Export
 

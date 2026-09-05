@@ -49,13 +49,13 @@ Public Sub GenerateMorningReport()
     ' =========================
     ' MOTOR INFORMATION
     ' =========================
-    Dim motorSN As Variant
+    Dim motorSn As Variant
     Dim config As Variant
     Dim revL As Variant
     Dim pumpRate As Variant
     Dim rotary As Variant
     
-    motorSN = GetByLabelAny(ws, Array("Motor S/N", "Motor SN"))
+    motorSn = GetByLabelAny(ws, Array("Motor S/N", "Motor SN"))
     config = GetByLabelAny(ws, Array("Configuration", "Config"))
     revL = GetByLabelAny(ws, Array("Rev/L", "Rev / L", "RevL"))
     pumpRate = GetByLabelAny(ws, Array("Pump Rate"))
@@ -147,7 +147,7 @@ Public Sub GenerateMorningReport()
     report = report & "Rotating Percentage: " & FormatPercentSmart(rotatingPct) & vbCrLf & vbCrLf
     
     report = report & "Motor Information" & vbCrLf
-    report = report & "Motor S/N: " & CleanText(motorSN) & vbCrLf
+    report = report & "Motor S/N: " & CleanText(motorSn) & vbCrLf
     report = report & "Configuration " & ChrW(8211) & " " & CleanText(config) & vbCrLf
     report = report & "Rev/L: " & FormatRevL(revL) & vbCrLf
     report = report & "Pump Rate: " & FormatPumpRate(pumpRate) & vbCrLf

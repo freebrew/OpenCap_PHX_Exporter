@@ -140,8 +140,7 @@ Public Sub RefreshData()
     On Error GoTo ErrHandler
     DayRoll_BackfillSlideMetrics
 
-    ' 3rd-party tools: seed "Other Inventory" serials from inventory.csv, then
-    ' tool / motor Current Hours (Data R33:R55) from BHA total Q24
+    ' 3rd-party / motor hours: hidden _TH_Hours tracker + active-BHA front tables
     On Error Resume Next
     ToolHours_SeedFromInventory
     ToolHours_Sync
@@ -1677,6 +1676,8 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
 
 
 

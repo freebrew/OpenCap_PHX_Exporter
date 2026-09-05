@@ -73,10 +73,11 @@ Private Const COSTS_COL_TOTAL As Long = 7   ' G
 ' -- Data sheet Mud Motor table (inventory.csv on location; BHA as fallback) ---
 Private Const SH_DATA          As String = "Data"
 Private Const MM_TITLE_TEXT    As String = "Enter Motors"
-Private Const MM_COL_SERIAL    As Long = 15  ' O
-Private Const MM_COL_HOURS     As Long = 18  ' R  (hours stay user-entered except on new job)
-Private Const MM_ROWS          As Long = 14  ' O42:O55 when title is on O39
-Private Const MM_TITLE_TO_DATA As Long = 3   ' rows from title down to first data row
+Private Const MM_COL_SERIAL    As Long = 2   ' B  (Motors On Location B45:B55)
+Private Const MM_COL_HOURS     As Long = 18  ' R  (front motor table; hours owned by MDL_ToolHours)
+Private Const MM_ROWS          As Long = 11  ' B45:B55
+Private Const MM_TITLE_TO_DATA As Long = 0
+Private Const MM_FIRST_ROW     As Long = 45  ' Motors On Location first serial row
 Private Const NM_LAST_JOB      As String = "OC_LastJobId"
 Private Const NM_CSV_ROOT      As String = "OC_CsvRoot"
 
@@ -832,11 +833,11 @@ Public Sub SortCrewByRole()
     ' Insertion sort by (priority, name)
     Dim j As Long, k As Long
     For j = 2 To n
-        Dim tR As String: tR = aRole(j)
+        Dim tr As String: tr = aRole(j)
         Dim tN As String: tN = aName(j)
         Dim tE As String: tE = aEmail(j)
         Dim tP As String: tP = aPhone(j)
-        Dim pj As Long: pj = RolePriority(tR)
+        Dim pj As Long: pj = RolePriority(tr)
         k = j - 1
         Do While k >= 1
             Dim pk As Long: pk = RolePriority(aRole(k))
@@ -850,7 +851,7 @@ Public Sub SortCrewByRole()
                 Exit Do
             End If
         Loop
-        aRole(k + 1) = tR
+        aRole(k + 1) = tr
         aName(k + 1) = tN
         aEmail(k + 1) = tE
         aPhone(k + 1) = tP
@@ -1765,8 +1766,8 @@ End Function
 ' Primary source: _OC_Inventory (inventory.csv) — ItemName contains "Mud Motor"
 ' or SubCategory = motor. SerialNumber is written as-is (PHX-*-PTS and 24X-*-PTS).
 ' Fallback: _OC_BHA Description contains "Mud Motor".
-' Writes serials into Data column O under "Enter Motors & hours below".
-' Hours (column R) are left untouched unless this refresh is a new Job ID.
+' Writes serials into Data B45:B55 (Motors On Location). Front O-table and
+' hours are owned by MDL_ToolHours (hidden _TH_Hours tracker + active BHA).
 ' ================================================================================
 
 Public Sub SyncMudMotorsFromBha()
@@ -1790,7 +1791,6 @@ Private Sub WriteMudMotorsFromInventory()
     Dim n As Long
     Dim i As Long, j As Long
     Dim tmpS As String, tmpQ As Double
-    Dim titleCell As Range
     Dim firstRow As Long, lastRow As Long, capacity As Long
     Dim wasProt As Boolean
     Dim r As Long
@@ -1828,13 +1828,7 @@ Private Sub WriteMudMotorsFromInventory()
         Next j
     Next i
 
-    Set titleCell = wsD.Columns(MM_COL_SERIAL).Find(What:=MM_TITLE_TEXT, _
-        LookIn:=xlValues, LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False)
-    If titleCell Is Nothing Then
-        firstRow = 42
-    Else
-        firstRow = titleCell.Row + MM_TITLE_TO_DATA
-    End If
+    firstRow = MM_FIRST_ROW
     lastRow = firstRow + MM_ROWS - 1
     capacity = MM_ROWS
 
@@ -1843,13 +1837,16 @@ Private Sub WriteMudMotorsFromInventory()
 
     For r = firstRow To lastRow
         ClearMergedCell wsD.Cells(r, MM_COL_SERIAL)
-        If mNewJob Then ClearMergedCell wsD.Cells(r, MM_COL_HOURS)
     Next r
 
     If n > capacity Then n = capacity
     For i = 1 To n
         SetMergedCellValue wsD.Cells(firstRow + i - 1, MM_COL_SERIAL), sns(i)
     Next i
+
+    On Error Resume Next
+    ToolHours_Sync
+    On Error GoTo ReprotectFail
 
     SheetReprotectAfterVba wsD, wasProt
     Exit Sub
@@ -1963,6 +1960,14 @@ Private Sub SetMergedCellValue(ByVal cell As Range, ByVal v As Variant)
     topLeft.Value2 = v
 End Sub
 
+Private Function IsSteerMotorText(ByVal text As String) As Boolean
+    Dim t As String
+    t = CStr(text & "")
+    IsSteerMotorText = (InStr(1, t, "Orbit RSS", vbTextCompare) > 0) _
+                    Or (InStr(1, t, "iCruise", vbTextCompare) > 0) _
+                    Or (InStr(1, t, "i-Cruise", vbTextCompare) > 0)
+End Function
+
 Private Function IsMudMotorInventory(ByVal sn As String, ByVal itemName As String, _
                                     ByVal subCat As String) As Boolean
     IsMudMotorInventory = False
@@ -1973,14 +1978,19 @@ Private Function IsMudMotorInventory(ByVal sn As String, ByVal itemName As Strin
     End If
     If StrComp(Trim$(subCat), "motor", vbTextCompare) = 0 Then
         IsMudMotorInventory = True
+        Exit Function
     End If
+    IsMudMotorInventory = IsSteerMotorText(itemName)
 End Function
 
 Private Function IsMudMotorSerial(ByVal sn As String, ByVal desc As String) As Boolean
     IsMudMotorSerial = False
     If Len(sn) = 0 Then Exit Function
-    If InStr(1, desc, "Mud Motor", vbTextCompare) = 0 Then Exit Function
-    IsMudMotorSerial = True
+    If InStr(1, desc, "Mud Motor", vbTextCompare) > 0 Then
+        IsMudMotorSerial = True
+        Exit Function
+    End If
+    IsMudMotorSerial = IsSteerMotorText(desc)
 End Function
 
 Private Function FindHeaderCol(ws As Worksheet, ByVal headerName As String) As Long
@@ -3106,7 +3116,7 @@ Private Function cAcGreen() As Long:  cAcGreen = RGB(198, 239, 206):  End Functi
 ' instead of leaving the table half empty.
 ' quiet: suppress the informational "more wells than rows" prompt (batch runs).
 Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
-        Optional ByVal maxSF As Double = 1000000#, Optional ByVal quiet As Boolean = False)
+        Optional ByVal maxSF As Double = 1000000#, Optional ByVal Quiet As Boolean = False)
     Application.StatusBar = "Reading anti-collision report..."
 
     Dim acWs As Worksheet
@@ -3176,7 +3186,7 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
     BuildAcTable nHits, aRefMD, aBetween, aSF
 
     ' Fill the "AC Info & Concerns" table on the Data sheet
-    WriteAcConcerns nHits, aWell, aRefMD, aBetween, aSF, quiet
+    WriteAcConcerns nHits, aWell, aRefMD, aBetween, aSF, Quiet
 
     UpdateImportPathDisplay SH_AC
 
@@ -3267,7 +3277,7 @@ End Function
 ' Each row is filled with its faded SF status colour (red/yellow/green).
 Private Sub WriteAcConcerns(nHits As Long, aWell() As String, _
         aRefMD() As Double, aBetween() As Double, aSF() As Double, _
-        Optional ByVal quiet As Boolean = False)
+        Optional ByVal Quiet As Boolean = False)
     Dim ws As Worksheet
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets("Data")
@@ -3336,7 +3346,7 @@ Private Sub WriteAcConcerns(nHits As Long, aWell() As String, _
 
     SheetReprotectAfterVba ws, wasProt
 
-    If nHits > capacity And Not quiet Then
+    If nHits > capacity And Not Quiet Then
         MsgBox "AC import read " & nHits & " offset well(s); this table holds " & _
                capacity & "." & vbCrLf & vbCrLf & _
                "Kept the " & capacity & " with the lowest separation factors and " & _
@@ -4065,6 +4075,8 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
+
 
 
 

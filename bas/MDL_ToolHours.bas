@@ -2,78 +2,80 @@ Attribute VB_Name = "MDL_ToolHours"
 Option Explicit
 
 ' ================================================================================
-'  MDL_ToolHours - Data tab: 3rd-party tool + motor "Current Hours" from Q24
+'  MDL_ToolHours - Data tab 3rd-party + motor hours
 ' ================================================================================
-' Data layout this module relies on:
-'   H3              selected BHA#
-'   Q24             BHA TOTALS circ hours  (=SUM(Q4:Q22))  -> hours on this BHA
-'   C22             selected motor S/N (dropdown fed by B45:B55)
-'   D24:D32         3rd-party tools picked for this BHA (dropdowns fed by O31:O38;
-'                   D29 is the "Activated Agitator Hours" header and never matches)
-'   O28:S30 title   "Enter any 3rd Party Tools/hours below"
-'   O33:P38         3rd-party serial | Q previous | R current | S total (=Q+R)
-'   O39:S41 title   "Enter Motors & hours below"
-'   O42:P55         motor serial     | Q previous | R current | S total (=Q+R)
+' Front tables (equal share of O28:S55):
+'   O28:S29 title   "Enter any 3rd Party Tools/hours below"
+'   O30             headers
+'   O31:S41         11 tool rows  (active BHA only)
+'   O42:S43 title   "Enter Motors & hours below"
+'   O44             headers
+'   O45:S55         11 motor rows (active BHA only)
 '
-' Rule: a serial is "on the selected BHA" when it is picked in D24:D32, or it
-' appears in _OC_BHA (Serial #) for BHA# = H3. OpenCap's export does not carry
-' FieldCap "Other Tools" (third-party) components - those BHA rows come through
-' with no serial - so the D-column picks are the authority for rentals OpenCap
-' does not know about. Matched rows get R = Q24. Unmatched rows are left alone
-' (their R keeps whatever it held), and Q "previous hours" is never touched.
+' Hidden tracker _TH_Hours (VeryHidden): every tool/motor seen on the job.
+'   A Serial | B Kind | C PreJob | D JobHours | E Total | F BhaList
+'   M2:M50   motor serials (dropdown source for Motors On Location)
 '
-' Motor: the row in O42:O55 whose serial = C22 gets R = Q24. If C22 is blank the
-' motor is taken from _OC_BHA (Description contains "Mud Motor") for BHA# = H3.
+' Hours:
+'   Q Previous = PreJob (typed once; auto-filled when a serial is reused)
+'   R Current  = this-job hours: sum of BHA Total Hrs for every BHA that
+'                carried the serial, with the selected BHA using live Q24
+'   S Total    = Q + R
 '
-' Other Inventory: the OpenCap exporter (v3.2.1+) tags third-party tools with
-' Category = "Other Inventory" in inventory.csv and Source = "Other Inventory" in
-' bha-equipment.csv. ToolHours_SeedFromInventory takes the selected BHA's tagged
-' serials (skipping MWD kit, drill bits, tubulars) and drops any not in O33:O38
-' into the first blank row (never clears / reorders rows). Serial matching
-' ignores spaces, dashes and case ("HMJ 625 62" = "HMJ-625-62").
-'
-' C31 "Previous Motor Hours" self-heals to VLOOKUP column 3 (Q previous); the
-' original pointed at column 4 (R current) and echoed C32.
-'
-' Entry points:
-'   ToolHours_Sync                full recompute (RefreshData, Pason form, manual)
-'   ToolHours_OnDataChange        Data Worksheet_Change hook (cheap range gate)
-'   ToolHours_SeedFromInventory   RefreshData, after the CSV import
+' Bits / MWD / tubulars are never seeded. Serial compare ignores spaces/dashes.
+' Official FieldCap BHA CSVs have no Source column — 3rd-party also matches
+' inventory Category "Other Inventory" or a Rental description.
+' Orbit RSS and iCruise seed into the Motors table, not 3rd-party.
 ' ================================================================================
 
 Private Const SH_DATA As String = "Data"
 Private Const SH_BHA As String = "_OC_BHA"
 Private Const SH_INVENTORY As String = "_OC_Inventory"
+Private Const SH_TRACK As String = "_TH_Hours"
 Private Const OTHER_INVENTORY_TAG As String = "Other Inventory"
+Private Const KIND_TOOL As String = "Tool"
+Private Const KIND_MOTOR As String = "Motor"
 
 Private Const CELL_BHA As String = "H3"
 Private Const CELL_HOURS As String = "Q24"
 Private Const CELL_MOTOR As String = "C22"
 Private Const CELL_PREV_MOTOR As String = "C31"
-Private Const PREV_MOTOR_BAD As String = "$O$42:$S$55,4,"
-Private Const PREV_MOTOR_GOOD As String = "$O$42:$S$55,3,"
 Private Const RNG_PICKS As String = "D24:D32"
 Private Const RNG_HOURS_SRC As String = "P4:Q22"
+Private Const RNG_MOL_SN As String = "B45:B55"
 
-Private Const COL_SERIAL As Long = 15      ' O (merged O:P)
-Private Const COL_CURRENT As Long = 18     ' R
+Private Const COL_SERIAL As Long = 15   ' O
+Private Const COL_PREV As Long = 17     ' Q
+Private Const COL_CURRENT As Long = 18  ' R
+Private Const COL_TOTAL As Long = 19    ' S
+
+Private Const TOOLS_TITLE_ROW As Long = 28
+Private Const TOOLS_HEADER_ROW As Long = 30
+Private Const TOOLS_FIRST As Long = 31
+Private Const TOOLS_LAST As Long = 41
+Private Const MOTOR_TITLE_ROW As Long = 42
+Private Const MOTOR_HEADER_ROW As Long = 44
+Private Const MOTOR_FIRST As Long = 45
+Private Const MOTOR_LAST As Long = 55
+
 Private Const TOOLS_TITLE_TOKEN As String = "3rd Party"
-Private Const TOOLS_TITLE_TO_DATA As Long = 5   ' O28 title -> O33 first row
 Private Const MOTOR_TITLE_TOKEN As String = "Enter Motors"
-Private Const MOTOR_TITLE_TO_DATA As Long = 3   ' O39 title -> O42 first row
-Private Const MOTOR_ROWS As Long = 14           ' O42:O55
-
 Private Const TITLE_TYPO As String = "Toosl"
 Private Const TITLE_FIX As String = "Tools"
 
+Private Const TR_SERIAL As Long = 1
+Private Const TR_KIND As Long = 2
+Private Const TR_PREJOB As Long = 3
+Private Const TR_JOB As Long = 4
+Private Const TR_TOTAL As Long = 5
+Private Const TR_BHAS As Long = 6
+Private Const TR_MOTOR_LIST As Long = 13  ' M
+
 Private mBusy As Boolean
 
-' Data Worksheet_Change hook. Only recomputes when an input cell moved.
 Public Sub ToolHours_OnDataChange(ByVal Target As Range)
     Dim ws As Worksheet
     Dim watch As Range
-    Dim toolsFirst As Long, toolsLast As Long
-    Dim motorFirst As Long, motorLast As Long
 
     On Error GoTo Quiet
     If mBusy Then Exit Sub
@@ -81,33 +83,27 @@ Public Sub ToolHours_OnDataChange(ByVal Target As Range)
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
     If Not Target.Worksheet Is ws Then Exit Sub
 
-    LocateTables ws, toolsFirst, toolsLast, motorFirst, motorLast
-
     Set watch = Union(ws.Range(CELL_BHA), ws.Range(CELL_MOTOR), _
                       ws.Range(RNG_PICKS), ws.Range(RNG_HOURS_SRC), _
-                      ws.Range(ws.Cells(toolsFirst, COL_SERIAL), ws.Cells(motorLast, COL_SERIAL)))
+                      ws.Range(ws.Cells(TOOLS_FIRST, COL_SERIAL), ws.Cells(MOTOR_LAST, COL_SERIAL)), _
+                      ws.Range(ws.Cells(TOOLS_FIRST, COL_PREV), ws.Cells(MOTOR_LAST, COL_PREV)))
     If Intersect(Target, watch) Is Nothing Then Exit Sub
 
     ToolHours_Sync
     Exit Sub
 Quiet:
-    ' Never raise out of Worksheet_Change
 End Sub
 
-' Full recompute of R (Current Hours) for the selected BHA's tools + motor.
+Public Sub ToolHours_SeedFromInventory()
+    ToolHours_Sync
+End Sub
+
 Public Sub ToolHours_Sync()
-    Dim ws As Worksheet
+    Dim ws As Worksheet, tr As Worksheet
     Dim wasProt As Boolean
     Dim prevEvents As Boolean
     Dim hrs As Double
     Dim bha As Long
-    Dim motorSn As String
-    Dim picks As Collection
-    Dim bhaSerials As Collection
-    Dim toolsFirst As Long, toolsLast As Long
-    Dim motorFirst As Long, motorLast As Long
-    Dim r As Long
-    Dim sn As String
 
     If mBusy Then Exit Sub
     If Not SheetExistsTH(SH_DATA) Then Exit Sub
@@ -124,39 +120,22 @@ Public Sub ToolHours_Sync()
 
     hrs = NumOrZero(ws.Range(CELL_HOURS).Value)
     bha = BhaNumber(ws.Range(CELL_BHA).Value)
-    motorSn = Trim$(CStr(ws.Range(CELL_MOTOR).Value & ""))
-
-    Set picks = CollectPicks(ws)
-    Set bhaSerials = CollectBhaSerials(bha)
-    If Len(motorSn) = 0 Then motorSn = BhaMotorSerial(bha)
-
-    LocateTables ws, toolsFirst, toolsLast, motorFirst, motorLast
 
     wasProt = SheetUnprotectForVba(ws)
     On Error GoTo FailProt
 
     FixTitleSpelling ws
-    FixPrevMotorHoursFormula ws
-
-    ' 3rd-party tools: on this BHA if picked in D24:D32 or listed in _OC_BHA
-    For r = toolsFirst To toolsLast
-        sn = SerialAt(ws, r)
-        If Len(sn) > 0 Then
-            If InSet(picks, sn) Or InSet(bhaSerials, sn) Then
-                WriteCurrent ws, r, hrs
-            End If
-        End If
-    Next r
-
-    ' Motor: the selected motor S/N only
-    If Len(motorSn) > 0 Then
-        For r = motorFirst To motorLast
-            sn = SerialAt(ws, r)
-            If Len(sn) > 0 Then
-                If NormSerial(sn) = NormSerial(motorSn) Then WriteCurrent ws, r, hrs
-            End If
-        Next r
-    End If
+    HarvestFrontPrevious ws
+    EnsureLayout ws
+    Set tr = EnsureTracker()
+    HarvestFrontPrevious ws
+    UpsertKnownSerials tr
+    RecomputeJobHours tr, bha, hrs
+    PaintFrontTools ws, tr, bha
+    PaintFrontMotors ws, tr, bha
+    WriteMotorList tr
+    FixDependentFormulas ws
+    UnlockFrontTables ws
 
     SheetReprotectAfterVba ws, wasProt
     Application.EnableEvents = prevEvents
@@ -172,103 +151,897 @@ Fail:
     mBusy = False
 End Sub
 
-' Fill blank 3rd-party rows with the selected BHA's "Other Inventory" serials.
-' Source: _OC_BHA rows for BHA# = H3 with Source = "Other Inventory" (assembly
-' order). Drill bits and tubulars are skipped (SubCategory from _OC_Inventory).
-' Serials already listed (compared ignoring spaces / dashes / case) are left as
-' typed; rows are never cleared or reordered; stops when the table is full.
-Public Sub ToolHours_SeedFromInventory()
-    Dim ws As Worksheet, bhaWs As Worksheet
-    Dim wasProt As Boolean
-    Dim prevEvents As Boolean
-    Dim cNum As Long, cSn As Long, cSrc As Long
-    Dim lastR As Long, r As Long
-    Dim bha As Long
-    Dim toolsFirst As Long, toolsLast As Long
-    Dim motorFirst As Long, motorLast As Long
-    Dim existing As New Collection
-    Dim skipKinds As Collection
-    Dim sn As String
-    Dim blankRow As Long
+' ------------------------------------------------------------------------------
+'  Hidden tracker
+' ------------------------------------------------------------------------------
 
-    If mBusy Then Exit Sub
-    If Not SheetExistsTH(SH_DATA) Then Exit Sub
-    If Not SheetExistsTH(SH_BHA) Then Exit Sub
-    Set ws = ThisWorkbook.Worksheets(SH_DATA)
-    Set bhaWs = ThisWorkbook.Worksheets(SH_BHA)
+Private Function EnsureTracker() As Worksheet
+    Dim ws As Worksheet
+    If SheetExistsTH(SH_TRACK) Then
+        Set ws = ThisWorkbook.Worksheets(SH_TRACK)
+    Else
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.name = SH_TRACK
+    End If
+    ws.Visible = xlSheetVeryHidden
+    If StrComp(CStr(ws.Cells(1, TR_SERIAL).Value & ""), "Serial", vbTextCompare) <> 0 Then
+        ws.Cells(1, TR_SERIAL).Value = "Serial"
+        ws.Cells(1, TR_KIND).Value = "Kind"
+        ws.Cells(1, TR_PREJOB).Value = "PreJobHours"
+        ws.Cells(1, TR_JOB).Value = "JobHours"
+        ws.Cells(1, TR_TOTAL).Value = "Total"
+        ws.Cells(1, TR_BHAS).Value = "BhaList"
+        ws.Cells(1, TR_MOTOR_LIST).Value = "MotorList"
+    End If
+    Set EnsureTracker = ws
+End Function
 
-    bha = BhaNumber(ws.Range(CELL_BHA).Value)
-    If bha <= 0 Then Exit Sub
-    cNum = HeaderCol(bhaWs, "BHA #")
-    cSn = HeaderCol(bhaWs, "Serial #")
-    cSrc = HeaderCol(bhaWs, "Source")
-    If cNum = 0 Or cSn = 0 Or cSrc = 0 Then Exit Sub   ' pre-v3.2 export: nothing tagged
+Private Function TrackerLastRow(ByVal tr As Worksheet) As Long
+    Dim r As Long
+    r = tr.Cells(tr.Rows.Count, TR_SERIAL).End(xlUp).Row
+    If r < 1 Then r = 1
+    TrackerLastRow = r
+End Function
 
-    ' inventory SubCategory is "<Category> <SubCategory>": "DD other", "MWD other",
-    ' "DD drill bit", "DD tubular" - skip MWD kit, bits and tubulars
-    Set skipKinds = InventorySerialsOfKind("MWD", "drill bit", "tubular")
-
-    LocateTables ws, toolsFirst, toolsLast, motorFirst, motorLast
-    For r = toolsFirst To toolsLast
-        sn = SerialAt(ws, r)
-        If Len(sn) > 0 Then AddUnique existing, sn
-    Next r
-
-    mBusy = True
-    prevEvents = Application.EnableEvents
-    Application.EnableEvents = False
-    On Error GoTo Fail
-    wasProt = SheetUnprotectForVba(ws)
-    On Error GoTo FailProt
-
-    lastR = bhaWs.Cells(bhaWs.Rows.Count, cNum).End(xlUp).Row
+Private Function TrackerFindRow(ByVal tr As Worksheet, ByVal sn As String) As Long
+    Dim r As Long, lastR As Long, key As String
+    TrackerFindRow = 0
+    key = NormSerial(sn)
+    If Len(key) = 0 Then Exit Function
+    lastR = TrackerLastRow(tr)
     For r = 2 To lastR
-        If BhaNumber(bhaWs.Cells(r, cNum).Value) = bha Then
-            If StrComp(Trim$(CStr(bhaWs.Cells(r, cSrc).Value & "")), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
-                sn = Trim$(CStr(bhaWs.Cells(r, cSn).Value & ""))
-                If Len(sn) > 0 Then
-                    If Not InSet(existing, sn) And Not InSet(skipKinds, sn) Then
-                        blankRow = FirstBlankSerialRow(ws, toolsFirst, toolsLast)
-                        If blankRow = 0 Then Exit For
-                        SetSerialAt ws, blankRow, sn
-                        AddUnique existing, sn
+        If NormSerial(CStr(tr.Cells(r, TR_SERIAL).Value & "")) = key Then
+            TrackerFindRow = r
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Function TrackerUpsert(ByVal tr As Worksheet, ByVal sn As String, _
+                               ByVal kind As String) As Long
+    Dim r As Long
+    TrackerUpsert = 0
+    If Not LooksLikeSerial(sn) Then Exit Function
+    r = TrackerFindRow(tr, sn)
+    If r = 0 Then
+        r = TrackerLastRow(tr) + 1
+        If r < 2 Then r = 2
+        tr.Cells(r, TR_SERIAL).numberFormat = "@"
+        tr.Cells(r, TR_SERIAL).Value = sn
+        tr.Cells(r, TR_PREJOB).Value = 0
+        tr.Cells(r, TR_JOB).Value = 0
+        tr.Cells(r, TR_TOTAL).Value = 0
+    End If
+    If Len(kind) > 0 Then tr.Cells(r, TR_KIND).Value = kind
+    TrackerUpsert = r
+End Function
+
+Private Sub HarvestFrontPrevious(ByVal ws As Worksheet)
+    Dim tr As Worksheet
+    Set tr = EnsureTracker()
+    If LayoutIsNew(ws) Then
+        HarvestRange ws, tr, TOOLS_FIRST, TOOLS_LAST, KIND_TOOL
+        HarvestRange ws, tr, MOTOR_FIRST, MOTOR_LAST, KIND_MOTOR
+    Else
+        HarvestRange ws, tr, 33, 38, KIND_TOOL
+        HarvestRange ws, tr, 42, 55, KIND_MOTOR
+    End If
+End Sub
+
+Private Sub HarvestRange(ByVal ws As Worksheet, ByVal tr As Worksheet, _
+                         ByVal firstR As Long, ByVal lastR As Long, ByVal kind As String)
+    Dim r As Long, trR As Long
+    Dim sn As String
+    Dim prev As Double
+    For r = firstR To lastR
+        sn = SerialAt(ws, r)
+        If LooksLikeSerial(sn) Then
+            prev = NumOrZero(ws.Cells(r, COL_PREV).Value)
+            trR = TrackerUpsert(tr, sn, kind)
+            If prev > 0 Then tr.Cells(trR, TR_PREJOB).Value = prev
+        End If
+    Next r
+End Sub
+
+Private Function LooksLikeSerial(ByVal sn As String) As Boolean
+    LooksLikeSerial = False
+    sn = Trim$(sn)
+    If Len(NormSerial(sn)) < 3 Then Exit Function
+    If InStr(1, sn, "hours below", vbTextCompare) > 0 Then Exit Function
+    If StrComp(sn, "Serial Number", vbTextCompare) = 0 Then Exit Function
+    LooksLikeSerial = True
+End Function
+
+Private Sub DedupTracker(ByVal tr As Worksheet)
+    Dim r As Long, other As Long
+    Dim sn As String, key As String
+    For r = TrackerLastRow(tr) To 2 Step -1
+        sn = CanonicalSerial(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
+        If LooksLikeSerial(sn) Then
+            tr.Cells(r, TR_SERIAL).numberFormat = "@"
+            tr.Cells(r, TR_SERIAL).Value = sn
+        End If
+        key = NormSerial(sn)
+        If Len(key) = 0 Then GoTo NextDedup
+        For other = 2 To r - 1
+            If NormSerial(CStr(tr.Cells(other, TR_SERIAL).Value & "")) = key Then
+                If NumOrZero(tr.Cells(r, TR_PREJOB).Value) > NumOrZero(tr.Cells(other, TR_PREJOB).Value) Then
+                    tr.Cells(other, TR_PREJOB).Value = tr.Cells(r, TR_PREJOB).Value
+                End If
+                tr.Rows(r).Delete
+                Exit For
+            End If
+        Next other
+NextDedup:
+    Next r
+End Sub
+
+Private Sub PurgeBadTrackerRows(ByVal tr As Worksheet)
+    Dim r As Long
+    For r = TrackerLastRow(tr) To 2 Step -1
+        If Not LooksLikeSerial(CStr(tr.Cells(r, TR_SERIAL).Value & "")) Then
+            tr.Rows(r).Delete
+        End If
+    Next r
+End Sub
+
+Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
+    Dim bhaWs As Worksheet
+    Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long
+    Dim lastR As Long, r As Long
+    Dim sn As String, src As String, desc As String
+    Dim cat As String, subCat As String, itemName As String
+
+    PurgeBadTrackerRows tr
+    DedupTracker tr
+
+    If SheetExistsTH(SH_BHA) Then
+        Set bhaWs = ThisWorkbook.Worksheets(SH_BHA)
+        cNum = HeaderCol(bhaWs, "BHA #")
+        cSn = HeaderCol(bhaWs, "Serial #")
+        cSrc = HeaderCol(bhaWs, "Source")
+        cDesc = HeaderCol(bhaWs, "Description")
+        If cSn > 0 Then
+            lastR = bhaWs.Cells(bhaWs.Rows.Count, cSn).End(xlUp).Row
+            For r = 2 To lastR
+                sn = CellSerial(bhaWs.Cells(r, cSn))
+                If LooksLikeSerial(sn) Then
+                    src = ""
+                    desc = ""
+                    If cSrc > 0 Then src = CStr(bhaWs.Cells(r, cSrc).Value & "")
+                    If cDesc > 0 Then desc = CStr(bhaWs.Cells(r, cDesc).Value & "")
+                    InventoryMeta sn, cat, subCat, itemName
+                    If IsMotorLike(sn, desc, cat, subCat, itemName) Then
+                        TrackerUpsert tr, sn, KIND_MOTOR
+                    ElseIf IsThirdPartySeed(src, sn, desc, cat, subCat, itemName) Then
+                        TrackerUpsert tr, sn, KIND_TOOL
                     End If
+                End If
+            Next r
+        End If
+    End If
+
+    UpsertMotorsFromInventory tr
+End Sub
+
+Private Sub UpsertMotorsFromInventory(ByVal tr As Worksheet)
+    Dim inv As Worksheet
+    Dim cSn As Long, cName As Long, cSub As Long
+    Dim lastR As Long, r As Long
+    Dim sn As String, itemName As String, subCat As String
+
+    If Not SheetExistsTH(SH_INVENTORY) Then Exit Sub
+    Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
+    cSn = HeaderCol(inv, "SerialNumber")
+    If cSn = 0 Then cSn = HeaderCol(inv, "Serial #")
+    cName = HeaderCol(inv, "ItemName")
+    If cName = 0 Then cName = HeaderCol(inv, "Description")
+    cSub = HeaderCol(inv, "SubCategory")
+    If cSn = 0 Then Exit Sub
+    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    For r = 2 To lastR
+        sn = CellSerial(inv.Cells(r, cSn))
+        itemName = ""
+        subCat = ""
+        If cName > 0 Then itemName = CStr(inv.Cells(r, cName).Value & "")
+        If cSub > 0 Then subCat = CStr(inv.Cells(r, cSub).Value & "")
+        If Len(sn) > 0 Then
+            If IsMotorLike(sn, itemName, "", subCat, itemName) Then
+                TrackerUpsert tr, sn, KIND_MOTOR
+            End If
+        End If
+    Next r
+End Sub
+
+Private Sub RecomputeJobHours(ByVal tr As Worksheet, ByVal curBha As Long, ByVal liveHrs As Double)
+    Dim bhaHrs As Collection
+    Dim bhaMembers As Collection
+    Dim lastR As Long, r As Long
+    Dim sn As String, key As String
+    Dim job As Double
+    Dim bhas As String
+    Dim v As Variant
+
+    Set bhaHrs = BhaHoursMap()
+    Set bhaMembers = BhaMembersMap()
+    lastR = TrackerLastRow(tr)
+    For r = 2 To lastR
+        sn = Trim$(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
+        key = NormSerial(sn)
+        job = 0
+        bhas = ""
+        If Len(key) > 0 Then
+            If InSet(bhaMembers, key) Then
+                bhas = CStr(bhaMembers.Item(key))
+                job = SumBhaHoursFor(bhas, bhaHrs, curBha, liveHrs)
+            End If
+        End If
+        tr.Cells(r, TR_JOB).Value = job
+        tr.Cells(r, TR_BHAS).Value = bhas
+        tr.Cells(r, TR_TOTAL).Value = NumOrZero(tr.Cells(r, TR_PREJOB).Value) + job
+    Next r
+End Sub
+
+' "3,1,2" -> hours of those BHAs; current BHA uses live Q24.
+Private Function SumBhaHoursFor(ByVal bhaList As String, ByVal bhaHrs As Collection, _
+                                ByVal curBha As Long, ByVal liveHrs As Double) As Double
+    Dim parts() As String
+    Dim i As Long, n As Long
+    Dim seen As New Collection
+    Dim tot As Double
+    Dim key As String
+
+    tot = 0
+    parts = Split(bhaList, ",")
+    For i = LBound(parts) To UBound(parts)
+        n = BhaNumber(Trim$(parts(i)))
+        If n > 0 Then
+            key = CStr(n)
+            If Not InSet(seen, key) Then
+                AddUnique seen, key
+                If n = curBha Then
+                    tot = tot + liveHrs
+                ElseIf InSet(bhaHrs, key) Then
+                    tot = tot + CDbl(bhaHrs.Item(key))
+                End If
+            End If
+        End If
+    Next i
+    SumBhaHoursFor = tot
+End Function
+
+' BHA# -> BHA Total Hrs (first row of that BHA).
+Private Function BhaHoursMap() As Collection
+    Dim col As New Collection
+    Dim ws As Worksheet
+    Dim cNum As Long, cHrs As Long
+    Dim lastR As Long, r As Long
+    Dim n As Long
+    Dim key As String
+
+    Set BhaHoursMap = col
+    If Not SheetExistsTH(SH_BHA) Then Exit Function
+    Set ws = ThisWorkbook.Worksheets(SH_BHA)
+    cNum = HeaderCol(ws, "BHA #")
+    cHrs = HeaderCol(ws, "BHA Total Hrs")
+    If cNum = 0 Or cHrs = 0 Then Exit Function
+    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    For r = 2 To lastR
+        n = BhaNumber(ws.Cells(r, cNum).Value)
+        If n > 0 Then
+            key = CStr(n)
+            If Not InSet(col, key) Then
+                On Error Resume Next
+                col.Add NumOrZero(ws.Cells(r, cHrs).Value), key
+                On Error GoTo 0
+            End If
+        End If
+    Next r
+End Function
+
+' normSerial -> comma-separated BHA# list
+Private Function BhaMembersMap() As Collection
+    Dim col As New Collection
+    Dim ws As Worksheet
+    Dim cNum As Long, cSn As Long
+    Dim lastR As Long, r As Long
+    Dim n As Long
+    Dim sn As String, key As String, cur As String
+
+    Set BhaMembersMap = col
+    If Not SheetExistsTH(SH_BHA) Then Exit Function
+    Set ws = ThisWorkbook.Worksheets(SH_BHA)
+    cNum = HeaderCol(ws, "BHA #")
+    cSn = HeaderCol(ws, "Serial #")
+    If cNum = 0 Or cSn = 0 Then Exit Function
+    lastR = ws.Cells(ws.Rows.Count, cSn).End(xlUp).Row
+    For r = 2 To lastR
+        n = BhaNumber(ws.Cells(r, cNum).Value)
+        sn = CellSerial(ws.Cells(r, cSn))
+        key = NormSerial(sn)
+        If n > 0 And Len(key) > 0 Then
+            cur = ""
+            On Error Resume Next
+            cur = CStr(col.Item(key))
+            On Error GoTo 0
+            If Len(cur) = 0 Then
+                col.Add CStr(n), key
+            ElseIf InStr("," & cur & ",", "," & CStr(n) & ",") = 0 Then
+                col.Remove key
+                col.Add cur & "," & CStr(n), key
+            End If
+        End If
+    Next r
+End Function
+
+Private Sub WriteMotorList(ByVal tr As Worksheet)
+    Dim lastR As Long, r As Long, dest As Long
+    Dim sn As String
+
+    tr.Range("M2:M80").ClearContents
+    dest = 2
+    lastR = TrackerLastRow(tr)
+    For r = 2 To lastR
+        If StrComp(CStr(tr.Cells(r, TR_KIND).Value & ""), KIND_MOTOR, vbTextCompare) = 0 Then
+            sn = Trim$(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
+            If Len(sn) > 0 Then
+                tr.Cells(dest, TR_MOTOR_LIST).numberFormat = "@"
+                tr.Cells(dest, TR_MOTOR_LIST).Value = sn
+                dest = dest + 1
+            End If
+        End If
+    Next r
+End Sub
+
+' ------------------------------------------------------------------------------
+'  Front tables
+' ------------------------------------------------------------------------------
+
+Private Function LayoutIsNew(ByVal ws As Worksheet) As Boolean
+    Dim h As String
+    h = Trim$(CStr(ws.Cells(TOOLS_HEADER_ROW, COL_SERIAL).Value & ""))
+    LayoutIsNew = (StrComp(h, "Serial Number", vbTextCompare) = 0) _
+                  And (InStr(1, CStr(ws.Cells(TOOLS_TITLE_ROW, COL_SERIAL).Value & ""), TOOLS_TITLE_TOKEN, vbTextCompare) > 0)
+End Function
+
+Private Sub EnsureLayout(ByVal ws As Worksheet)
+    If LayoutIsNew(ws) Then Exit Sub
+    RebuildEqualTables ws
+End Sub
+
+Private Sub RebuildEqualTables(ByVal ws As Worksheet)
+    Dim rng As Range
+
+    On Error Resume Next
+    ws.Range("O28:S55").UnMerge
+    On Error GoTo 0
+
+    ws.Range("O28:S55").ClearContents
+    ws.Range("O28:S55").ClearFormats
+
+    Set rng = ws.Range("O28:S29")
+    rng.Merge
+    rng.Value = "Enter any 3rd Party Tools/hours below"
+    rng.Font.bold = True
+    rng.HorizontalAlignment = xlCenter
+    rng.VerticalAlignment = xlCenter
+    rng.Interior.Color = RGB(221, 235, 247)
+
+    PaintHeaderRow ws, TOOLS_HEADER_ROW
+    PaintDataRows ws, TOOLS_FIRST, TOOLS_LAST
+
+    Set rng = ws.Range("O42:S43")
+    rng.Merge
+    rng.Value = "Enter Motors & hours below"
+    rng.Font.bold = True
+    rng.HorizontalAlignment = xlCenter
+    rng.VerticalAlignment = xlCenter
+    rng.Interior.Color = RGB(252, 228, 214)
+
+    PaintHeaderRow ws, MOTOR_HEADER_ROW
+    PaintDataRows ws, MOTOR_FIRST, MOTOR_LAST
+End Sub
+
+Private Sub PaintHeaderRow(ByVal ws As Worksheet, ByVal r As Long)
+    Dim rng As Range
+    Set rng = ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_SERIAL + 1))
+    rng.Merge
+    rng.Value = "Serial Number"
+    rng.Font.bold = True
+    rng.HorizontalAlignment = xlCenter
+    ws.Cells(r, COL_PREV).Value = "Previous hours"
+    ws.Cells(r, COL_PREV).Font.bold = True
+    ws.Cells(r, COL_CURRENT).Value = "Current Hours"
+    ws.Cells(r, COL_CURRENT).Font.bold = True
+    ws.Cells(r, COL_TOTAL).Value = "Total"
+    ws.Cells(r, COL_TOTAL).Font.bold = True
+    ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_TOTAL)).Interior.Color = RGB(217, 217, 217)
+    ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_TOTAL)).Borders.LineStyle = xlContinuous
+End Sub
+
+Private Sub PaintDataRows(ByVal ws As Worksheet, ByVal firstR As Long, ByVal lastR As Long)
+    Dim r As Long
+    Dim rng As Range
+    For r = firstR To lastR
+        On Error Resume Next
+        ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_SERIAL + 1)).UnMerge
+        On Error GoTo 0
+        Set rng = ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_SERIAL + 1))
+        rng.Merge
+        rng.numberFormat = "@"
+        rng.HorizontalAlignment = xlLeft
+        ws.Cells(r, COL_PREV).numberFormat = "0.00"
+        ws.Cells(r, COL_CURRENT).numberFormat = "0.00"
+        ws.Cells(r, COL_TOTAL).Formula = "=IFERROR(IF(O" & r & "<>"""",SUM(Q" & r & ":R" & r & "),""""),"""")"
+        ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_TOTAL)).Borders.LineStyle = xlContinuous
+    Next r
+End Sub
+
+Private Sub PaintFrontTools(ByVal ws As Worksheet, ByVal tr As Worksheet, ByVal bha As Long)
+    Dim sns As Collection
+    Dim i As Long, r As Long
+
+    Set sns = ActiveBhaToolSerials(bha)
+
+    r = TOOLS_FIRST
+    For i = 1 To sns.Count
+        If r > TOOLS_LAST Then Exit For
+        WriteFrontRow ws, tr, r, CStr(sns.Item(i)), KIND_TOOL
+        r = r + 1
+    Next i
+    For r = r To TOOLS_LAST
+        ClearFrontRow ws, r
+    Next r
+End Sub
+
+Private Sub PaintFrontMotors(ByVal ws As Worksheet, ByVal tr As Worksheet, ByVal bha As Long)
+    Dim sns As Collection
+    Dim motorSn As String
+    Dim i As Long, r As Long
+
+    Set sns = New Collection
+    motorSn = Trim$(CStr(ws.Range(CELL_MOTOR).Value & ""))
+    If Len(motorSn) = 0 Then motorSn = BhaMotorSerial(bha)
+    If Len(motorSn) > 0 Then AddUnique sns, motorSn
+
+    AppendBhaMotors sns, bha
+
+    r = MOTOR_FIRST
+    For i = 1 To sns.Count
+        If r > MOTOR_LAST Then Exit For
+        WriteFrontRow ws, tr, r, CStr(sns.Item(i)), KIND_MOTOR
+        r = r + 1
+    Next i
+    For r = r To MOTOR_LAST
+        ClearFrontRow ws, r
+    Next r
+End Sub
+
+Private Sub WriteFrontRow(ByVal ws As Worksheet, ByVal tr As Worksheet, _
+                          ByVal r As Long, ByVal sn As String, ByVal kind As String)
+    Dim trR As Long
+    trR = TrackerUpsert(tr, sn, kind)
+    SetSerialAt ws, r, sn
+    WriteNum ws, r, COL_PREV, NumOrZero(tr.Cells(trR, TR_PREJOB).Value)
+    WriteNum ws, r, COL_CURRENT, NumOrZero(tr.Cells(trR, TR_JOB).Value)
+End Sub
+
+Private Sub ClearFrontRow(ByVal ws As Worksheet, ByVal r As Long)
+    Dim c As Range
+    Set c = ws.Cells(r, COL_SERIAL)
+    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    If Len(Trim$(CStr(c.Value & ""))) = 0 _
+       And IsEmpty(ws.Cells(r, COL_PREV).Value) _
+       And IsEmpty(ws.Cells(r, COL_CURRENT).Value) Then Exit Sub
+    c.numberFormat = "@"
+    c.Value = ""
+    ws.Cells(r, COL_PREV).ClearContents
+    ws.Cells(r, COL_CURRENT).ClearContents
+End Sub
+
+Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
+    Dim col As New Collection
+    Dim ws As Worksheet
+    Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long
+    Dim lastR As Long, r As Long
+    Dim sn As String, src As String, desc As String
+    Dim cat As String, subCat As String, itemName As String
+
+    Set ActiveBhaToolSerials = col
+    If bha <= 0 Then Exit Function
+    If Not SheetExistsTH(SH_BHA) Then Exit Function
+    Set ws = ThisWorkbook.Worksheets(SH_BHA)
+    cNum = HeaderCol(ws, "BHA #")
+    cSn = HeaderCol(ws, "Serial #")
+    cSrc = HeaderCol(ws, "Source")
+    cDesc = HeaderCol(ws, "Description")
+    If cNum = 0 Or cSn = 0 Then Exit Function
+    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    For r = 2 To lastR
+        If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
+            sn = CellSerial(ws.Cells(r, cSn))
+            If LooksLikeSerial(sn) Then
+                src = ""
+                desc = ""
+                If cSrc > 0 Then src = CStr(ws.Cells(r, cSrc).Value & "")
+                If cDesc > 0 Then desc = CStr(ws.Cells(r, cDesc).Value & "")
+                InventoryMeta sn, cat, subCat, itemName
+                If IsThirdPartySeed(src, sn, desc, cat, subCat, itemName) Then
+                    AddUnique col, sn
                 End If
             End If
         End If
     Next r
+End Function
 
-    SheetReprotectAfterVba ws, wasProt
-    Application.EnableEvents = prevEvents
-    mBusy = False
-    Exit Sub
+Private Sub AppendBhaMotors(ByVal col As Collection, ByVal bha As Long)
+    Dim ws As Worksheet
+    Dim cNum As Long, cSn As Long, cDesc As Long
+    Dim lastR As Long, r As Long
+    Dim sn As String
 
-FailProt:
+    If bha <= 0 Then Exit Sub
+    If Not SheetExistsTH(SH_BHA) Then Exit Sub
+    Set ws = ThisWorkbook.Worksheets(SH_BHA)
+    cNum = HeaderCol(ws, "BHA #")
+    cSn = HeaderCol(ws, "Serial #")
+    cDesc = HeaderCol(ws, "Description")
+    If cNum = 0 Or cSn = 0 Or cDesc = 0 Then Exit Sub
+    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    For r = 2 To lastR
+        If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
+            sn = CellSerial(ws.Cells(r, cSn))
+            If LooksLikeSerial(sn) Then
+                If IsMotorLike(sn, CStr(ws.Cells(r, cDesc).Value & ""), "", "", "") Then
+                    AddUnique col, sn
+                End If
+            End If
+        End If
+    Next r
+End Sub
+
+Private Sub FixDependentFormulas(ByVal ws As Worksheet)
+    Dim r As Long
+    Dim toolTbl As String, motorTbl As String
+    Dim f As String
+
+    toolTbl = "$O$" & TOOLS_FIRST & ":$S$" & TOOLS_LAST
+    motorTbl = "$O$" & MOTOR_FIRST & ":$S$" & MOTOR_LAST
+
+    For r = 24 To 28
+        SetLookup ws.Cells(r, 5), "D" & r, toolTbl, 3   ' E Start = Previous
+        SetLookupBlank ws.Cells(r, 6), "D" & r, toolTbl, 5  ' F Total
+        SetListValidation ws.Cells(r, 4), "=$O$" & TOOLS_FIRST & ":$O$" & TOOLS_LAST
+    Next r
+
+    ' D29 is "Activated Agitator Hours" header — leave it.
+    SetLookup ws.Cells(30, 5), "D30", toolTbl, 3
+    SetLookupBlank ws.Cells(30, 6), "D30", toolTbl, 5
+    SetListValidation ws.Cells(30, 4), "=$O$" & TOOLS_FIRST & ":$O$" & TOOLS_LAST
+
+    For r = 31 To 32
+        If r = 31 Then
+            SetLookup ws.Cells(r, 5), "$D31", toolTbl, 3
+            SetLookup ws.Cells(r, 6), "$D31", toolTbl, 5
+        Else
+            SetLookup ws.Cells(r, 5), "D32", toolTbl, 3
+        End If
+        SetListValidation ws.Cells(r, 4), "=$O$" & TOOLS_FIRST & ":$O$" & TOOLS_LAST
+    Next r
+
+    ws.Range(CELL_PREV_MOTOR).Formula = "=IFERROR(VLOOKUP($C$22," & motorTbl & ",3,0),"""")"
+
+    For r = 45 To 55
+        ws.Cells(r, 6).Formula = "=IFERROR(VLOOKUP(B" & r & "," & motorTbl & ",5,FALSE),IFERROR(VLOOKUP(B" & r & "," & SH_TRACK & "!$A$2:$E$80,5,FALSE),""""))"
+    Next r
+
+    SetListValidation ws.Range(CELL_MOTOR), "=$B$45:$B$55"
+
+    f = CStr(ws.Range("C23").Formula & "")
+    If InStr(1, f, "B45:F52", vbTextCompare) > 0 Then
+        ws.Range("C23").Formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
+    End If
+    f = CStr(ws.Range("C24").Formula & "")
+    If InStr(1, f, "B45:F52", vbTextCompare) > 0 Then
+        ws.Range("C24").Formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
+    End If
+End Sub
+
+Private Sub SetLookup(ByVal c As Range, ByVal keyAddr As String, _
+                      ByVal tbl As String, ByVal col As Long)
+    Dim f As String
+    f = CStr(c.Formula & "")
+    If Len(f) = 0 Then Exit Sub
+    If InStr(1, f, "VLOOKUP", vbTextCompare) = 0 Then Exit Sub
+    c.Formula = "=IFERROR(VLOOKUP(" & keyAddr & "," & tbl & "," & col & ",FALSE),"""")"
+End Sub
+
+Private Sub SetLookupBlank(ByVal c As Range, ByVal keyAddr As String, _
+                           ByVal tbl As String, ByVal col As Long)
+    Dim f As String
+    f = CStr(c.Formula & "")
+    If Len(f) = 0 Then Exit Sub
+    If InStr(1, f, "VLOOKUP", vbTextCompare) = 0 Then Exit Sub
+    c.Formula = "=IFERROR(IF(ISBLANK(" & keyAddr & "),"""",VLOOKUP(" & keyAddr & "," & tbl & "," & col & ",0)),"""")"
+End Sub
+
+Private Sub SetListValidation(ByVal c As Range, ByVal listRef As String)
     On Error Resume Next
-    SheetReprotectAfterVba ws, wasProt
-Fail:
+    If c.Validation.Type = 3 Or Len(CStr(c.Validation.Formula1 & "")) > 0 Then
+        c.Validation.Delete
+        c.Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+            Operator:=xlBetween, Formula1:=listRef
+        c.Validation.IgnoreBlank = True
+        c.Validation.InCellDropdown = True
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub UnlockFrontTables(ByVal ws As Worksheet)
     On Error Resume Next
-    Application.EnableEvents = prevEvents
-    mBusy = False
+    ws.Range(ws.Cells(TOOLS_FIRST, COL_SERIAL), ws.Cells(MOTOR_LAST, COL_TOTAL)).Locked = False
+    On Error GoTo 0
 End Sub
 
 ' ------------------------------------------------------------------------------
 '  Internals
 ' ------------------------------------------------------------------------------
 
-' C31 "Previous Motor Hours" must read the Q (previous) column, VLOOKUP col 3.
-Private Sub FixPrevMotorHoursFormula(ByVal ws As Worksheet)
+Private Sub FixTitleSpelling(ByVal ws As Worksheet)
     Dim c As Range
-    Dim f As String
-    Set c = ws.Range(CELL_PREV_MOTOR)
-    f = CStr(c.Formula & "")
-    If InStr(1, f, "VLOOKUP", vbTextCompare) = 0 Then Exit Sub
-    If InStr(1, f, PREV_MOTOR_BAD, vbTextCompare) = 0 Then Exit Sub
-    c.Formula = Replace(f, PREV_MOTOR_BAD, PREV_MOTOR_GOOD, 1, 1, vbTextCompare)
+    Dim txt As String
+    Set c = FindInColumn(ws, COL_SERIAL, TITLE_TYPO)
+    If c Is Nothing Then Exit Sub
+    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    txt = CStr(c.Value & "")
+    If InStr(1, txt, TITLE_TYPO, vbTextCompare) = 0 Then Exit Sub
+    c.Value = Replace(txt, TITLE_TYPO, TITLE_FIX, 1, -1, vbTextCompare)
 End Sub
 
-' Serials from _OC_Inventory whose SubCategory contains one of the given kinds
-' (whole-word, case-insensitive).
+Private Function FindInColumn(ByVal ws As Worksheet, ByVal col As Long, _
+                              ByVal token As String) As Range
+    On Error Resume Next
+    Set FindInColumn = ws.Columns(col).Find(What:=token, LookIn:=xlValues, _
+        LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False)
+    On Error GoTo 0
+End Function
+
+Private Function SerialAt(ByVal ws As Worksheet, ByVal r As Long) As String
+    Dim c As Range
+    Set c = ws.Cells(r, COL_SERIAL)
+    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    SerialAt = CellSerial(c)
+End Function
+
+' Prefer .Text so a text-formatted "0261" is not read as 261.
+' If Excel already coerced a leading-zero serial to a number, recover the
+' inventory spelling (0261) by matching digit-keys.
+Private Function CellSerial(ByVal c As Range) As String
+    Dim t As String
+    If c Is Nothing Then Exit Function
+    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    t = Trim$(CStr(c.text & ""))
+    If Len(t) = 0 Or t = "0" Then t = Trim$(CStr(c.Value & ""))
+    CellSerial = CanonicalSerial(t)
+End Function
+
+Private Function CanonicalSerial(ByVal sn As String) As String
+    Dim inv As Worksheet
+    Dim cSn As Long, lastR As Long, r As Long
+    Dim other As String, want As String
+    CanonicalSerial = Trim$(sn)
+    want = DigitKey(sn)
+    If Len(want) = 0 Then Exit Function
+    If Not SheetExistsTH(SH_INVENTORY) Then Exit Function
+    Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
+    cSn = HeaderCol(inv, "SerialNumber")
+    If cSn = 0 Then cSn = HeaderCol(inv, "Serial #")
+    If cSn = 0 Then Exit Function
+    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    For r = 2 To lastR
+        other = Trim$(CStr(inv.Cells(r, cSn).text & ""))
+        If Len(other) = 0 Then other = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
+        If DigitKey(other) = want And Len(other) >= Len(sn) Then
+            CanonicalSerial = other
+            Exit Function
+        End If
+    Next r
+End Function
+
+' Digit-only key with leading zeros stripped, so 0261 and 261 match.
+Private Function DigitKey(ByVal sn As String) As String
+    Dim s As String
+    s = NormSerial(sn)
+    DigitKey = ""
+    If Len(s) = 0 Then Exit Function
+    If s Like "*[!0-9]*" Then Exit Function
+    Do While Len(s) > 1 And Left$(s, 1) = "0"
+        s = mid$(s, 2)
+    Loop
+    DigitKey = s
+End Function
+
+Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sn As String)
+    Dim c As Range
+    Set c = ws.Cells(r, COL_SERIAL)
+    If c.MergeCells Then
+        c.MergeArea.numberFormat = "@"
+        Set c = c.MergeArea.Cells(1, 1)
+    End If
+    c.numberFormat = "@"
+    If StrComp(CStr(c.text & ""), sn, vbTextCompare) = 0 Then Exit Sub
+    c.Value = CStr(sn)
+End Sub
+
+Private Sub WriteNum(ByVal ws As Worksheet, ByVal r As Long, ByVal col As Long, ByVal hrs As Double)
+    Dim c As Range
+    Set c = ws.Cells(r, col)
+    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
+    If Not IsEmpty(c.Value) Then
+        If IsNumeric(c.Value) Then
+            If Abs(CDbl(c.Value) - hrs) < 0.000001 Then Exit Sub
+        End If
+    ElseIf hrs = 0 Then
+        c.Value = 0
+        Exit Sub
+    End If
+    c.Value = hrs
+End Sub
+
+Private Function CollectPicks(ByVal ws As Worksheet) As Collection
+    Dim col As New Collection
+    Dim c As Range
+    Dim sn As String
+    For Each c In ws.Range(RNG_PICKS).Cells
+        sn = Trim$(CStr(c.Value & ""))
+        If Len(sn) > 0 And InStr(1, sn, "Agitator Hours", vbTextCompare) = 0 Then
+            AddUnique col, sn
+        End If
+    Next c
+    Set CollectPicks = col
+End Function
+
+Private Function BhaMotorSerial(ByVal bha As Long) As String
+    Dim ws As Worksheet
+    Dim cNum As Long, cSn As Long, cDesc As Long
+    Dim lastR As Long, r As Long
+    Dim sn As String
+
+    BhaMotorSerial = ""
+    If bha <= 0 Then Exit Function
+    If Not SheetExistsTH(SH_BHA) Then Exit Function
+    Set ws = ThisWorkbook.Worksheets(SH_BHA)
+    cNum = HeaderCol(ws, "BHA #")
+    cSn = HeaderCol(ws, "Serial #")
+    cDesc = HeaderCol(ws, "Description")
+    If cNum = 0 Or cSn = 0 Or cDesc = 0 Then Exit Function
+    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    For r = 2 To lastR
+        If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
+            sn = CellSerial(ws.Cells(r, cSn))
+            If LooksLikeSerial(sn) Then
+                If IsMotorLike(sn, CStr(ws.Cells(r, cDesc).Value & ""), "", "", "") Then
+                    BhaMotorSerial = sn
+                    Exit Function
+                End If
+            End If
+        End If
+    Next r
+End Function
+
+Private Function InventoryMeta(ByVal sn As String, ByRef cat As String, _
+                               ByRef subCat As String, ByRef itemName As String) As Boolean
+    Dim inv As Worksheet
+    Dim cSn As Long, cCat As Long, cSub As Long, cName As Long
+    Dim lastR As Long, r As Long
+    Dim want As String
+
+    cat = ""
+    subCat = ""
+    itemName = ""
+    InventoryMeta = False
+    want = NormSerial(sn)
+    If Len(want) = 0 Then Exit Function
+    If Not SheetExistsTH(SH_INVENTORY) Then Exit Function
+    Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
+    cSn = HeaderCol(inv, "SerialNumber")
+    If cSn = 0 Then cSn = HeaderCol(inv, "Serial #")
+    cCat = HeaderCol(inv, "Category")
+    cSub = HeaderCol(inv, "SubCategory")
+    cName = HeaderCol(inv, "ItemName")
+    If cName = 0 Then cName = HeaderCol(inv, "Description")
+    If cSn = 0 Then Exit Function
+    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    For r = 2 To lastR
+        If NormSerial(CellSerial(inv.Cells(r, cSn))) = want Then
+            If cCat > 0 Then cat = CStr(inv.Cells(r, cCat).Value & "")
+            If cSub > 0 Then subCat = CStr(inv.Cells(r, cSub).Value & "")
+            If cName > 0 Then itemName = CStr(inv.Cells(r, cName).Value & "")
+            InventoryMeta = True
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Function IsSteerMotorText(ByVal text As String) As Boolean
+    Dim t As String
+    t = CStr(text & "")
+    IsSteerMotorText = (InStr(1, t, "Orbit RSS", vbTextCompare) > 0) _
+                    Or (InStr(1, t, "iCruise", vbTextCompare) > 0) _
+                    Or (InStr(1, t, "i-Cruise", vbTextCompare) > 0)
+End Function
+
+Private Function IsMotorLike(ByVal sn As String, ByVal desc As String, _
+                             ByVal cat As String, ByVal subCat As String, _
+                             ByVal itemName As String) As Boolean
+    IsMotorLike = False
+    If Len(Trim$(sn)) = 0 Then Exit Function
+    If InStr(1, desc, "Mud Motor", vbTextCompare) > 0 Then
+        IsMotorLike = True
+        Exit Function
+    End If
+    If InStr(1, itemName, "Mud Motor", vbTextCompare) > 0 Then
+        IsMotorLike = True
+        Exit Function
+    End If
+    If StrComp(Trim$(subCat), "motor", vbTextCompare) = 0 Then
+        IsMotorLike = True
+        Exit Function
+    End If
+    IsMotorLike = IsSteerMotorText(desc) Or IsSteerMotorText(itemName)
+End Function
+
+Private Function IsSkippedToolKind(ByVal cat As String, ByVal subCat As String, _
+                                   ByVal desc As String, ByVal itemName As String) As Boolean
+    Dim blob As String
+    blob = LCase$(Trim$(cat) & " " & Trim$(subCat) & " " & Trim$(desc) & " " & Trim$(itemName))
+    If StrComp(Trim$(cat), "MWD", vbTextCompare) = 0 Then
+        IsSkippedToolKind = True
+        Exit Function
+    End If
+    If InStr(1, blob, "mwd kit", vbTextCompare) > 0 Then
+        IsSkippedToolKind = True
+        Exit Function
+    End If
+    If InStr(1, blob, "drill bit", vbTextCompare) > 0 Then
+        IsSkippedToolKind = True
+        Exit Function
+    End If
+    If InStr(1, " " & LCase$(Trim$(subCat)) & " ", " tubular ", vbTextCompare) > 0 Then
+        IsSkippedToolKind = True
+        Exit Function
+    End If
+    If InStr(1, blob, "slick collar", vbTextCompare) > 0 _
+       Or InStr(1, blob, "pony collar", vbTextCompare) > 0 _
+       Or InStr(1, blob, "drill pipe", vbTextCompare) > 0 _
+       Or InStr(1, blob, "hwdp", vbTextCompare) > 0 Then
+        IsSkippedToolKind = True
+        Exit Function
+    End If
+    IsSkippedToolKind = False
+End Function
+
+Private Function IsThirdPartySeed(ByVal src As String, ByVal sn As String, _
+                                  ByVal desc As String, ByVal cat As String, _
+                                  ByVal subCat As String, ByVal itemName As String) As Boolean
+    IsThirdPartySeed = False
+    If Not LooksLikeSerial(sn) Then Exit Function
+    If IsMotorLike(sn, desc, cat, subCat, itemName) Then Exit Function
+    If IsSkippedToolKind(cat, subCat, desc, itemName) Then Exit Function
+    If StrComp(Trim$(src), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
+        IsThirdPartySeed = True
+        Exit Function
+    End If
+    If StrComp(Trim$(cat), OTHER_INVENTORY_TAG, vbTextCompare) = 0 Then
+        IsThirdPartySeed = True
+        Exit Function
+    End If
+    If InStr(1, desc, "Rental", vbTextCompare) > 0 _
+       Or InStr(1, itemName, "Rental", vbTextCompare) > 0 Then
+        IsThirdPartySeed = True
+    End If
+End Function
+
 Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collection
     Dim col As New Collection
     Dim inv As Worksheet
@@ -288,165 +1061,11 @@ Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collec
         sub_ = " " & Trim$(CStr(inv.Cells(r, cSub).Value & "")) & " "
         For k = LBound(kinds) To UBound(kinds)
             If InStr(1, sub_, " " & CStr(kinds(k)) & " ", vbTextCompare) > 0 Then
-                sn = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
+                sn = CellSerial(inv.Cells(r, cSn))
                 If Len(sn) > 0 Then AddUnique col, sn
                 Exit For
             End If
         Next k
-    Next r
-End Function
-
-Private Function FirstBlankSerialRow(ByVal ws As Worksheet, ByVal firstRow As Long, _
-                                     ByVal lastRow As Long) As Long
-    Dim r As Long
-    FirstBlankSerialRow = 0
-    For r = firstRow To lastRow
-        If Len(SerialAt(ws, r)) = 0 Then
-            FirstBlankSerialRow = r
-            Exit Function
-        End If
-    Next r
-End Function
-
-Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sn As String)
-    Dim c As Range
-    Set c = ws.Cells(r, COL_SERIAL)
-    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
-    ' serials are text - "0261" must not become 261
-    c.NumberFormat = "@"
-    c.Value = sn
-End Sub
-
-' Find both tables from their title text in column O so a row shift does not
-' silently point us at the wrong cells. Falls back to the documented layout.
-Private Sub LocateTables(ByVal ws As Worksheet, ByRef toolsFirst As Long, _
-                         ByRef toolsLast As Long, ByRef motorFirst As Long, _
-                         ByRef motorLast As Long)
-    Dim tTitle As Range, mTitle As Range
-
-    Set tTitle = FindInColumn(ws, COL_SERIAL, TOOLS_TITLE_TOKEN)
-    Set mTitle = FindInColumn(ws, COL_SERIAL, MOTOR_TITLE_TOKEN)
-
-    If tTitle Is Nothing Then toolsFirst = 33 Else toolsFirst = tTitle.Row + TOOLS_TITLE_TO_DATA
-    If mTitle Is Nothing Then
-        motorFirst = 42
-    Else
-        motorFirst = mTitle.Row + MOTOR_TITLE_TO_DATA
-    End If
-    motorLast = motorFirst + MOTOR_ROWS - 1
-
-    If mTitle Is Nothing Then
-        toolsLast = 38
-    Else
-        toolsLast = mTitle.Row - 1
-    End If
-    If toolsLast < toolsFirst Then toolsLast = toolsFirst
-End Sub
-
-Private Function FindInColumn(ByVal ws As Worksheet, ByVal col As Long, _
-                              ByVal token As String) As Range
-    On Error Resume Next
-    Set FindInColumn = ws.Columns(col).Find(What:=token, LookIn:=xlValues, _
-        LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False)
-    On Error GoTo 0
-End Function
-
-' "Enter any 3rd Party Toosl/hours below" -> "... Tools/hours below"
-Private Sub FixTitleSpelling(ByVal ws As Worksheet)
-    Dim c As Range
-    Dim txt As String
-    Set c = FindInColumn(ws, COL_SERIAL, TITLE_TYPO)
-    If c Is Nothing Then Exit Sub
-    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
-    txt = CStr(c.Value & "")
-    If InStr(1, txt, TITLE_TYPO, vbTextCompare) = 0 Then Exit Sub
-    c.Value = Replace(txt, TITLE_TYPO, TITLE_FIX, 1, -1, vbTextCompare)
-End Sub
-
-Private Function SerialAt(ByVal ws As Worksheet, ByVal r As Long) As String
-    Dim c As Range
-    Set c = ws.Cells(r, COL_SERIAL)
-    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
-    SerialAt = Trim$(CStr(c.Value & ""))
-End Function
-
-Private Sub WriteCurrent(ByVal ws As Worksheet, ByVal r As Long, ByVal hrs As Double)
-    Dim c As Range
-    Set c = ws.Cells(r, COL_CURRENT)
-    If c.MergeCells Then Set c = c.MergeArea.Cells(1, 1)
-    ' IsNumeric(Empty) is True, so test blank first - a blank cell must become 0.
-    If Not IsEmpty(c.Value) Then
-        If IsNumeric(c.Value) Then
-            If Abs(CDbl(c.Value) - hrs) < 0.000001 Then Exit Sub
-        End If
-    End If
-    c.Value = hrs
-End Sub
-
-' Serials picked in the "3rd Party Tools" / "Activated Agitator" dropdowns.
-Private Function CollectPicks(ByVal ws As Worksheet) As Collection
-    Dim col As New Collection
-    Dim c As Range
-    Dim sn As String
-    For Each c In ws.Range(RNG_PICKS).Cells
-        sn = Trim$(CStr(c.Value & ""))
-        If Len(sn) > 0 Then AddUnique col, sn
-    Next c
-    Set CollectPicks = col
-End Function
-
-' Every Serial # that _OC_BHA lists for this BHA#.
-Private Function CollectBhaSerials(ByVal bha As Long) As Collection
-    Dim col As New Collection
-    Dim ws As Worksheet
-    Dim cNum As Long, cSn As Long
-    Dim lastR As Long, r As Long
-    Dim sn As String
-
-    Set CollectBhaSerials = col
-    If bha <= 0 Then Exit Function
-    If Not SheetExistsTH(SH_BHA) Then Exit Function
-    Set ws = ThisWorkbook.Worksheets(SH_BHA)
-    cNum = HeaderCol(ws, "BHA #")
-    cSn = HeaderCol(ws, "Serial #")
-    If cNum = 0 Or cSn = 0 Then Exit Function
-
-    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
-    For r = 2 To lastR
-        If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
-            sn = Trim$(CStr(ws.Cells(r, cSn).Value & ""))
-            If Len(sn) > 0 Then AddUnique col, sn
-        End If
-    Next r
-End Function
-
-' Motor serial for this BHA# from _OC_BHA (Description contains "Mud Motor").
-Private Function BhaMotorSerial(ByVal bha As Long) As String
-    Dim ws As Worksheet
-    Dim cNum As Long, cSn As Long, cDesc As Long
-    Dim lastR As Long, r As Long
-    Dim sn As String
-
-    BhaMotorSerial = ""
-    If bha <= 0 Then Exit Function
-    If Not SheetExistsTH(SH_BHA) Then Exit Function
-    Set ws = ThisWorkbook.Worksheets(SH_BHA)
-    cNum = HeaderCol(ws, "BHA #")
-    cSn = HeaderCol(ws, "Serial #")
-    cDesc = HeaderCol(ws, "Description")
-    If cNum = 0 Or cSn = 0 Or cDesc = 0 Then Exit Function
-
-    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
-    For r = 2 To lastR
-        If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
-            If InStr(1, CStr(ws.Cells(r, cDesc).Value & ""), "Mud Motor", vbTextCompare) > 0 Then
-                sn = Trim$(CStr(ws.Cells(r, cSn).Value & ""))
-                If Len(sn) > 0 Then
-                    BhaMotorSerial = sn
-                    Exit Function
-                End If
-            End If
-        End If
     Next r
 End Function
 
@@ -462,12 +1081,10 @@ Private Function HeaderCol(ByVal ws As Worksheet, ByVal header As String) As Lon
     Next c
 End Function
 
-' Serial compare key: case-insensitive, ignoring spaces / dashes / punctuation,
-' so FieldCap "HMJ 625 62" matches a typed "HMJ-625-62".
 Private Function NormSerial(ByVal sn As String) As String
     Dim i As Long, ch As String, out As String
     For i = 1 To Len(sn)
-        ch = Mid$(sn, i, 1)
+        ch = mid$(sn, i, 1)
         If ch Like "[A-Za-z0-9]" Then out = out & UCase$(ch)
     Next i
     NormSerial = out
@@ -514,3 +1131,5 @@ Private Function SheetExistsTH(ByVal name As String) As Boolean
     On Error GoTo 0
     SheetExistsTH = Not ws Is Nothing
 End Function
+
+

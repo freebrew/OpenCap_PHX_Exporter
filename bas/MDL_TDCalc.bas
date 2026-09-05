@@ -9,8 +9,9 @@ Option Explicit
 '                         INC/AZM from survey (or bit W/X if present)
 '                         NS/EW/TVD via minimum-curvature integration
 '    Planned TD  I54:M54  written by Import Plan from the last _OC_Survey station
-'    Actual TD   I55:M55  min-curve last position -> next T2:Y5 named target
-'                         -> Planned TD; MD is estimated, attitude/coords = plan TD
+'    Actual TD   I55:M55  original sheet formula (merged MD): current MD
+'                         + remaining NS/EW distance * RF from heading vs
+'                         remaining-vector azimuth. Not a copy of Planned TD.
 ' ================================================================================
 
 Private Const SS_SHEET As String = "Slidesheet"
@@ -39,6 +40,14 @@ Private Const TD_COL_FIRST As Long = 9     ' I
 Private Const SURVEY_BLOCK As String = "Slidesheet!$D$13:$AQ$320"
 Private Const TGT_BLOCK As String = "Slidesheet!$T$2:$Y$5"
 Private Const PLANNED_BLOCK As String = "Data!$I$54:$M$54"
+
+' Recovered from Field/Demo before TdEstFinal overwrote I55 (merged I55:M55).
+Private Const ACTUAL_TD_FORMULA As String = _
+    "=ROUND($I$53+SQRT(($L$54-$L$53)^2+($M$54-$M$53)^2)*LET(" & _
+    "dN,$L$54-$L$53,dE,$M$54-$M$53," & _
+    "AZt,IF(dN=0,IF(dE>=0,PI()/2,3*PI()/2),MOD(ATAN(dE/dN)+IF(dN<0,PI(),0)+2*PI(),2*PI()))," & _
+    "dAZ,MOD(AZt-($K$53*PI()/180)+PI(),2*PI())-PI()," & _
+    "DL,ABS(dAZ),IF(DL=0,1,DL/(2*SIN(DL/2)))),2)"
 
 Private Const PI_ As Double = 3.14159265358979
 Private Const EPS As Double = 0.0000001
@@ -145,7 +154,6 @@ Public Sub InstallTdActualFormulas()
     Application.ScreenUpdating = False
     wasProt = SheetUnprotectForVba(ws)
 
-    ' Old layout merged I55:M55 for an MD-only estimate.
     On Error Resume Next
     ws.Range("I55:M55").UnMerge
     On Error GoTo ErrHandler
@@ -156,9 +164,11 @@ Public Sub InstallTdActualFormulas()
     For i = 0 To 4
         ws.Cells(TD_ROW_ACTUAL, TD_COL_FIRST + i).Formula = _
             "=IFERROR(TdActualBit(""" & fields(i) & """," & SURVEY_BLOCK & "," & TGT_BLOCK & "),"""")"
-        ws.Cells(TD_ROW_EST, TD_COL_FIRST + i).Formula = _
-            "=IFERROR(TdEstFinal(""" & fields(i) & """," & SURVEY_BLOCK & "," & TGT_BLOCK & "," & PLANNED_BLOCK & "),"""")"
     Next i
+
+    ws.Range("J55:M55").ClearContents
+    ws.Range("I55").Formula2 = ACTUAL_TD_FORMULA
+    ws.Range("I55:M55").Merge
 
     SheetReprotectAfterVba ws, wasProt
     Application.ScreenUpdating = prevSU
@@ -586,6 +596,8 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
     dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
+
+
 
 
 
