@@ -7,7 +7,7 @@
 **Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)  
 **Data Hub prospect notes:** [docs/FieldCap_Data_Hub_Prospect_Report.md](docs/FieldCap_Data_Hub_Prospect_Report.md)
 
-**Current Chrome extension revision:** `v3.2.3`
+**Current Chrome extension revision:** `v3.2.4`
 
 ---
 
@@ -221,10 +221,14 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
 
 ### Installation
 
+**Load unpacked (Chrome or Edge):**
+
 1. Open `chrome://extensions` (or `edge://extensions`).
 2. Enable **Developer mode**.
 3. **Load unpacked** → `src/chrome-extension/`.
 4. Log into FieldCap, open the extension popup, enter Job ID, **Fetch & Build CSVs**.
+
+**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.4.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
 
 ---
 
@@ -246,7 +250,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.2.3
+    ├── chrome-extension/            ← Manifest V3, v3.2.4
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -254,6 +258,12 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### v3.2.4 — Chrome Web Store / Edge Chromium package
+
+- Store zip is Manifest V3 at the archive root (`dist/OpenCap_DataExporter_v3.2.4.zip`).
+- `browser-api.js` binds `chrome` from `browser` so the same build runs on Chrome and Edge.
+- Listing name is `OpenCap Data Exporter` (no leading dot). Minimum Chrome/Edge 116.
 
 ### Slide Sheet — 2026-09-04
 

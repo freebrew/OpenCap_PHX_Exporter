@@ -105,7 +105,7 @@ Public Function ProjRollingMotorOut(ByVal qRng As Range, ByVal mRng As Range) As
     Dim i As Long
     Dim taken As Long
     Dim tot As Double
-    Dim qv As Variant
+    Dim qV As Variant
     Dim mv As Variant
     Dim thisOk As Boolean
     Dim thisQ As Double
@@ -129,13 +129,13 @@ Public Function ProjRollingMotorOut(ByVal qRng As Range, ByVal mRng As Range) As
     thisQ = 0#
 
     For i = n To 1 Step -1
-        RollingSample qArr, mArr, i, n, qv, mv
-        If YieldSampleOk(qv, Q_LO) Then
-            tot = tot + CDbl(qv)
+        RollingSample qArr, mArr, i, n, qV, mv
+        If YieldSampleOk(qV, Q_LO) Then
+            tot = tot + CDbl(qV)
             taken = taken + 1
             If i = n Then
                 thisOk = True
-                thisQ = CDbl(qv)
+                thisQ = CDbl(qV)
             End If
             If taken >= N_WANT Then Exit For
         End If
@@ -155,20 +155,20 @@ End Function
 
 Private Sub RollingSample(ByVal qArr As Variant, ByVal mArr As Variant, _
                           ByVal i As Long, ByVal n As Long, _
-                          ByRef qv As Variant, ByRef mv As Variant)
+                          ByRef qV As Variant, ByRef mv As Variant)
     If n = 1 And Not IsArray(qArr) Then
-        qv = qArr
+        qV = qArr
         mv = mArr
     Else
-        qv = qArr(i, 1)
+        qV = qArr(i, 1)
         mv = mArr(i, 1)
     End If
 End Sub
 
-Private Function YieldSampleOk(ByVal qv As Variant, ByVal qLo As Double) As Boolean
+Private Function YieldSampleOk(ByVal qV As Variant, ByVal qLo As Double) As Boolean
     YieldSampleOk = False
-    If Not HasNum(qv) Then Exit Function
-    If CDbl(qv) <= qLo Then Exit Function
+    If Not HasNum(qV) Then Exit Function
+    If CDbl(qV) <= qLo Then Exit Function
     YieldSampleOk = True
 End Function
 

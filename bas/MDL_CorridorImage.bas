@@ -131,6 +131,14 @@ Private mToGo As Double, mReqInc As Double, mHoldDevEnd As Double, mHoldLatEnd A
 ' ---- waypoints -----------------------------------------------------------------
 Private mWMD() As Double, mWTvd() As Double, mWInc() As Double
 Private mWCount As Long
+' Rows the user actually typed in AC14:AD33, before plan targets are merged in.
+' The LATERAL sail view (geo bands, AA14 corridor) is only meaningful when this
+' table defines the corridor; without it high-inc wells stay on the BUILD view.
+Private mUserWpCount As Long
+' Waypoint row 1 is the HEEL: the sail corridor (and the tunnel view) starts
+' there. Nothing before it belongs in the tunnel's stretched TVD scale.
+Private mHeelMD As Double, mHeelTvd As Double
+Private Const HEEL_LEAD As Double = 20#         ' mMD of room drawn ahead of the heel
 
 ' ---- shape bookkeeping ----------------------------------------------------------
 Private mNames() As String
@@ -391,19 +399,31 @@ Private Function BuildScene(ss As Worksheet) As Boolean
     If Not WalkSurveys(ss, True) Then Exit Function      ' pass 1: find the last survey
     Trace "  pass1 done svyMD=" & mSvyMD & " bitMD=" & mBitMD
 
+    ' Aim at the FIRST waypoint ahead of the survey. Named T2:Y5 targets are
+    ' already merged into the waypoint list, so this naturally picks the user's
+    ' AC14:AD33 landing point over a named target kilometres down the lateral.
+    ' (Aiming straight at plan TD used to blow the window open to the whole
+    ' well and made the mail render crawl.)
     Dim i As Long
     Dim tMd As Double, tTvd As Double, tInc As Double, tName As String
     mTgtName = "WP"
-    If NextPlanTarget(ss, mSvyMD, tMd, tTvd, tInc, tName) Then
+    mWpMD = 0#
+    For i = 0 To mWCount - 1
+        If mWMD(i) > mSvyMD + 0.005 Then
+            mWpMD = mWMD(i): mWpTvd = mWTvd(i)
+            Exit For
+        End If
+    Next i
+    If mWpMD > 0# Then
+        ' Label it with the plan-target name when they are the same station.
+        If NextPlanTarget(ss, mSvyMD, tMd, tTvd, tInc, tName) Then
+            If Abs(tMd - mWpMD) < 0.75 Then mTgtName = tName
+        End If
+        If mUserWpCount >= 1 And Abs(mWpMD - mHeelMD) < 0.01 Then mTgtName = "HEEL"
+    ElseIf NextPlanTarget(ss, mSvyMD, tMd, tTvd, tInc, tName) Then
         mWpMD = tMd: mWpTvd = tTvd: mTgtName = tName
     ElseIf mWCount > 0 Then
         mWpMD = mWMD(mWCount - 1): mWpTvd = mWTvd(mWCount - 1)
-        For i = 0 To mWCount - 1
-            If mWMD(i) > mSvyMD Then
-                mWpMD = mWMD(i): mWpTvd = mWTvd(i)
-                Exit For
-            End If
-        Next i
     Else
         mWpMD = mSvyMD + 80#: mWpTvd = mSvyTvd
     End If
@@ -423,9 +443,18 @@ Private Function BuildScene(ss As Worksheet) As Boolean
     ' Vertical / early build sit above the sail table. If the short target
     ' window captured <2 stations, open back to MD 0 so the room has a hole.
     If mSCount < 2 Then
-        mMD0 = 0#
-        If mMD1 < mSvyMD + RUN_AHEAD Then mMD1 = mSvyMD + RUN_AHEAD
-        ApplySectionLayout
+        If mSection = "LATERAL" Then
+            ' Barely past the heel: too little corridor hole for a tunnel yet.
+            ' Show the landing in the shadow box rather than reopen the build.
+            mSection = "BUILD"
+            FrameWindowToTarget
+            ApplySectionLayout
+            Trace "  lateral too short -> BUILD window " & mMD0 & " to " & mMD1
+        Else
+            mMD0 = 0#
+            If mMD1 < mSvyMD + RUN_AHEAD Then mMD1 = mSvyMD + RUN_AHEAD
+            ApplySectionLayout
+        End If
         If Not WalkSurveys(ss, False) Then Exit Function
         Trace "  widened stations=" & mSCount
     End If
@@ -438,7 +467,12 @@ Private Function BuildScene(ss As Worksheet) As Boolean
     mUseSailBands = (mSection = "LATERAL")
 
     If Not MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mMD0, mTvdDatum) Then
-        mTvdDatum = mSTvd(0)
+        ' Room opens just ahead of the heel: 0 on the back wall = geo at the heel.
+        If mUserWpCount >= 1 And mMD0 < mHeelMD Then
+            mTvdDatum = mHeelTvd
+        Else
+            mTvdDatum = mSTvd(0)
+        End If
     End If
 
     Dim py As Double, gT As Double, gHi As Double, gLo As Double, mid As Double
@@ -556,6 +590,12 @@ Private Function LoadWaypoints(ss As Worksheet) As Boolean
             End If
         End If
     Next r
+    mUserWpCount = mWCount
+    If mWCount > 0 Then
+        mHeelMD = mWMD(0): mHeelTvd = mWTvd(0)
+    Else
+        mHeelMD = 0#: mHeelTvd = 0#
+    End If
     LoadWaypoints = True
 End Function
 
@@ -589,6 +629,8 @@ Private Sub MergePlanTargetsAsWaypoints(ss As Worksheet)
         vT = ss.Cells(r, 24).Value2
         If Not (IsNumeric(vMd) And IsNumeric(vT)) Then GoTo NextMerge
         If Len(Trim$(CStr(vMd & ""))) = 0 Then GoTo NextMerge
+        ' The user's waypoint row 1 IS the heel; do not also mark the plan's.
+        If mUserWpCount >= 1 And UCase$(Trim$(CStr(ss.Cells(r, 25).Value2 & ""))) = "HEEL" Then GoTo NextMerge
         md = CDbl(vMd): tvd = CDbl(vT)
         keep = True
         For i = 0 To mWCount - 1
@@ -619,29 +661,48 @@ Private Sub ClassifySection(ByVal incDeg As Double)
         mSection = "VERTICAL"
     ElseIf incDeg < 80# Then
         mSection = "BUILD"
+    ElseIf mUserWpCount < 2 Then
+        ' High inclination but no sail corridor typed in AC14:AD33 yet: the
+        ' lateral tunnel would have no geo bands and used to frame itself to
+        ' plan TD (whole-well canvas, minutes-long mail render). Stay on the
+        ' BUILD shadow box, which shows the curve landing at ~90.
+        mSection = "BUILD"
+    ElseIf mSvyMD < mHeelMD - 0.5 Then
+        ' Still landing: the corridor has not started. Shadow box to the HEEL.
+        mSection = "BUILD"
     Else
         mSection = "LATERAL"
     End If
 End Sub
 
 Private Sub FrameWindowToTarget()
-    Dim lookBack As Double, maxWin As Double, minWin As Double
+    Dim lookBack As Double, maxWin As Double, minWin As Double, maxAhead As Double
     Select Case mSection
         Case "VERTICAL"
-            lookBack = 80#: maxWin = 400#: minWin = 60#
+            lookBack = 80#: maxWin = 400#: minWin = 60#: maxAhead = 200#
         Case "BUILD"
-            lookBack = 250#: maxWin = 800#: minWin = 120#
+            lookBack = 250#: maxWin = 800#: minWin = 120#: maxAhead = 400#
         Case Else
-            lookBack = 800#: maxWin = WINDOW_LEN: minWin = 200#
+            lookBack = 800#: maxWin = WINDOW_LEN: minWin = 200#: maxAhead = 400#
     End Select
     mMD1 = mWpMD + RUN_AHEAD
     If mMD1 < mSvyMD + 15# Then mMD1 = mSvyMD + 15#
+    ' Never let a far target (e.g. plan TD past the last waypoint) stretch the
+    ' room: the frame stays a rolling window around the bit; distance-to-go and
+    ' the metrics still speak to the real target.
+    If mMD1 > mSvyMD + maxAhead Then mMD1 = mSvyMD + maxAhead
     mMD0 = mSvyMD - lookBack
     If mMD0 < 0# Then mMD0 = 0#
     If mMD1 - mMD0 > maxWin Then mMD0 = mMD1 - maxWin
     If mMD1 - mMD0 < minWin Then
         mMD0 = mMD1 - minWin
         If mMD0 < 0# Then mMD0 = 0#
+    End If
+    ' Tunnel starts at the heel. Looking back into the build dragged 100+ m of
+    ' TVD into a room scaled for a +/-2 m corridor and smeared everything into
+    ' a diagonal. The look-back grows naturally as the lateral is drilled.
+    If mSection = "LATERAL" And mUserWpCount >= 1 Then
+        If mMD0 < mHeelMD - HEEL_LEAD Then mMD0 = mHeelMD - HEEL_LEAD
     End If
 End Sub
 
@@ -863,6 +924,37 @@ End Function
 ' ================================================================================
 '  PROJECTION
 ' ================================================================================
+' TVD gained drilling distance a along a constant-curvature arc that starts at
+' inc0 (radians). kap is signed curvature in rad/m (+ = building).
+Private Function ArcTvdGain(ByVal inc0Rad As Double, ByVal kap As Double, ByVal a As Double) As Double
+    If Abs(kap) < 0.0000001 Then
+        ArcTvdGain = a * Cos(inc0Rad)
+    Else
+        ArcTvdGain = (Sin(inc0Rad + kap * a) - Sin(inc0Rad)) / kap
+    End If
+End Function
+
+' Signed curvature (rad/m) of the constant-BUR arc that starts at the survey
+' inclination and gains dTvd of TVD over toGo metres of hole. TVD gain is
+' monotone decreasing in curvature, so bisection converges; the result is
+' clamped to +/-40 deg/30m when the target is not reachable on one arc.
+Private Function SolveArcCurvature(ByVal inc0Deg As Double, ByVal toGo As Double, ByVal dTvd As Double) As Double
+    Dim i1 As Double, lo As Double, hi As Double, midK As Double, k As Long
+    Dim kMax As Double
+    SolveArcCurvature = 0#
+    If toGo <= 0# Then Exit Function
+    i1 = inc0Deg * PIE / 180#
+    kMax = (40# / 30#) * PIE / 180#
+    lo = -kMax: hi = kMax
+    If ArcTvdGain(i1, lo, toGo) <= dTvd Then SolveArcCurvature = lo: Exit Function
+    If ArcTvdGain(i1, hi, toGo) >= dTvd Then SolveArcCurvature = hi: Exit Function
+    For k = 1 To 48
+        midK = (lo + hi) / 2#
+        If ArcTvdGain(i1, midK, toGo) > dTvd Then lo = midK Else hi = midK
+    Next k
+    SolveArcCurvature = (lo + hi) / 2#
+End Function
+
 Private Function ObX(ByVal md As Double, ByVal lat As Double) As Double
     If mShaft Then
         ObX = mX0 + lat * mKzx + (md - mMD0) * mSxd
@@ -1059,16 +1151,28 @@ Private Sub DrawRoom()
     End If
 
     ' ---- forward projections from the last survey ------------------------------
-    Dim n As Long: n = Int(mToGo / 4#) + 2
+    ' Required path (red): constant-curvature arc that leaves the survey at its
+    ' current inclination and lands on the target TVD exactly at the target MD
+    ' (curvature solved by bisection). This rolls smoothly to ~90 deg at a
+    ' landing instead of the old straight chord kinked at the bit. Both
+    ' projections are clipped at the room edge so a far target cannot shoot
+    ' lines across the canvas.
+    Dim drawLen As Double
+    drawLen = mToGo
+    If mSvyMD + drawLen > mMD1 Then drawLen = mMD1 - mSvyMD
+    If drawLen < 1# Then drawLen = 1#
+    Dim kap As Double
+    kap = SolveArcCurvature(mSvyInc, mToGo, mWpTvd - mSvyTvd)
+    Dim n As Long: n = Int(drawLen / 4#) + 2
     Dim rx() As Double, ry() As Double, hx() As Double, hy() As Double
     ReDim rx(0 To n - 1): ReDim ry(0 To n - 1)
     ReDim hx(0 To n - 1): ReDim hy(0 To n - 1)
     Dim k As Long, a As Double, md As Double, tvdProj As Double, latH As Double
     For k = 0 To n - 1
         a = k * 4#
-        If a > mToGo Then a = mToGo
+        If a > drawLen Then a = drawLen
         md = mSvyMD + a
-        tvdProj = mSvyTvd + a * Cos(mReqInc * PIE / 180#)
+        tvdProj = mSvyTvd + ArcTvdGain(mSvyInc * PIE / 180#, kap, a)
         rx(k) = ObX(md, LatScr(mSvyLat * (1# - a / mToGo)))
         ry(k) = ObY(PlotY(tvdProj), LatScr(mSvyLat * (1# - a / mToGo)))
         latH = mSvyLat + a * Sin((mSvyAzi - mSvyPlanAzi) * PIE / 180#)
@@ -1084,15 +1188,18 @@ Private Sub DrawRoom()
     Dot bx, by, 5, h("FF5555"), h("1A1A1A"), 1.4
     Tx bx - 10, by - 11, "BIT", 10, h("FF5555"), "end", True
 
-    Dim ax As Double, ay As Double
-    tvdProj = mSvyTvd + mToGo * Cos(mSvyInc * PIE / 180#)
-    ax = ObX(mWpMD, LatScr(mHoldLatEnd)): ay = ObY(PlotY(tvdProj), LatScr(mHoldLatEnd))
-    Dot ax, ay, 4, h("1A1A1A"), h("E09A3D"), 2
-    ' Keep held-arrival label clear of the BIT tag.
-    If mUseSailBands Then
-        Tx ax + 10, ay + 12, Format$(mHoldDevEnd, "0.00") & " m high", 8.5, h("E09A3D"), "start"
-    ElseIf Abs(mHoldDevEnd) > 1# Then
-        Tx ax + 10, ay + 12, Format$(Abs(mHoldDevEnd), "0.0") & " m TVD if held", 8.5, h("E09A3D"), "start"
+    ' Held-arrival marker only when the target sits inside the room.
+    If mWpMD <= mMD1 + 0.1 Then
+        Dim ax As Double, ay As Double
+        tvdProj = mSvyTvd + mToGo * Cos(mSvyInc * PIE / 180#)
+        ax = ObX(mWpMD, LatScr(mHoldLatEnd)): ay = ObY(PlotY(tvdProj), LatScr(mHoldLatEnd))
+        Dot ax, ay, 4, h("1A1A1A"), h("E09A3D"), 2
+        ' Keep held-arrival label clear of the BIT tag.
+        If mUseSailBands Then
+            Tx ax + 10, ay + 12, Format$(mHoldDevEnd, "0.00") & " m high", 8.5, h("E09A3D"), "start"
+        ElseIf Abs(mHoldDevEnd) > 1# Then
+            Tx ax + 10, ay + 12, Format$(Abs(mHoldDevEnd), "0.0") & " m TVD if held", 8.5, h("E09A3D"), "start"
+        End If
     End If
 
     ' ---- reporting-day span along the front foot of the room -------------------
@@ -1928,8 +2035,9 @@ Private Sub DrawWaypointMarks()
                IIf(isNext, h("4CAF7A"), h("8AAB9A")), "middle", isNext
         End If
 
-        Tx wx, mVY + mVH - 30, Format$(mWMD(i), "#,##0"), 8.5, _
-           IIf(isNext, h("4CAF7A"), h("A8A8A8")), "middle", isNext
+        Dim isHeel As Boolean: isHeel = (mUserWpCount >= 1 And Abs(mWMD(i) - mHeelMD) < 0.01)
+        Tx wx, mVY + mVH - 30, IIf(isHeel, "HEEL ", "") & Format$(mWMD(i), "#,##0"), 8.5, _
+           IIf(isNext Or isHeel, h("4CAF7A"), h("A8A8A8")), "middle", isNext Or isHeel
 NextWp:
     Next i
 End Sub
@@ -2125,9 +2233,9 @@ End Sub
 '  exactly what the cells say and the D7:F17 block stays read-only.
 ' ================================================================================
 Private Sub DrawDay(dt As Worksheet)
-    Rect mPX, mQY, mPW, mQH, h("222222"), h("3A3A3A"), 0.75
-    Tx mPX + 11, mQY + 17, "REPORTING DAY", 9.5, h("FFFFFF"), "start", True
-    Ln mPX + 11, mQY + 22, mPX + mPW - 11, mQY + 22, h("4A4A4A"), 0.75, msoLineSolid
+    Rect mPX, mQY, mPW, mQH, h("222222"), h("3A3A3A"), 0.6
+    Tx mPX + 11, mQY + 16, "REPORTING DAY", 9.5, h("FFFFFF"), "start", True
+    LeaderAfter mPX + 11, mQY + 16, mPX + mPW - 11, "REPORTING DAY", 9.5
 
     Dim y As Double: y = mQY + 36
     KV mPX, mPW, y, "From / to", _
@@ -2202,10 +2310,10 @@ Private Sub DrawMetrics(ss As Worksheet, dt As Worksheet)
 End Sub
 
 Private Sub MHead(ByRef y As Double, ByVal t As String)
-    y = y + 5
+    y = y + 8
     Tx mMX + 11, y, t, 9.5, h("FFFFFF"), "start", True
-    Ln mMX + 11, y + 4, mMX + mMW - 11, y + 4, h("4A4A4A"), 0.75, msoLineSolid
-    y = y + 16
+    LeaderAfter mMX + 11, y, mMX + mMW - 11, t, 9.5
+    y = y + 18
 End Sub
 
 Private Sub KV(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
@@ -2256,13 +2364,13 @@ Private Function MeasureOpsHeight(dt As Worksheet) As Double
     Dim acH As Double, motH As Double
     nAc = CountFilledAc(dt)
     nMot = CountFilledMotors(dt)
-    ' Row pitch must clear TYPE_SCALE_OPS text (see DrawOps AC / motors loops).
-    Const ROW_PITCH As Double = 22#
-    If nAc = 0 Then acH = 44# Else acH = 32# + ROW_PITCH * CDbl(nAc)
-    If nMot = 0 Then motH = 44# Else motH = 32# + ROW_PITCH * CDbl(nMot)
+    ' Title + header + rule + rows. Pitch clears TYPE_SCALE_OPS text.
+    Const ROW_PITCH As Double = 20#
+    If nAc = 0 Then acH = 56# Else acH = 58# + ROW_PITCH * CDbl(nAc)
+    If nMot = 0 Then motH = 56# Else motH = 58# + ROW_PITCH * CDbl(nMot)
     ' chips + day/BHA + motor band + AC + motors + gaps + footer
-    MeasureOpsHeight = OPS_GAP + 52# + OPS_GAP + 175# + OPS_GAP + 275# + _
-                       OPS_GAP + acH + OPS_GAP + motH + 44#
+    MeasureOpsHeight = OPS_GAP + 30# + OPS_GAP + 168# + OPS_GAP + 286# + _
+                       OPS_GAP + acH + OPS_GAP + motH + 28#
 End Function
 
 Private Sub KVDark(ByVal px As Double, ByVal pw As Double, ByVal y As Double, _
@@ -2274,39 +2382,51 @@ End Sub
 
 Private Sub PanelHeadDark(ByVal px As Double, ByVal pw As Double, ByRef y As Double, ByVal t As String)
     Tx px + 11, y, t, 9.5, h("FFFFFF"), "start", True
-    Ln px + 11, y + 4, px + pw - 11, y + 4, h("4A4A4A"), 0.75, msoLineSolid
-    y = y + 16
+    LeaderAfter px + 11, y, px + pw - 11, t, 9.5
+    y = y + 18
 End Sub
 
+' Hairline to the RIGHT of a title, at the visual midline. Never crosses glyphs
+' the way an underline did once TYPE_SCALE_OPS enlarged the text box.
+Private Sub LeaderAfter(ByVal x0 As Double, ByVal y As Double, ByVal x1 As Double, _
+                        ByVal t As String, ByVal sz As Double)
+    Dim tw As Double
+    If mTypeScale > 0.01 Then sz = sz * mTypeScale
+    tw = CDbl(Len(t)) * sz * 0.58 + 10#
+    If x0 + tw < x1 - 12# Then
+        Ln x0 + tw, y - sz * 0.35, x1, y - sz * 0.35, h("4A4A4A"), 0.55, msoLineSolid
+    End If
+End Sub
+
+' Section title, left-aligned; rule continues after the words.
 Private Sub SecBarDark(ByVal y As Double, ByVal t As String)
-    Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26, h("2A2A2A"), h("3A3A3A"), 0.5
-    Tx CANVAS_W / 2#, y + 18, t, 10, h("FFFFFF"), "middle", True
+    Tx OPS_PAD, y + 14, t, 11, h("FFFFFF"), "start", True
+    LeaderAfter OPS_PAD, y + 14, CANVAS_W - OPS_PAD, t, 11
 End Sub
 
 Private Sub DrawOps(dt As Worksheet)
-    Const ROW_PITCH As Double = 22#
+    Const ROW_PITCH As Double = 20#
     Dim y As Double
     Dim lx As Double, rx As Double, cw As Double
     Dim ly As Double, ry As Double
     Dim r As Long, n As Long
+    Dim x0 As Double, x1 As Double
 
     cw = OpsColW()
     lx = OPS_PAD
     rx = OPS_PAD + cw + OPS_COL_GAP
     y = mOpsOrigin + OPS_GAP
 
-    ' ---- header chips: plan / BHA / costs ------------------------------------
-    Rect lx, y, CANVAS_W - 2 * OPS_PAD, 44, h("222222"), h("3A3A3A"), 0.75
-    Tx lx + 14, y + 28, cellText(dt, "B2") & " " & cellText(dt, "C2"), 12, h("FFFFFF"), "start", True
-    Tx lx + 220, y + 28, cellText(dt, "B3") & " " & cellText(dt, "C3"), 12, h("FFFFFF"), "start", True
-    Tx lx + 400, y + 28, cellText(dt, "D3") & " " & cellText(dt, "E3"), 12, h("FFFFFF"), "start", False
-    Tx CANVAS_W - OPS_PAD - 14, y + 28, cellText(dt, "D4") & " " & cellText(dt, "E4"), 12, h("FFFFFF"), "end", True
-    y = y + 44 + OPS_GAP
+    ' ---- header chips: plan / BHA / costs (one line, no box) -----------------
+    Tx lx + 4, y + 16, cellText(dt, "B2") & " " & cellText(dt, "C2"), 11, h("FFFFFF"), "start", True
+    Tx lx + 220, y + 16, cellText(dt, "B3") & " " & cellText(dt, "C3"), 11, h("FFFFFF"), "start", True
+    Tx lx + 420, y + 16, cellText(dt, "D3") & " " & cellText(dt, "E3"), 11, h("FFFFFF"), "start", False
+    Tx CANVAS_W - OPS_PAD, y + 16, cellText(dt, "D4") & " " & cellText(dt, "E4"), 11, h("FFFFFF"), "end", True
+    Ln OPS_PAD, y + 24, CANVAS_W - OPS_PAD, y + 24, h("4A4A4A"), 0.6, msoLineSolid
+    y = y + 30 + OPS_GAP
 
     ' ---- day drilling | BHA totals -------------------------------------------
-    Rect lx, y, cw, 167, h("222222"), h("3A3A3A"), 0.75
-    Rect rx, y, cw, 167, h("222222"), h("3A3A3A"), 0.75
-    ly = y + 20: ry = y + 20
+    ly = y + 16: ry = y + 16
     PanelHeadDark lx, cw, ly, "DAY DRILLING"
     KVDark lx, cw, ly, cellText(dt, "B4"), cellText(dt, "C4"), 11, h("FFFFFF"), False: ly = ly + 17
     KVDark lx, cw, ly, cellText(dt, "B5"), cellText(dt, "C5"), 11, h("FFFFFF"), False: ly = ly + 17
@@ -2326,9 +2446,7 @@ Private Sub DrawOps(dt As Worksheet)
     y = y + 167 + OPS_GAP
 
     ' ---- ROP + motor perf | motor info + 3rd party ---------------------------
-    Rect lx, y, cw, 267, h("222222"), h("3A3A3A"), 0.75
-    Rect rx, y, cw, 267, h("222222"), h("3A3A3A"), 0.75
-    ly = y + 20: ry = y + 20
+    ly = y + 16: ry = y + 16
     PanelHeadDark lx, cw, ly, "PERFORMANCE"
     KVDark lx, cw, ly, cellText(dt, "B18"), cellText(dt, "C18"), 11, h("FFFFFF"), False: ly = ly + 17
     KVDark lx, cw, ly, cellText(dt, "B19"), cellText(dt, "C19"), 11, h("FFFFFF"), False: ly = ly + 17
@@ -2356,33 +2474,34 @@ Private Sub DrawOps(dt As Worksheet)
     PanelHeadDark rx, cw, ry, cellText(dt, "D29")
     KVDark rx, cw, ry, cellText(dt, "D30"), _
            cellText(dt, "E30") & "  /  " & cellText(dt, "F30"), 10.5, h("FFFFFF"), False
-    y = y + 267 + OPS_GAP
+    y = y + 286 + OPS_GAP
 
     ' ---- AC Info (filled rows only) ------------------------------------------
+    ' No enclosing Rect: its top edge used to strike through the scaled headers.
     n = CountFilledAc(dt)
     SecBarDark y, cellText(dt, "B33")
     y = y + 36
+    x0 = OPS_PAD
+    x1 = CANVAS_W - OPS_PAD
     If n = 0 Then
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, h("222222"), h("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 20, "none", 11, h("A8A8A8"), "start"
-        y = y + 32
+        Tx x0, y + 12, "none", 10.5, h("A8A8A8"), "start"
+        y = y + 20
     Else
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), h("222222"), h("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 16, "Offset Well", 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 620, y + 16, "SF", 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 720, y + 16, "C2C (m)", 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 860, y + 16, "Closest C2C", 10, h("A8A8A8"), "start"
-        y = y + 24
+        Tx x0, y + 12, "Offset Well", 9, h("A8A8A8"), "start", True
+        Tx x1 - 280, y + 12, "SF", 9, h("A8A8A8"), "end", True
+        Tx x1 - 160, y + 12, "C2C (m)", 9, h("A8A8A8"), "end", True
+        Tx x1, y + 12, "Closest C2C", 9, h("A8A8A8"), "end", True
+        Ln x0, y + 26, x1, y + 26, h("4A4A4A"), 0.5, msoLineSolid
+        y = y + 38
         For r = 35 To 42
             If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
-                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 10.5, h("FFFFFF"), "start"
-                Tx OPS_PAD + 620, y + 2, cellText(dt, "D" & r), 10.5, h("FFFFFF"), "start"
-                Tx OPS_PAD + 720, y + 2, cellText(dt, "E" & r), 10.5, h("FFFFFF"), "start"
-                Tx OPS_PAD + 860, y + 2, cellText(dt, "F" & r), 10.5, h("FFFFFF"), "start"
+                Tx x0, y, cellText(dt, "B" & r), 10, h("FFFFFF"), "start"
+                Tx x1 - 280, y, cellText(dt, "D" & r), 10, h("FFFFFF"), "end"
+                Tx x1 - 160, y, cellText(dt, "E" & r), 10, h("FFFFFF"), "end"
+                Tx x1, y, cellText(dt, "F" & r), 10, h("FFFFFF"), "end"
                 y = y + ROW_PITCH
             End If
         Next r
-        y = y + 6
     End If
     y = y + OPS_GAP
 
@@ -2391,28 +2510,26 @@ Private Sub DrawOps(dt As Worksheet)
     SecBarDark y, cellText(dt, "B43")
     y = y + 36
     If n = 0 Then
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 32, h("222222"), h("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 20, "none", 11, h("A8A8A8"), "start"
-        y = y + 32
+        Tx x0, y + 12, "none", 10.5, h("A8A8A8"), "start"
+        y = y + 20
     Else
-        Rect OPS_PAD, y, CANVAS_W - 2 * OPS_PAD, 26# + ROW_PITCH * CDbl(n), h("222222"), h("3A3A3A"), 0.5
-        Tx OPS_PAD + 14, y + 16, cellText(dt, "B44"), 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 220, y + 16, cellText(dt, "C44"), 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 420, y + 16, cellText(dt, "D44"), 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 560, y + 16, cellText(dt, "E44"), 10, h("A8A8A8"), "start"
-        Tx OPS_PAD + 720, y + 16, cellText(dt, "F44"), 10, h("A8A8A8"), "start"
-        y = y + 24
+        Tx x0, y + 12, cellText(dt, "B44"), 9, h("A8A8A8"), "start", True
+        Tx x0 + 250, y + 12, cellText(dt, "C44"), 9, h("A8A8A8"), "start", True
+        Tx x1 - 280, y + 12, cellText(dt, "D44"), 9, h("A8A8A8"), "end", True
+        Tx x1 - 160, y + 12, cellText(dt, "E44"), 9, h("A8A8A8"), "end", True
+        Tx x1, y + 12, cellText(dt, "F44"), 9, h("A8A8A8"), "end", True
+        Ln x0, y + 26, x1, y + 26, h("4A4A4A"), 0.5, msoLineSolid
+        y = y + 38
         For r = 45 To 55
             If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
-                Tx OPS_PAD + 14, y + 2, cellText(dt, "B" & r), 11, h("FFFFFF"), "start"
-                Tx OPS_PAD + 220, y + 2, cellText(dt, "C" & r), 11, h("FFFFFF"), "start"
-                Tx OPS_PAD + 420, y + 2, cellText(dt, "D" & r), 11, h("FFFFFF"), "start"
-                Tx OPS_PAD + 560, y + 2, cellText(dt, "E" & r), 11, h("FFFFFF"), "start"
-                Tx OPS_PAD + 720, y + 2, cellText(dt, "F" & r), 11, h("FFFFFF"), "start"
+                Tx x0, y, cellText(dt, "B" & r), 10, h("FFFFFF"), "start"
+                Tx x0 + 250, y, cellText(dt, "C" & r), 10, h("FFFFFF"), "start"
+                Tx x1 - 280, y, cellText(dt, "D" & r), 10, h("FFFFFF"), "end"
+                Tx x1 - 160, y, cellText(dt, "E" & r), 10, h("FFFFFF"), "end"
+                Tx x1, y, cellText(dt, "F" & r), 10, h("FFFFFF"), "end"
                 y = y + ROW_PITCH
             End If
         Next r
-        y = y + 6
     End If
 
     If mUseSailBands Then

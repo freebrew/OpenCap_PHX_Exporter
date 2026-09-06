@@ -1,8 +1,10 @@
-// OpenCap Data Exporter — Background Service Worker v3.1.1
+// OpenCap Data Exporter — Background Service Worker v3.2.4
 // Fetches data directly from FieldCap's OData API using the active session.
 // Produces typed CSVs including:
 //   • job-details, crew, bha-equipment
 //   • slide/rotate metres by calendar day (SurveySheetEntries × ActivityLogs — all days in one pull)
+
+importScripts("browser-api.js");
 
 "use strict";
 

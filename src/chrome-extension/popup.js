@@ -1,4 +1,4 @@
-// OpenCap Data Exporter — Popup v3.1.8
+// OpenCap Data Exporter — Popup v3.2.4
 
 (async () => {
   "use strict";

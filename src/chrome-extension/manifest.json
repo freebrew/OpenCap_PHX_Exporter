@@ -1,8 +1,12 @@
 {
   "manifest_version": 3,
-  "name": ".OpenCap Data Exporter",
-  "version": "3.2.3",
-  "description": "Export job details, crew, BHA equipment (incl. third-party Other Tools), inventory, and daily slide/rotate metres from FieldCap to CSV via OData API using your active session.",
+  "name": "OpenCap Data Exporter",
+  "short_name": "OpenCap",
+  "version": "3.2.4",
+  "description": "Export FieldCap job, crew, BHA, inventory, and daily slide/rotate metres to CSV using your login.",
+  "author": "PHX OpenCap",
+  "homepage_url": "https://freebrew.github.io/OpenCap_PHX_Exporter/",
+  "minimum_chrome_version": "116",
   "permissions": [
     "downloads",
     "storage",
@@ -20,6 +24,7 @@
         "*://*.phxtech.com/*"
       ],
       "js": [
+        "browser-api.js",
         "content.js"
       ],
       "run_at": "document_idle"

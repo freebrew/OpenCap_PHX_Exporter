@@ -858,12 +858,12 @@ Private Sub ApplyLookupsAndRates(ByVal ws As Worksheet)
     h.Range("U7").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "U8:U44<>"""")," & cd & "U8:U44),"""")"
     h.Range("V7").Formula = "=IFERROR(ROUND(LOOKUP(2,1/(" & cd & "V8:V44<>"""")," & cd & "V8:V44),2),"""")"
 
-    ' V1 = TVD-target BRR (ProjLandingBurr: circular arc to the landing
-    ' station's TVD). V3 = measured-target DLR (3D dogleg to the yellow box
-    ' INC/AZM over remaining MD). V2/V4 stay yellow-box TRR / TFR.
+    ' Rates match their U labels: V1 = BRR (ProjLandingBurr: circular arc to
+    ' the landing station's TVD; fallback dINC/dMD). V3 = DLR (3D dogleg to
+    ' yellow-box INC/AZM over remaining MD). V2/V4 stay yellow-box TRR / TFR.
     ws.Range("V1").Formula = "=IFERROR(ROUND(ProjLandingBurr(ContDI_Data!T1,ContDI_Data!T4,ContDI_Data!U4,ContDI_Data!V1,IF(ISNUMBER(ContDI_Data!X1),ContDI_Data!X1,19.2),ProjTargets_MD,ProjTargets_INC,ProjTargets_AZM,ProjTargets_TVD),2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
     ws.Range("V2").Formula = "=IFERROR(ROUND(ABS(MOD(T3-ContDI_Data!U4+180,360)-180)/ContDI_Data!U1*30,2),"""")"
-    ws.Range("V3").Formula = "=IFERROR(ROUND(ProjDoglegDeg(ContDI_Data!T4,ContDI_Data!U4,T2,T3)/ContDI_Data!U1*30,2),"""")"
+    ws.Range("V3").Formula = "=IFERROR(ROUND(ProjDoglegDeg(ContDI_Data!T4,ContDI_Data!U4,T2,T3)/ContDI_Data!U1*30,2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
     ws.Range("V4").Formula = "=IFERROR(ProjTfToTarget(ContDI_Data!T4,ContDI_Data!U4,T2,T3,5),"""")"
     HideContDIHelpers ws
 End Sub
@@ -973,6 +973,8 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
         ws.Cells(r, COL_TVD_BIT).Formula = "=IF(AND(" & nD & ",ISNUMBER($S" & r & "),ISNUMBER($T" & r & "),ISNUMBER(B$2),ISNUMBER(E$2)),(($S" & r & "-B$2)*COS((RADIANS($T" & r & ")+RADIANS($D" & r & "))/2))+E$2,"""")"
     Next r
 End Sub
+
+
 
 
 
