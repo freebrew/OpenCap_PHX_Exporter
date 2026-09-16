@@ -32,25 +32,25 @@ Sub NEW_SS()
     sheets("Slidesheet").Select
     Range("C11:L11").Select
     Selection.ClearContents
-    Range("C12:C305").Select
+    Range("C12:C505").Select
     Selection.ClearContents
-    Range("E12:F305").Select
-    Range("F305").Activate
+    Range("E12:F505").Select
+    Range("F505").Activate
     Selection.ClearContents
     Range("B11").Select
     Selection.ClearContents
-    Range("U11:V305").Select
+    Range("U11:V505").Select
     Selection.ClearContents
-    Range("Z197:Z305").Select
-    Range("Z305").Activate
+    Range("Z197:Z505").Select
+    Range("Z505").Activate
     ActiveWindow.SmallScroll Down:=129
-    Range("Z305").Select
-    Selection.AutoFill Destination:=Range("Z11:Z305"), Type:=xlFillDefault
-    Range("Z11:Z305").Select
+    Range("Z505").Select
+    Selection.AutoFill Destination:=Range("Z11:Z505"), Type:=xlFillDefault
+    Range("Z11:Z505").Select
     Range("S12").Select
     Selection.AutoFill Destination:=Range("S11:S12"), Type:=xlFillDefault
     Range("S11:S12").Select
-    Range("AF11:AH304").Select
+    Range("AF11:AH504").Select
     Selection.ClearContents
     Range("W2:X4").Select
     Selection.ClearContents
@@ -94,6 +94,8 @@ Sub NEW_SS()
     Range("B11").Select
     
 End Sub
+
+
 
 
 

@@ -1,8 +1,9 @@
-// OpenCap Data Exporter — Background Service Worker v3.2.4
+// OpenCap Data Exporter — Background Service Worker v3.2.5
 // Fetches data directly from FieldCap's OData API using the active session.
 // Produces typed CSVs including:
 //   • job-details, crew, bha-equipment
 //   • slide/rotate metres by calendar day (SurveySheetEntries × ActivityLogs — all days in one pull)
+//   • BHA Hrs Slid / Hrs Rot from Sliding / Drilling ActivityLog duration when the BHA grid is 0
 
 importScripts("browser-api.js");
 
@@ -422,6 +423,8 @@ const pickSlideOrRotateMetres = (obj, mode) => {
 
 const normalizeKey = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const isFilled = (v) => !(v === null || v === undefined || v === "");
+const HOUR_MERGE_KEYS = new Set(["SlideHours", "RotateHours"]);
+
 const mergeNonEmpty = (base, patch) => {
   const out = { ...(base ?? {}) };
   for (const [k, v] of Object.entries(patch ?? {})) {
@@ -433,6 +436,18 @@ const mergeNonEmpty = (base, patch) => {
       Number(v) === 0
     ) {
       const prev = parseHoursNum(out[k]);
+      if (prev !== null && prev > 0) continue;
+    }
+    // BHA-grid HrsSld is often 0 while Sliding ActivityLogs carry the real time.
+    // Never let a zero hour wipe a filled value; never overwrite a keyed-in hour
+    // with the ActivityLog sum.
+    if (HOUR_MERGE_KEYS.has(k)) {
+      const next = parseHoursNum(v);
+      const prev = parseHoursNum(out[k]);
+      if (next === null || next === 0) {
+        if (prev !== null && prev > 0) continue;
+        continue;
+      }
       if (prev !== null && prev > 0) continue;
     }
     out[k] = v;
@@ -479,7 +494,7 @@ const toCanonicalBhaGridRow = (row) => {
       StartEndDepth:    getByAliases(row, ["Start/End Depth", "Start-End Depth", "Depth Range"]),
       StartDepth:       getByAliases(row, ["Start Depth", "Depth Start", "From Depth"]),
       EndDepth:         getByAliases(row, ["End Depth", "Depth End", "To Depth"]),
-      SlideHours:       getByAliases(row, ["Hrs Sld", "Hrs Slid", "Slide Hrs", "Slide Hours"]),
+      SlideHours:       getByAliases(row, ["Hrs Sld", "HrsSld", "Hrs Slid", "Slide Hrs", "Slide Hours"]),
       RotateHours:      getByAliases(row, ["Hrs Rot", "Rotate Hrs", "Rotate Hours"]),
       SlideMetres:      getByAliases(row, [
         "SLD METERS", "SLD Metres", "SLD Mtrs", "Slide Metres", "Slide Meters",
@@ -701,7 +716,7 @@ const toCanonicalAssemblyPatch = (obj) => {
     Motor:            getByAliases(obj, ["Motor", "Motor Serial", "MotorDescription"]),
     GuidanceType:     getByAliases(obj, ["Guidance", "Guidance Type", "GuidanceType"]),
     MetresDrilled:    getByAliases(obj, ["Metres Drilled", "Meters Drilled", "Meters Driled", "Meter Drilled", "MetresDrilled", "MetersDrilled", "Footage"]),
-    SlideHours:       getByAliases(obj, ["Hrs Sld", "Hrs Slid", "Slide Hrs", "Slide Hours", "SlideHours"]),
+    SlideHours:       getByAliases(obj, ["Hrs Sld", "HrsSld", "Hrs Slid", "Slide Hrs", "Slide Hours", "SlideHours"]),
     RotateHours:      getByAliases(obj, ["Hrs Rot", "Rotate Hrs", "Rotate Hours", "RotateHours"]),
     CirculateHours:   getByAliases(obj, ["Hrs Circ", "Circ Hrs", "Circulate Hours", "CirculateHours"]),
     TotalHours:       getByAliases(obj, ["Total Hrs", "Total Hours", "TotalHours"]),
@@ -1034,7 +1049,16 @@ const buildLogsByAsmIndex = (logs) => {
   return logsByAsm;
 };
 
-const surveyCellShape = () => ({ slide: 0, rot: 0, total: 0, classified: 0 });
+const surveyCellShape = () => ({
+  slide: 0, rot: 0, total: 0, classified: 0, slideHrs: 0, rotHrs: 0,
+});
+
+const activityLogDurationHours = (log) => {
+  const start = toMs(log?.StartDateTime);
+  const end = toMs(log?.EndDateTime);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return (end - start) / 3600000;
+};
 
 const bumpSurveyCell = (cell, course, tid, tMs, logsByAsm) => {
   cell.total += course;
@@ -1122,6 +1146,22 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
     const isRot = actType === ROTATE_ACTIVITY_TYPE;
     if (!isSlide && !isRot) continue;
 
+    const lf = (lifetime[bha] ??= surveyCellShape());
+    const dayStr = surveyDayBucketKey(log.StartDateTime);
+    const dc = dayStr ? ((byDay[bha] ??= {})[dayStr] ??= surveyCellShape()) : null;
+
+    // Duration is independent of MD. A Sliding row with 44 min and no Custom1/2
+    // still belongs in BHA Hrs Slid.
+    const hrs = activityLogDurationHours(log);
+    if (hrs > 0) {
+      if (isSlide) lf.slideHrs += hrs;
+      if (isRot) lf.rotHrs += hrs;
+      if (dc) {
+        if (isSlide) dc.slideHrs += hrs;
+        if (isRot) dc.rotHrs += hrs;
+      }
+    }
+
     const startMd = parseFloat(log.Custom1);
     const endMd = parseFloat(log.Custom2);
     if (!Number.isFinite(startMd) || !Number.isFinite(endMd)) continue;
@@ -1130,16 +1170,10 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
 
     const slide = isSlide ? cl : 0;
     const rot = isRot ? cl : 0;
-
-    const dayStr = surveyDayBucketKey(log.StartDateTime);
-
-    const lf = (lifetime[bha] ??= surveyCellShape());
     lf.slide += slide;
     lf.rot += rot;
     lf.total += cl;
-
-    if (dayStr) {
-      const dc = ((byDay[bha] ??= {})[dayStr] ??= surveyCellShape());
+    if (dc) {
       dc.slide += slide;
       dc.rot += rot;
       dc.total += cl;
@@ -1151,11 +1185,15 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
 const finalizeSurveyPatchMap = (totals) => {
   const out = {};
   for (const [bha, v] of Object.entries(totals)) {
-    if (v.slide <= 0 && v.rot <= 0 && v.total <= 0) continue;
+    const slideHrs = v.slideHrs ?? 0;
+    const rotHrs = v.rotHrs ?? 0;
+    if (v.slide <= 0 && v.rot <= 0 && v.total <= 0 && slideHrs <= 0 && rotHrs <= 0) continue;
     const patch = {};
     if (v.slide > 0) patch.SlideMetres = Number(v.slide.toFixed(2));
     if (v.rot > 0) patch.RotateMetres = Number(v.rot.toFixed(2));
     if (v.total > 0) patch.MetresDrilled = Number(v.total.toFixed(2));
+    if (slideHrs > 0) patch.SlideHours = Number(slideHrs.toFixed(2));
+    if (rotHrs > 0) patch.RotateHours = Number(rotHrs.toFixed(2));
     if (Object.keys(patch).length) out[bha] = patch;
   }
   return out;
@@ -2223,17 +2261,27 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
   const tH4 = pickRaw(assemblyPick, "ToolHours4");
 
   let hrsSlide = pickHours(assemblyPick,
-    "SlideHours", "SlideHrs", "SlidingHours", "HoursSliding", "HrsSlide"
+    "SlideHours", "SlideHrs", "SlidingHours", "HoursSliding", "HrsSlide",
+    "HrsSld", "HrsSlid", "Hrs Sld", "BHA Hrs Slid"
   );
   let hrsRot = pickHours(assemblyPick,
-    "RotateHours", "RotateHrs", "RotatingHours", "HoursRotating", "HrsRotate"
+    "RotateHours", "RotateHrs", "RotatingHours", "HoursRotating", "HrsRotate",
+    "HrsRot", "Hrs Rot"
   );
   let hrsCirc = pickHours(assemblyPick,
     "CirculateHours", "CircHours", "CirculatingHours", "HoursCirculating", "HrsCirc", "CircHrs"
   );
-  if (!hrsSlide) hrsSlide = minutesToHours(tH2);
-  if (!hrsRot)   hrsRot   = minutesToHours(tH1);
-  if (!hrsCirc)  hrsCirc  = minutesToHours(tH3);
+  // "0.00" is truthy — treat zero as empty so ToolHours minutes can fill.
+  const hoursOrMinutes = (current, minutesRaw) => {
+    const n = parseHoursNum(current);
+    if (n !== null && n > 0) return current;
+    const fromMin = minutesToHours(minutesRaw);
+    const m = parseHoursNum(fromMin);
+    return m !== null && m > 0 ? fromMin : current;
+  };
+  hrsSlide = hoursOrMinutes(hrsSlide, tH2);
+  hrsRot = hoursOrMinutes(hrsRot, tH1);
+  hrsCirc = hoursOrMinutes(hrsCirc, tH3);
 
   let hrsTotal = pickHours(assemblyPick,
     "TotalHours", "TotalHrs", "TotalDrillingHours", "HoursTotal", "DrillHours"
@@ -2243,12 +2291,13 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
   );
   if (!hrsBelowRot) hrsBelowRot = minutesToHours(tH4);
 
-  // If tenant stores only slide/rot/circ in ToolHours slots, derive total hours.
-  if (!hrsTotal) {
+  // If tenant stores only slide/rot/circ (or ActivityLog duration), derive total.
+  const totalNum = parseHoursNum(hrsTotal);
+  if (totalNum === null || totalNum === 0) {
     const s = parseHoursNum(hrsSlide);
     const r = parseHoursNum(hrsRot);
     const c = parseHoursNum(hrsCirc);
-    if (s !== null || r !== null || c !== null) {
+    if ((s ?? 0) + (r ?? 0) + (c ?? 0) > 0) {
       hrsTotal = ((s ?? 0) + (r ?? 0) + (c ?? 0)).toFixed(2);
     }
   }

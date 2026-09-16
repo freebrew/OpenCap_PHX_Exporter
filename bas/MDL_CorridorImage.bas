@@ -16,7 +16,9 @@ Option Explicit
 '      shaft:  concentric N/E target rings; hole + plan pierce the plane.
 '      tunnel: MD along X; TVD plot exaggerated; AA14 / geo +/- on walls+floor
 '
-'  Framed from the last survey to the next named T2:Y5 target.
+'  Lateral X = reporting-day metres (Data I4/J4 Start/End Depth, same as C4/C5).
+'  Shaft camera uses that same 24 h pair. VERTICAL/BUILD survey collect still
+'  rolls around the bit; the next T2:Y5 target is labels / metrics only.
 '
 '  Two panels sit beside it: a true 1:1 vertical section of the whole well, and
 '  the last-survey / position / requirement figures as text. Those figures are the
@@ -113,6 +115,7 @@ Private mAMD() As Double, mANS() As Double, mAEW() As Double, mATvd() As Double
 Private mACount As Long
 Private mSvyNS As Double, mSvyEW As Double
 Private mShOx As Double, mShOy As Double, mShS As Double
+Private mShNS As Double   ' N' (L/R / into-the-box) scale; mShS is E' / along-hole
 Private mShV0 As Double, mShNMin As Double, mShNMax As Double
 Private mShEMin As Double, mShEMax As Double, mShV1 As Double
 Private mTgtN As Double, mTgtE As Double, mTgtV As Double
@@ -121,12 +124,29 @@ Private mShVS As Double   ' pt per m of TVD (pierce is compressed, disk is 1:1)
 ' Geo corridor ribbons slope with waypoint TVD; hole uses the same frame.
 Private mTvdDatum As Double
 
+' ---- shaft-view yaw --------------------------------------------------------------
+' The shadow box rotates the N/E frame to the hole instead of drawing raw grid
+' axes (which could point the drilled line straight at the viewer):
+'   default  — looking down the line: hole direction at the window end recedes
+'              into the box (maps onto the N' depth diagonal);
+'   lateral  — inc at the window end >= LAT_VIEW_INC: the hole (curve-to-HEEL
+'              blend, heel, lateral) runs strictly left -> right (maps onto E').
+Private mVwC As Double, mVwS As Double   ' cos/sin of the yaw applied to (n,e)
+Private mVwAzOff As Double               ' yaw in degrees, added to world azimuths
+Private mVwLat As Boolean                ' True = lateral left->right framing
+Private mVwLand As Boolean               ' True = curve landing into the heel (keep TVD)
+Private Const LAT_VIEW_INC As Double = 55#
+Private Const LAND_START_INC As Double = 84#
+' Example-window override (RenderCorridorExample). 0 = live reporting-day window.
+Private mExA As Double, mExB As Double
+
 ' ---- last survey and forward projection ---------------------------------------
 Private mSvyMD As Double, mSvyInc As Double, mSvyAzi As Double, mSvyTvd As Double
 Private mSvyDev As Double, mSvyLat As Double, mSvyPlanAzi As Double
 Private mBitMD As Double
-Private mWpMD As Double, mWpTvd As Double
+Private mWpMD As Double, mWpTvd As Double, mWpInc As Double
 Private mToGo As Double, mReqInc As Double, mHoldDevEnd As Double, mHoldLatEnd As Double
+Private mBurr As Double, mShowBurr As Boolean
 
 ' ---- waypoints -----------------------------------------------------------------
 Private mWMD() As Double, mWTvd() As Double, mWInc() As Double
@@ -278,6 +298,15 @@ Done:
     Set mWs = Nothing
 End Function
 
+' Shadow box for an arbitrary MD window (perspective QA / examples). Corridor
+' band only; the live 24 h path is untouched. Returns the exported PNG path.
+Public Function RenderCorridorExample(ByVal mdFrom As Double, ByVal mdTo As Double, _
+                                      Optional ByVal outPath As String = "") As String
+    mExA = mdFrom: mExB = mdTo
+    RenderCorridorExample = RenderCorridorPng(outPath, "corridor")
+    mExA = 0#: mExB = 0#
+End Function
+
 ' Whatever went wrong on the last RenderCorridorPng call, "" if it succeeded.
 Public Function CorridorLastError() As String
     CorridorLastError = mLastError
@@ -293,7 +322,8 @@ Public Function CorridorSceneInfo() As String
         Format$(mSvyMD, "#,##0.00") & " inc " & Format$(mSvyInc, "0.00") & _
         " dev " & Format$(mSvyDev, "0.00") & " lat " & Format$(mSvyLat, "0.00") & _
         "; next wp " & Format$(mWpMD, "#,##0") & " to go " & Format$(mToGo, "0.0") & _
-        " req " & Format$(mReqInc, "0.00") & " shapes " & mNameN
+        " req " & IIf(mShowBurr, "BURR " & Format$(mBurr, "0.00"), Format$(mReqInc, "0.00")) & _
+        " shapes " & mNameN
 End Function
 
 ' Proves the VBE is honouring On Error rather than breaking on every error, which
@@ -408,24 +438,28 @@ Private Function BuildScene(ss As Worksheet) As Boolean
     Dim tMd As Double, tTvd As Double, tInc As Double, tName As String
     mTgtName = "WP"
     mWpMD = 0#
+    mWpInc = 0#
     For i = 0 To mWCount - 1
         If mWMD(i) > mSvyMD + 0.005 Then
-            mWpMD = mWMD(i): mWpTvd = mWTvd(i)
+            mWpMD = mWMD(i): mWpTvd = mWTvd(i): mWpInc = mWInc(i)
             Exit For
         End If
     Next i
     If mWpMD > 0# Then
         ' Label it with the plan-target name when they are the same station.
         If NextPlanTarget(ss, mSvyMD, tMd, tTvd, tInc, tName) Then
-            If Abs(tMd - mWpMD) < 0.75 Then mTgtName = tName
+            If Abs(tMd - mWpMD) < 0.75 Then
+                mTgtName = tName
+                If tInc > 0.01 Then mWpInc = tInc
+            End If
         End If
         If mUserWpCount >= 1 And Abs(mWpMD - mHeelMD) < 0.01 Then mTgtName = "HEEL"
     ElseIf NextPlanTarget(ss, mSvyMD, tMd, tTvd, tInc, tName) Then
-        mWpMD = tMd: mWpTvd = tTvd: mTgtName = tName
+        mWpMD = tMd: mWpTvd = tTvd: mWpInc = tInc: mTgtName = tName
     ElseIf mWCount > 0 Then
-        mWpMD = mWMD(mWCount - 1): mWpTvd = mWTvd(mWCount - 1)
+        mWpMD = mWMD(mWCount - 1): mWpTvd = mWTvd(mWCount - 1): mWpInc = mWInc(mWCount - 1)
     Else
-        mWpMD = mSvyMD + 80#: mWpTvd = mSvyTvd
+        mWpMD = mSvyMD + 80#: mWpTvd = mSvyTvd: mWpInc = mSvyInc
     End If
     If mWpTvd = 0# Then
         If Not MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mWpMD, mWpTvd) Then
@@ -465,6 +499,11 @@ Private Function BuildScene(ss As Worksheet) As Boolean
 
     mShaft = (mSection <> "LATERAL")
     mUseSailBands = (mSection = "LATERAL")
+    ' Example renders always want the shadow box, whatever the live bit state.
+    If mExB > 0# Then
+        mShaft = True
+        mUseSailBands = False
+    End If
 
     If Not MDL_PlanGauge.PG_WaypointTvdAtMd(ss, mMD0, mTvdDatum) Then
         ' Room opens just ahead of the heel: 0 on the back wall = geo at the heel.
@@ -554,6 +593,7 @@ Private Function BuildScene(ss As Worksheet) As Boolean
     mReqInc = WorksheetFunction.Acos(c) * 180# / PIE
     mHoldDevEnd = mWpTvd - (mSvyTvd + mToGo * Cos(mSvyInc * PIE / 180#))
     mHoldLatEnd = mSvyLat + mToGo * Sin((mSvyAzi - mSvyPlanAzi) * PIE / 180#)
+    ComputeBurrMetrics
 
     Trace "BuildScene ok " & CorridorSceneInfo()
     BuildScene = True
@@ -656,6 +696,36 @@ NextMerge:
     Next r
 End Sub
 
+' BURR while the next station still needs a real inclination change (KOP→TANGENT,
+' SOT→EOT, curve→HEEL). Vertical, tangent hold, and lateral keep required inc.
+Private Function AimInclination() As Double
+    AimInclination = mWpInc
+    If UCase$(Trim$(mTgtName)) = "HEEL" And AimInclination < 80# Then AimInclination = 90#
+End Function
+
+Private Sub ComputeBurrMetrics()
+    Dim aim As Double, dTvd As Double, dSin As Double, radius As Double
+    mBurr = 0#
+    mShowBurr = False
+    If mSection = "VERTICAL" Or mSection = "LATERAL" Then Exit Sub
+
+    aim = AimInclination()
+    If Abs(aim - mSvyInc) <= 2.5 Then Exit Sub
+    If mToGo <= 0.01 Then Exit Sub
+
+    mShowBurr = True
+    If aim >= 80# Then
+        dTvd = mWpTvd - mSvyTvd
+        dSin = Sin(aim * PIE / 180#) - Sin(mSvyInc * PIE / 180#)
+        If dTvd > 0.01 And dSin > 0.01 Then
+            radius = dTvd / dSin
+            mBurr = (30# * 180# / PIE) / radius
+            Exit Sub
+        End If
+    End If
+    mBurr = (aim - mSvyInc) * 30# / mToGo
+End Sub
+
 Private Sub ClassifySection(ByVal incDeg As Double)
     If incDeg < 5# Then
         mSection = "VERTICAL"
@@ -677,13 +747,39 @@ End Sub
 
 Private Sub FrameWindowToTarget()
     Dim lookBack As Double, maxWin As Double, minWin As Double, maxAhead As Double
+    Dim day0 As Double, day1 As Double
+
+    ' Example QA window wins (RenderCorridorExample).
+    If mExB > mExA And mExB > 0# Then
+        mMD0 = mExA
+        mMD1 = mExB
+        Exit Sub
+    End If
+
+    ' Lateral email / live room: X is the reporting-day metres (Data I4/J4,
+    ' same pair as C4/C5) — not an 800 m look-back. That leftover camera
+    ' made the 24 h bar a sliver on a long tunnel and hid the day's hole.
+    If mSection = "LATERAL" Then
+        ReportDayMd day0, day1
+        If day1 < mSvyMD Then day1 = mSvyMD
+        mMD0 = day0
+        mMD1 = day1
+        If mMD0 < 0# Then mMD0 = 0#
+        If mMD1 - mMD0 < 15# Then
+            mMD0 = mMD1 - 15#
+            If mMD0 < 0# Then mMD0 = 0#
+        End If
+        ' A few metres past the bit so the BIT tag is not clipped. The 24 h
+        ' bar still paints I -> J; this pad is not extra day's footage.
+        If mMD1 < mSvyMD + 8# Then mMD1 = mSvyMD + 8#
+        Exit Sub
+    End If
+
     Select Case mSection
         Case "VERTICAL"
             lookBack = 80#: maxWin = 400#: minWin = 60#: maxAhead = 200#
-        Case "BUILD"
-            lookBack = 250#: maxWin = 800#: minWin = 120#: maxAhead = 400#
         Case Else
-            lookBack = 800#: maxWin = WINDOW_LEN: minWin = 200#: maxAhead = 400#
+            lookBack = 250#: maxWin = 800#: minWin = 120#: maxAhead = 400#
     End Select
     mMD1 = mWpMD + RUN_AHEAD
     If mMD1 < mSvyMD + 15# Then mMD1 = mSvyMD + 15#
@@ -697,12 +793,6 @@ Private Sub FrameWindowToTarget()
     If mMD1 - mMD0 < minWin Then
         mMD0 = mMD1 - minWin
         If mMD0 < 0# Then mMD0 = 0#
-    End If
-    ' Tunnel starts at the heel. Looking back into the build dragged 100+ m of
-    ' TVD into a room scaled for a +/-2 m corridor and smeared everything into
-    ' a diagonal. The look-back grows naturally as the lateral is drilled.
-    If mSection = "LATERAL" And mUserWpCount >= 1 Then
-        If mMD0 < mHeelMD - HEEL_LEAD Then mMD0 = mHeelMD - HEEL_LEAD
     End If
 End Sub
 
@@ -1011,7 +1101,8 @@ Private Sub DrawRoom()
     Dim plot As Double, endGeo As Double, endHi As Double
 
     Tx mVX, 20, "WELLBORE CORRIDOR " & ChrW(8212) & " " & mSection & " to " & mTgtName & _
-       "  " & Format$(mMD0, "#,##0") & " to " & Format$(mMD1, "#,##0") & " mMD", _
+       "  " & Format$(mMD0, "#,##0") & " to " & Format$(mMD1, "#,##0") & " mMD" & _
+       "  " & ChrW(183) & " 24 h " & Format$(mMD1 - mMD0, "#,##0") & " m", _
        12.5, h("FFFFFF"), "start", True
     Rect mVX, mVY, mVW, mVH, h("222222"), h("3A3A3A"), 0.75
 
@@ -1023,7 +1114,7 @@ Private Sub DrawRoom()
     Quad mMD0, mDevHi, -mLatBox, mMD1, mDevHi, -mLatBox, _
          mMD1, mDevLo, -mLatBox, mMD0, mDevLo, -mLatBox, -1, h("4A4A4A"), 0.75
 
-    Dim dv As Double, tick As Double, dvStep As Double
+    Dim dV As Double, tick As Double, dvStep As Double
     If mShaft Then
         tick = 50#
         If (mDevLo - mDevHi) > 400# Then tick = 100#
@@ -1032,17 +1123,17 @@ Private Sub DrawRoom()
         tick = 2#
         dvStep = -tick
     End If
-    For dv = Int(mDevHi / tick) * tick To mDevLo Step dvStep
-        Dim isZero As Boolean: isZero = (Abs(dv) < 0.001)
-        Ln ObX(mMD0, mLatBox), ObY(dv, mLatBox), ObX(mMD1, mLatBox), ObY(dv, mLatBox), _
+    For dV = Int(mDevHi / tick) * tick To mDevLo Step dvStep
+        Dim isZero As Boolean: isZero = (Abs(dV) < 0.001)
+        Ln ObX(mMD0, mLatBox), ObY(dV, mLatBox), ObX(mMD1, mLatBox), ObY(dV, mLatBox), _
            IIf(isZero, h("555555"), h("3A3A3A")), 0.7, IIf(isZero, msoLineDash, msoLineSysDot)
-        Ln ObX(mMD0, -mLatBox), ObY(dv, -mLatBox), ObX(mMD1, -mLatBox), ObY(dv, -mLatBox), _
+        Ln ObX(mMD0, -mLatBox), ObY(dV, -mLatBox), ObX(mMD1, -mLatBox), ObY(dV, -mLatBox), _
            IIf(isZero, h("444444"), h("333333")), 0.6, IIf(isZero, msoLineDash, msoLineSysDot)
-        Ln ObX(mMD0, -mLatBox), ObY(dv, -mLatBox), ObX(mMD0, mLatBox), ObY(dv, mLatBox), _
+        Ln ObX(mMD0, -mLatBox), ObY(dV, -mLatBox), ObX(mMD0, mLatBox), ObY(dV, mLatBox), _
            h("3A3A3A"), 0.6, msoLineSolid
-        Tx ObX(mMD0, -mLatBox) - 5, ObY(dv, -mLatBox) + 3, _
-           IIf(mShaft, Format$(dv, "#,##0"), SignedM(dv)), 8.5, h("A8A8A8"), "end"
-    Next dv
+        Tx ObX(mMD0, -mLatBox) - 5, ObY(dV, -mLatBox) + 3, _
+           IIf(mShaft, Format$(dV, "#,##0"), SignedM(dV)), 8.5, h("A8A8A8"), "end"
+    Next dV
 
     If mUseSailBands Then
         DrawGeoCorridorRibbon mLatBox, h("1E3A2F"), h("4CAF7A"), 1.15
@@ -1203,10 +1294,12 @@ Private Sub DrawRoom()
     End If
 
     ' ---- reporting-day span along the front foot of the room -------------------
-    ' drawn last so it sits over the floor edge rather than under it
+    ' drawn last so it sits over the floor edge rather than under it.
+    ' Same I4/J4 (or C4/C5) pair that frames the lateral X axis.
     Dim d0 As Double, d1 As Double, dy As Double
-    d0 = ClampMd(NumCell(ThisWorkbook.Worksheets("Data").Range("C4")))
-    d1 = ClampMd(NumCell(ThisWorkbook.Worksheets("Data").Range("C5")))
+    ReportDayMd d0, d1
+    d0 = ClampMd(d0)
+    d1 = ClampMd(d1)
     dy = mVY + mVH - 16
     Rect ObX(d0, -mLatBox), dy - 8, ObX(d1, -mLatBox) - ObX(d0, -mLatBox), 11, _
          h("1A3348"), h("5BA3D9"), 0.75
@@ -1232,7 +1325,11 @@ Private Sub DrawRoom()
     Ln mVX + 108, ly, mVX + 124, ly, h("9EC9B0"), 2#, msoLineDash
     Tx mVX + 128, ly + 4, "shadows", 10, h("FFFFFF"), "start"
     Ln mVX + 178, ly, mVX + 194, ly, h("FF5555"), 2.4, msoLineSolid
-    Tx mVX + 198, ly + 4, "required " & Format$(mReqInc, "0.00") & ChrW(176), 10, h("FFFFFF"), "start"
+    If mShowBurr Then
+        Tx mVX + 198, ly + 4, "BURR " & Format$(mBurr, "0.00") & ChrW(176) & "/30m", 10, h("FFFFFF"), "start"
+    Else
+        Tx mVX + 198, ly + 4, "required " & Format$(mReqInc, "0.00") & ChrW(176), 10, h("FFFFFF"), "start"
+    End If
     Ln mVX + 292, ly, mVX + 308, ly, h("E09A3D"), 2.2, msoLineDash
     Tx mVX + 312, ly + 4, "if " & Format$(mSvyInc, "0.00") & ChrW(176) & " held", 10, h("FFFFFF"), "start"
     Dot mVX + 420, ly, 2.5, h("4CAF7A"), -1, 0
@@ -1274,12 +1371,13 @@ Private Sub DrawShaftProfile()
     Dim visEnd As Double
     visEnd = day1
     If mSvyMD > visEnd Then visEnd = mSvyMD
-    ' Long reporting days (stale 00:00, first-day totals) still get a tight
-    ' camera: last ~150 m of hole plus a short look-ahead, not surface-to-bit.
-    If (visEnd - day0) > 180# Then
-        mdA = visEnd - 150#
-    Else
-        mdA = day0
+    ' X / camera = reporting-day metres (Data I4/J4). Do not crop a long
+    ' day to the last 150 m — that hid most of the 24 h hole.
+    mdA = day0
+    ' Example override: arbitrary MD window (perspective QA renders).
+    If mExB > mExA And mExB > 0# Then
+        mdA = mExA
+        visEnd = mExB
     End If
     ahead = (visEnd - mdA) * 0.55
     If ahead < 40# Then ahead = 40#
@@ -1288,7 +1386,7 @@ Private Sub DrawShaftProfile()
     If mWpMD > visEnd And mWpMD <= visEnd + ahead + 0.5 Then mdB = mWpMD + 8#
     If mdB <= mdA Then mdB = mdA + 40#
 
-    Tx mVX, 18, "24 h  " & Format$(mdA, "#,##0") & " " & ChrW(8594) & " " & _
+    Tx mVX, 18, IIf(mExB > 0#, "view  ", "24 h  ") & Format$(mdA, "#,##0") & " " & ChrW(8594) & " " & _
        Format$(visEnd, "#,##0") & " mMD   " & Format$(visEnd - mdA, "#,##0.0") & " m", _
        12, ink, "start", True
     Tx mVX, mVY + 12, "plan  " & ChrW(183) & "  last 24 h hole  " & ChrW(183) & _
@@ -1325,6 +1423,21 @@ Private Sub DrawShaftProfile()
 
     CollectDayHole mdA, visEnd, hN, hE, hV, nH
 
+    ' Yaw the frame to the hole BEFORE extents: walls, grids, shadows, targets
+    ' and the bit all draw in the rotated (n', e') frame from here on.
+    ComputeShaftView planPN, planPE, planPV, nPl, hN, hE, hV, nH
+    Dim rotN As Double
+    For i = 0 To nPl - 1
+        rotN = VwN(planPN(i), planPE(i))
+        planPE(i) = VwE(planPN(i), planPE(i))
+        planPN(i) = rotN
+    Next i
+    For i = 0 To nH - 1
+        rotN = VwN(hN(i), hE(i))
+        hE(i) = VwE(hN(i), hE(i))
+        hN(i) = rotN
+    Next i
+
     frmN = 0#: frmE = 0#
     If nPl >= 1 Then
         frmN = planPN(0): frmE = planPE(0)
@@ -1337,7 +1450,7 @@ Private Sub DrawShaftProfile()
         eMin = hE(0): eMax = hE(0)
         vMin = hV(0): vMax = hV(0)
     Else
-        frmN = mSvyNS: frmE = mSvyEW
+        frmN = VwN(mSvyNS, mSvyEW): frmE = VwE(mSvyNS, mSvyEW)
         nMin = 0#: nMax = 0#: eMin = 0#: eMax = 0#
         vMin = mSvyTvd: vMax = mSvyTvd
     End If
@@ -1383,12 +1496,21 @@ Private Sub DrawShaftProfile()
     Dim hxMin As Double, hxMax As Double, hyMin As Double, hyMax As Double
     Dim hx As Double, hy As Double
     Dim cN As Double, cE As Double
+    Dim nEx As Double
+    ' N' is the cross-section (L/R, labels stay in metres). Landing: 3x so
+    ' ±10 m reads. Flat lateral keeps the stronger L/R zoom.
+    nEx = 1#
+    If mVwLand Then
+        nEx = 3#
+    ElseIf mVwLat Then
+        nEx = 12#
+    End If
     hxMin = 1E+30: hxMax = -1E+30: hyMin = 1E+30: hyMax = -1E+30
     For i = 0 To 3
         If i < 2 Then cN = nMin Else cN = nMax
         If (i Mod 2) = 0 Then cE = eMin Else cE = eMax
-        hx = cE * 0.88 + cN * 0.52
-        hy = -cN * 0.4 + cE * 0.18
+        hx = cE * 0.88 + cN * nEx * 0.52
+        hy = -cN * nEx * 0.4 + cE * 0.18
         If hx < hxMin Then hxMin = hx
         If hx > hxMax Then hxMax = hx
         If hy < hyMin Then hyMin = hy
@@ -1402,11 +1524,23 @@ Private Sub DrawShaftProfile()
     If mShS * (hyMax - hyMin) > usableH * 0.42 Then
         mShS = usableH * 0.42 / (hyMax - hyMin)
     End If
+    mShNS = mShS * nEx
     vertRoom = usableH - mShS * (hyMax - hyMin)
     mShVS = vertRoom / (vMax - vMin)
     If mShVS < 0.01 Then mShVS = 0.01
+    If mVwLat And Not mVwLand Then
+        If mShVS > mShS * 2# Then mShVS = mShS * 2#
+        ' Same TVD range and tick step; box is 3x taller so the weave reads.
+        mShVS = mShVS * 3#
+        If mShVS * (vMax - vMin) > vertRoom Then mShVS = vertRoom / (vMax - vMin)
+    Else
+        If mShVS > mShS * 6# Then mShVS = mShS * 6#
+    End If
+    Dim spareV As Double
+    spareV = vertRoom - mShVS * (vMax - vMin)
+    If spareV < 0# Then spareV = 0#
     mShOx = mVX + 56# - hxMin * mShS
-    mShOy = mVY + 22# - (vMin - mTgtV) * mShVS - hyMin * mShS
+    mShOy = mVY + 22# + spareV / 2# - (vMin - mTgtV) * mShVS - hyMin * mShS
 
     Quad3 nMax, eMin, vMin, nMax, eMax, vMin, nMax, eMax, vMax, nMax, eMin, vMax, wallFill, wallEdge
     Quad3 nMin, eMin, vMin, nMax, eMin, vMin, nMax, eMin, vMax, nMin, eMin, vMax, wallFill, wallEdge
@@ -1428,9 +1562,11 @@ Private Sub DrawShaftProfile()
     stepE = NiceStep(eMax - eMin, 4)
     g = stepN * Int(nMin / stepN)
     If g < nMin Then g = g + stepN
+    ' Floor grid numbers are metres in the yawed frame (relative to the window
+    ' centre) — absolute N/E stops meaning anything once the box is hole-oriented.
     Do While g <= nMax + 0.01
         Ln ShX(g, eMin), ShY(g, eMin, vMax), ShX(g, eMax), ShY(g, eMax, vMax), gridClr, 0.5, msoLineSolid
-        Tx ShX(g, eMax) + 2, ShY(g, eMax, vMax) + 11, Format$(g + frmN, "0"), 6.5, h("5C6770"), "start"
+        Tx ShX(g, eMax) + 2, ShY(g, eMax, vMax) + 11, Format$(g, "0"), 6.5, h("5C6770"), "start"
         g = g + stepN
     Loop
     g = stepE * Int(eMin / stepE)
@@ -1439,7 +1575,7 @@ Private Sub DrawShaftProfile()
         Ln ShX(nMin, g), ShY(nMin, g, vMax), ShX(nMax, g), ShY(nMax, g, vMax), gridClr, 0.5, msoLineSolid
         ' E-axis numbers on the open FRONT edge of the floor (n = nMin), not at
         ' the back-wall joint where they read as part of the back scale.
-        Tx ShX(nMin, g) - 3, ShY(nMin, g, vMax) + 5, Format$(g + frmE, "0"), 6.5, h("5C6770"), "end"
+        Tx ShX(nMin, g) - 3, ShY(nMin, g, vMax) + 5, Format$(g, "0"), 6.5, h("5C6770"), "end"
         g = g + stepE
     Loop
 
@@ -1475,15 +1611,28 @@ Private Sub DrawShaftProfile()
 
     DrawNamedTargetsOnPlan np, pMD, pInc, pAzi, pTvd, pNS, pEW, frmN, frmE, mdA, mdB
 
-    Dot ShX(mSvyNS - frmN, mSvyEW - frmE), ShY(mSvyNS - frmN, mSvyEW - frmE, mSvyTvd), _
-       3.6, holeClr, h("1A1A1A"), 0.8
-    Tx ShX(mSvyNS - frmN, mSvyEW - frmE) - 7, _
-       ShY(mSvyNS - frmN, mSvyEW - frmE, mSvyTvd) + 2, "BIT", 8.5, holeClr, "end", True
+    ' BIT marker in the yawed frame; example windows that end before the bit
+    ' leave it out rather than pinning it outside the walls.
+    Dim bN As Double, bE As Double
+    bN = VwN(mSvyNS, mSvyEW) - frmN
+    bE = VwE(mSvyNS, mSvyEW) - frmE
+    If mExB <= 0# Or (mSvyMD >= mdA - 0.5 And mSvyMD <= visEnd + 0.5) Then
+        Dot ShX(bN, bE), ShY(bN, bE, mSvyTvd), 3.6, holeClr, h("1A1A1A"), 0.8
+        Tx ShX(bN, bE) - 7, ShY(bN, bE, mSvyTvd) + 2, "BIT", 8.5, holeClr, "end", True
+    End If
 
+    ' Grid-north arrow through the same yaw + oblique basis as the geometry.
     Dim gx As Double, gy As Double
+    Dim gnN As Double, gnE As Double, gdx As Double, gdy As Double, gm As Double
     gx = mVX + mVW - 40#: gy = mVY + mVH - 12#
-    Ln gx, gy, gx + 13#, gy - 10#, planClr, 1.1, msoLineSolid
-    Tx gx + 16, gy - 10, "GN", 8, planClr, "start", True
+    gnN = VwN(1#, 0#): gnE = VwE(1#, 0#)
+    gdx = gnE * 0.88 + gnN * 0.52
+    gdy = -gnN * 0.4 + gnE * 0.18
+    gm = Sqr(gdx * gdx + gdy * gdy)
+    If gm < 0.0001 Then gm = 1#
+    gdx = gdx / gm * 13#: gdy = gdy / gm * 13#
+    Ln gx, gy, gx + gdx, gy + gdy, planClr, 1.1, msoLineSolid
+    Tx gx + gdx + 3, gy + gdy + 4, "GN", 8, planClr, "start", True
 
     ly = mVY + mVH + 14
     Ln mVX + 2, ly, mVX + 18, ly, holeClr, 2.4, msoLineSolid
@@ -1548,14 +1697,21 @@ Private Sub ShadowOnWall(pN() As Double, pE() As Double, pV() As Double, _
     PolyLine xs, ys, cnt, clr, 1.05, msoLineSolid
 End Sub
 
-' Data C4/C5 = reporting-day start/end MD (same cells the tunnel 24 h bar uses).
+' Data I4/J4 = Midnight Start Depth / End Depth (24 h metres drilled).
+' C4/C5 are the same pair shown as 00:00 Depth / Midnight Depth.
 Private Sub ReportDayMd(ByRef d0 As Double, ByRef d1 As Double)
     On Error Resume Next
-    d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
-    d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
+    d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("I4"))
+    d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("J4"))
+    If d1 <= 0# Then
+        d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
+        d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
+    End If
     On Error GoTo 0
     If d1 <= 0# Then d1 = mSvyMD
-    If d0 <= 0# Or d0 >= d1 Then
+    ' MD 0 is a real start (spud). Only replace an inverted / empty pair.
+    If d0 < 0# Then d0 = 0#
+    If d0 >= d1 Then
         d0 = d1 - 30#
         If d0 < 0# Then d0 = 0#
     End If
@@ -1570,13 +1726,19 @@ Private Sub CollectDayHole(ByVal day0 As Double, ByVal day1 As Double, _
     Dim tN As Double, tE As Double, tv As Double
     nH = 0
     If mACount < 2 Then Exit Sub
+    ' Respect the caller's window as-is: the live 24 h window already ends at
+    ' the last survey, and example windows must stay clipped where they end.
     mdLo = day0: mdHi = day1
-    If mdHi < mSvyMD Then mdHi = mSvyMD
     ReDim hN(0 To mACount + 1): ReDim hE(0 To mACount + 1): ReDim hV(0 To mACount + 1)
 
-    If HoleXyzAtMd(mdLo, tN, tE, tv) Then
-        hN(0) = tN: hE(0) = tE: hV(0) = tv
-        nH = 1
+    ' Seed the interpolated start only inside survey coverage — HoleXyzAtMd
+    ' clamps, and a clamped phantom at the bit grows the box 60 m under a
+    ' window that is entirely ahead of the surveys.
+    If mdLo < mAMD(mACount - 1) - 0.01 Then
+        If HoleXyzAtMd(mdLo, tN, tE, tv) Then
+            hN(0) = tN: hE(0) = tE: hV(0) = tv
+            nH = 1
+        End If
     End If
     For i = 0 To mACount - 1
         If mAMD(i) > mdLo + 0.01 And mAMD(i) <= mdHi + 0.05 Then
@@ -1584,8 +1746,10 @@ Private Sub CollectDayHole(ByVal day0 As Double, ByVal day1 As Double, _
             nH = nH + 1
         End If
     Next i
-    If nH < 2 And mACount >= 2 Then
+    If nH < 2 And mACount >= 2 And mSvyMD >= mdLo - 0.5 And mSvyMD <= mdHi + 0.5 Then
         ' One station in the day: keep the previous stand so the line exists.
+        ' Only when the bit is inside the window — example windows before or
+        ' past survey coverage must not pin the last stand outside their walls.
         For i = mACount - 1 To 1 Step -1
             If mAMD(i) <= mdHi Then
                 hN(0) = mANS(i - 1): hE(0) = mAEW(i - 1): hV(0) = mATvd(i - 1)
@@ -1595,6 +1759,8 @@ Private Sub CollectDayHole(ByVal day0 As Double, ByVal day1 As Double, _
             End If
         Next i
     End If
+    ' A single point cannot draw and must not grow the extents.
+    If nH < 2 Then nH = 0
 End Sub
 
 Private Function HoleXyzAtMd(ByVal md As Double, ByRef outN As Double, _
@@ -1629,7 +1795,8 @@ Private Function IsPlotTargetName(ByVal s As String) As Boolean
     s = UCase$(Trim$(s))
     IsPlotTargetName = (s = "KOP" Or s = "TANGENT" Or s = "HEEL" _
                      Or s = "SOT" Or s = "EOT" Or s = "TD" _
-                     Or s = "NUDGE" Or s = "VERTICAL")
+                     Or s = "NUDGE" Or s = "VERTICAL" _
+                     Or s = "ICP" Or s = "BUILD")
 End Function
 
 ' Named stations in the MD window from _OC_PlanSec (full list), then T2:Y5.
@@ -1653,6 +1820,7 @@ Private Function LoadWindowTargets(ByVal mdA As Double, ByVal mdB As Double, _
             userNm = UCase$(Trim$(CStr(ps.Cells(r, 12).Value2 & "")))
             nm = userNm
             If Len(nm) = 0 Then nm = UCase$(Trim$(CStr(ps.Cells(r, 11).Value2 & "")))
+            If Len(nm) = 0 Then nm = SeedNameFromText(CStr(ps.Cells(r, 10).Value2 & ""))
             If Not IsPlotTargetName(nm) Then GoTo NextPs
             md = CDbl(vMd)
             If md < mdA - 0.5 Or md > mdB + 0.5 Then GoTo NextPs
@@ -1697,9 +1865,11 @@ Private Sub GrowNamedTargets(ByVal np As Long, pMD() As Double, pInc() As Double
     Dim tMd() As Double, tNm() As String
     Dim pN As Double, pE As Double, pV As Double, pA As Double, PI As Double
     If np < 2 Then Exit Sub
+    Dim rotN As Double
     nT = LoadWindowTargets(mdA, mdB, tMd, tNm)
     For i = 0 To nT - 1
         MDL_PlanGauge.PG_PlanAt tMd(i), np, pMD, pInc, pAzi, pTvd, pNS, pEW, pN, pE, pV, pA, PI
+        rotN = VwN(pN, pE): pE = VwE(pN, pE): pN = rotN
         ExtGrow pN, pE, pV, nMin, nMax, eMin, eMax, vMin, vMax
     Next i
 End Sub
@@ -1718,12 +1888,32 @@ Private Sub DrawNamedTargetsOnPlan(ByVal np As Long, pMD() As Double, pInc() As 
     rT = 11# / mShS
     If rT < 1.2 Then rT = 1.2
     If rT > 8# Then rT = 8#
+    Dim rotN As Double
+    Dim n1 As Double, e1 As Double, v1 As Double, a1 As Double, i1 As Double
+    Dim n2 As Double, e2 As Double, v2 As Double, a2 As Double, i2 As Double
+    Dim dN As Double, dE As Double, dV As Double, horiz As Double
+    Dim incC As Double, aziC As Double
     For i = 0 To nT - 1
         MDL_PlanGauge.PG_PlanAt tMd(i), np, pMD, pInc, pAzi, pTvd, pNS, pEW, pN, pE, pV, pA, PI
+        rotN = VwN(pN, pE): pE = VwE(pN, pE): pN = rotN
         pN = pN - frmN: pE = pE - frmE
-        SampleTargetRingAt xs, ys, rT, pN, pE, pV, PI, pA, 29
+        ' Tangent from the drawn plan chord (yawed), not catalog azi + yaw.
+        ' Catalog inc at HEEL is already 90° while the curve is still flattening.
+        MDL_PlanGauge.PG_PlanAt tMd(i) - 6#, np, pMD, pInc, pAzi, pTvd, pNS, pEW, n1, e1, v1, a1, i1
+        MDL_PlanGauge.PG_PlanAt tMd(i) + 6#, np, pMD, pInc, pAzi, pTvd, pNS, pEW, n2, e2, v2, a2, i2
+        rotN = VwN(n1, e1): e1 = VwE(n1, e1): n1 = rotN - frmN: e1 = e1 - frmE
+        rotN = VwN(n2, e2): e2 = VwE(n2, e2): n2 = rotN - frmN: e2 = e2 - frmE
+        dN = n2 - n1: dE = e2 - e1: dV = v2 - v1
+        horiz = Sqr(dN * dN + dE * dE)
+        If horiz < 0.05 And Abs(dV) < 0.05 Then
+            incC = PI: aziC = pA + mVwAzOff
+        Else
+            If dV <= 0.01 Then incC = 90# Else incC = WorksheetFunction.Atan2(dV, horiz) * 180# / PIE
+            aziC = WorksheetFunction.Atan2(dN, dE) * 180# / PIE
+        End If
+        SampleTargetRingAt xs, ys, rT, pN, pE, pV, incC, aziC, 29
         PolyLine xs, ys, 29, h("1B4D2E"), 1.15, msoLineSolid
-        SampleTargetRingAt xs, ys, rT * 0.45, pN, pE, pV, PI, pA, 29
+        SampleTargetRingAt xs, ys, rT * 0.45, pN, pE, pV, incC, aziC, 29
         PolyLine xs, ys, 29, h("1B4D2E"), 0.8, msoLineSolid
         Dot ShX(pN, pE), ShY(pN, pE, pV), 2.6, h("3D2458"), h("1A1A1A"), 0.7
         Tx ShX(pN, pE) + 7, ShY(pN, pE, pV) + 12, _
@@ -1732,7 +1922,10 @@ Private Sub DrawNamedTargetsOnPlan(ByVal np As Long, pMD() As Double, pInc() As 
 End Sub
 
 ' Circle centred on a plan station, in the plane perpendicular to the
-' wellbore tangent at that MD (inc/azm in degrees). Vertical hole → N/E ring.
+' wellbore tangent at that MD (inc/azm in the yawed frame, degrees).
+' Sampled in plot-scaled (n',e',v') = (n*mShNS, e*mShS, v*mShVS) so the
+' disk stays square to the *drawn* plan segment when L/R and TVD scales differ.
+' Vertical hole → ring in the N/E plane.
 Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
         ByVal radius As Double, ByVal cN As Double, ByVal cE As Double, _
         ByVal tvd As Double, ByVal incDeg As Double, ByVal aziDeg As Double, _
@@ -1745,20 +1938,21 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
     Dim wN As Double, wE As Double, wV As Double
     Dim mag As Double
     Dim n As Double, e As Double, v As Double
-    Dim Sh As Double, sV As Double
+    Dim sN As Double, sE As Double, sV As Double
+    Dim r As Double, ca As Double, sa As Double
 
     If nPts < 9 Then nPts = 9
     ReDim xs(0 To nPts - 1)
     ReDim ys(0 To nPts - 1)
 
+    sE = mShS: If sE < 0.001 Then sE = 0.001
+    sN = mShNS: If sN < 0.001 Then sN = sE
+    sV = mShVS: If sV < 0.001 Then sV = 0.001
+
     incR = incDeg * PIE / 180#
     aziR = aziDeg * PIE / 180#
-    ' Basis in plot-scaled metres so the ring stays perpendicular to the
-    ' drawn segment after TVD is compressed relative to N/E.
-    Sh = mShS: If Sh < 0.001 Then Sh = 0.001
-    sV = mShVS: If sV < 0.001 Then sV = 0.001
-    tN = Cos(aziR) * Sin(incR) * Sh
-    tE = Sin(aziR) * Sin(incR) * Sh
+    tN = Cos(aziR) * Sin(incR) * sN
+    tE = Sin(aziR) * Sin(incR) * sE
     tv = Cos(incR) * sV
     mag = Sqr(tN * tN + tE * tE + tv * tv)
     If mag < 0.0001 Then
@@ -1767,7 +1961,6 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
         tN = tN / mag: tE = tE / mag: tv = tv / mag
     End If
 
-    ' Helper not parallel to the tangent: vertical unless the hole is near vertical.
     If Abs(tv) < 0.95 Then
         hN = 0#: hE = 0#: hV = 1#
     Else
@@ -1786,11 +1979,13 @@ Private Sub SampleTargetRingAt(xs() As Double, ys() As Double, _
     wE = tv * uN - tN * uV
     wV = tN * uE - tE * uN
 
+    r = radius * sE
     For i = 0 To nPts - 1
         a = 2# * PIE * CDbl(i) / CDbl(nPts - 1)
-        n = cN + radius * (Cos(a) * uN + Sin(a) * wN)
-        e = cE + radius * (Cos(a) * uE + Sin(a) * wE)
-        v = tvd + radius * (Sh / sV) * (Cos(a) * uV + Sin(a) * wV)
+        ca = Cos(a): sa = Sin(a)
+        n = cN + r * (ca * uN + sa * wN) / sN
+        e = cE + r * (ca * uE + sa * wE) / sE
+        v = tvd + r * (ca * uV + sa * wV) / sV
         xs(i) = ShX(n, e)
         ys(i) = ShY(n, e, v)
     Next i
@@ -1861,16 +2056,101 @@ Private Sub DrawMinCurveToTarget()
     PolyLine xs, ys, 25, h("C0392B"), 1.6, msoLineDash
 End Sub
 
-' Target view: +North up-right (GN), +East down-right, +TVD down through the plane.
-' n/e are metres from the plan at the target.
+' Yawed frame: n' recedes up-right into the box, e' runs left -> right.
+' World (n,e) go through VwN/VwE before extents, walls, and every ShX/ShY call.
+Private Function VwN(ByVal n As Double, ByVal e As Double) As Double
+    VwN = n * mVwC - e * mVwS
+End Function
+
+Private Function VwE(ByVal n As Double, ByVal e As Double) As Double
+    VwE = n * mVwS + e * mVwC
+End Function
+
+' Pick the yaw from the direction of the drawn line at the END of the window
+' (plan preferred, else as-drilled). Lateral inclinations map that direction
+' onto E' (strict left -> right); anything steeper recedes into the box.
+' Near-vertical windows (no horizontal run) keep the plain N/E frame.
+Private Sub ComputeShaftView(pN() As Double, pE() As Double, pV() As Double, ByVal np As Long, _
+                             hN() As Double, hE() As Double, hV() As Double, ByVal nH As Long)
+    Dim n1 As Double, e1 As Double, v1 As Double
+    Dim dN As Double, dE As Double, dV As Double
+    Dim horiz As Double, incEst As Double, azS As Double
+    Dim i As Long
+
+    mVwC = 1#: mVwS = 0#: mVwAzOff = 0#: mVwLat = False: mVwLand = False
+
+    dN = 0#: dE = 0#: dV = 0#
+    If np >= 2 Then
+        n1 = pN(np - 1): e1 = pE(np - 1): v1 = pV(np - 1)
+        For i = np - 2 To 0 Step -1
+            dN = n1 - pN(i): dE = e1 - pE(i): dV = v1 - pV(i)
+            horiz = Sqr(dN * dN + dE * dE)
+            If horiz >= 8# Or Sqr(horiz * horiz + dV * dV) >= 30# Then Exit For
+        Next i
+    ElseIf nH >= 2 Then
+        n1 = hN(nH - 1): e1 = hE(nH - 1): v1 = hV(nH - 1)
+        For i = nH - 2 To 0 Step -1
+            dN = n1 - hN(i): dE = e1 - hE(i): dV = v1 - hV(i)
+            horiz = Sqr(dN * dN + dE * dE)
+            If horiz >= 8# Or Sqr(horiz * horiz + dV * dV) >= 30# Then Exit For
+        Next i
+    Else
+        Exit Sub
+    End If
+
+    horiz = Sqr(dN * dN + dE * dE)
+    If horiz < 1.5 Then Exit Sub
+
+    If dV <= 0.01 Then
+        incEst = 90#
+    Else
+        incEst = WorksheetFunction.Atan2(dV, horiz) * 180# / PIE
+    End If
+    azS = WorksheetFunction.Atan2(dN, dE)   ' radians from grid north
+
+    mVwLat = (incEst >= LAT_VIEW_INC)
+    If mVwLat Then
+        ' yaw = 90 - azS: hole azimuth lands on +E' -> strict left -> right
+        mVwC = Sin(azS): mVwS = Cos(azS)
+        mVwAzOff = 90# - azS * 180# / PIE
+        ' Landing if the window still starts in the curve. End-inc alone would
+        ' treat curve->HEEL as a flat lateral and crush the TVD drop.
+        Dim inc0 As Double, h0 As Double, dV0 As Double
+        If np >= 2 Then
+            h0 = Sqr((pN(1) - pN(0)) ^ 2 + (pE(1) - pE(0)) ^ 2)
+            dV0 = pV(1) - pV(0)
+        ElseIf nH >= 2 Then
+            h0 = Sqr((hN(1) - hN(0)) ^ 2 + (hE(1) - hE(0)) ^ 2)
+            dV0 = hV(1) - hV(0)
+        Else
+            h0 = 0#: dV0 = 0#
+        End If
+        If h0 < 0.01 Then
+            inc0 = incEst
+        ElseIf dV0 <= 0.01 Then
+            inc0 = 90#
+        Else
+            inc0 = WorksheetFunction.Atan2(dV0, h0) * 180# / PIE
+        End If
+        mVwLand = (inc0 < LAND_START_INC)
+    Else
+        ' yaw = -azS: hole azimuth lands on +N' -> recedes down the line
+        mVwC = Cos(azS): mVwS = -Sin(azS)
+        mVwAzOff = -azS * 180# / PIE
+    End If
+End Sub
+
+' Target view: n' up-right into the box, e' left -> right, +TVD down.
+' n/e are metres from the frame centre, already yawed via VwN/VwE.
 Private Function ShX(ByVal n As Double, ByVal e As Double) As Double
-    ShX = mShOx + e * mShS * 0.88 + n * mShS * 0.52
+    ShX = mShOx + e * mShS * 0.88 + n * mShNS * 0.52
 End Function
 
 Private Function ShY(ByVal n As Double, ByVal e As Double, ByVal v As Double) As Double
     ' TVD uses its own compressed scale so the pierce fits the headroom even
-    ' when the rings are only a couple of metres wide.
-    ShY = mShOy + (v - mTgtV) * mShVS - n * mShS * 0.4 + e * mShS * 0.18
+    ' when the rings are only a couple of metres wide. N' uses mShNS so laterals
+    ' can widen L/R without stretching TVD.
+    ShY = mShOy + (v - mTgtV) * mShVS - n * mShNS * 0.4 + e * mShS * 0.18
 End Function
 
 ' Closed ring (last point repeats the first) around the target in the N/E
@@ -2127,8 +2407,7 @@ Private Sub DrawSection(ss As Worksheet)
 
     ' the plan, split so drilled / remaining / today read differently
     Dim d0 As Double, d1 As Double
-    d0 = NumCell(ThisWorkbook.Worksheets("Data").Range("C4"))
-    d1 = NumCell(ThisWorkbook.Worksheets("Data").Range("C5"))
+    ReportDayMd d0, d1
     SectionSeg pMD, pTvd, vs, np, sc, gx, gy, 0, mBitMD, h("FFFFFF"), 2.4, msoLineSolid
     SectionSeg pMD, pTvd, vs, np, sc, gx, gy, mBitMD, pMD(np - 1), h("6A6A6A"), 1.6, msoLineDash
     SectionSeg pMD, pTvd, vs, np, sc, gx, gy, d0, d1, h("5BA3D9"), 4.2, msoLineSolid
@@ -2301,10 +2580,17 @@ Private Sub DrawMetrics(ss As Worksheet, dt As Worksheet)
     MHead y, "REQUIREMENT TO " & mTgtName & " " & Format$(mWpMD, "#,##0")
     KV mMX, mMW, y, "Distance to go", Format$(mToGo, "#,##0.0") & " m", 10.5, h("FFFFFF"), False: y = y + 16
     KV mMX, mMW, y, "Target TVD", Format$(mWpTvd, "#,##0.00") & " m", 10.5, h("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "Required inclination", Format$(mReqInc, "0.00") & ChrW(176), 10.5, h("FF5555"), True: y = y + 16
-    KV mMX, mMW, y, "Holding", Format$(mSvyInc, "0.00") & ChrW(176), 10.5, h("FFFFFF"), False: y = y + 16
-    KV mMX, mMW, y, "Correction", Format$(Abs(mReqInc - mSvyInc), "0.00") & ChrW(176) & " " & _
-       IIf(mReqInc < mSvyInc, "drop", "build"), 10.5, h("FF5555"), True: y = y + 16
+    If mShowBurr Then
+        KV mMX, mMW, y, "BURR", Format$(mBurr, "0.00") & ChrW(176) & "/30 m", 10.5, h("FF5555"), True: y = y + 16
+        KV mMX, mMW, y, "Holding", Format$(mSvyInc, "0.00") & ChrW(176), 10.5, h("FFFFFF"), False: y = y + 16
+        KV mMX, mMW, y, "Landing inclination", Format$(AimInclination(), "0.00") & ChrW(176), _
+           10.5, h("FFFFFF"), False: y = y + 16
+    Else
+        KV mMX, mMW, y, "Required inclination", Format$(mReqInc, "0.00") & ChrW(176), 10.5, h("FF5555"), True: y = y + 16
+        KV mMX, mMW, y, "Holding", Format$(mSvyInc, "0.00") & ChrW(176), 10.5, h("FFFFFF"), False: y = y + 16
+        KV mMX, mMW, y, "Correction", Format$(Abs(mReqInc - mSvyInc), "0.00") & ChrW(176) & " " & _
+           IIf(mReqInc < mSvyInc, "drop", "build"), 10.5, h("FF5555"), True: y = y + 16
+    End If
     KV mMX, mMW, y, "Arrival if held", Format$(Abs(mHoldDevEnd), "0.00") & " m " & _
        IIf(mHoldDevEnd >= 0, "above", "below"), 10.5, h("E09A3D"), False: y = y + 16
 End Sub
@@ -2364,10 +2650,11 @@ Private Function MeasureOpsHeight(dt As Worksheet) As Double
     Dim acH As Double, motH As Double
     nAc = CountFilledAc(dt)
     nMot = CountFilledMotors(dt)
-    ' Title + header + rule + rows. Pitch clears TYPE_SCALE_OPS text.
-    Const ROW_PITCH As Double = 20#
-    If nAc = 0 Then acH = 56# Else acH = 58# + ROW_PITCH * CDbl(nAc)
-    If nMot = 0 Then motH = 56# Else motH = 58# + ROW_PITCH * CDbl(nMot)
+    ' Title + header + rule + rows. Pitch must clear TYPE_SCALE_OPS text boxes
+    ' (10pt * 1.35 * 1.8 ≈ 24 pt tall) so hours cannot sit on the next serial.
+    Const ROW_PITCH As Double = 26#
+    If nAc = 0 Then acH = 62# Else acH = 68# + ROW_PITCH * CDbl(nAc)
+    If nMot = 0 Then motH = 62# Else motH = 68# + ROW_PITCH * CDbl(nMot)
     ' chips + day/BHA + motor band + AC + motors + gaps + footer
     MeasureOpsHeight = OPS_GAP + 30# + OPS_GAP + 168# + OPS_GAP + 286# + _
                        OPS_GAP + acH + OPS_GAP + motH + 28#
@@ -2386,15 +2673,48 @@ Private Sub PanelHeadDark(ByVal px As Double, ByVal pw As Double, ByRef y As Dou
     y = y + 18
 End Sub
 
-' Hairline to the RIGHT of a title, at the visual midline. Never crosses glyphs
-' the way an underline did once TYPE_SCALE_OPS enlarged the text box.
+' Actual glyph width of a Calibri run at the live type scale. Probe shape is
+' deleted immediately and is not added to the export group.
+Private Function MeasureTx(ByVal t As String, ByVal sz As Double, ByVal bold As Boolean) As Double
+    Dim shp As Shape
+    MeasureTx = 0#
+    If Len(t) = 0 Then Exit Function
+    If mTypeScale > 0.01 Then sz = sz * mTypeScale
+    On Error GoTo Fail
+    Set shp = mWs.Shapes.AddTextbox(msoTextOrientationHorizontal, 0, 0, 2400, sz * 2.2)
+    shp.line.Visible = msoFalse
+    shp.fill.Visible = msoFalse
+    With shp.TextFrame2
+        .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
+        .WordWrap = msoFalse
+        .AutoSize = msoAutoSizeShapeToFitText
+        With .TextRange
+            .text = t
+            .Font.name = "Calibri"
+            .Font.Size = sz
+            .Font.bold = IIf(bold, msoTrue, msoFalse)
+        End With
+    End With
+    MeasureTx = shp.Width
+    shp.Delete
+    Exit Function
+Fail:
+    On Error Resume Next
+    If Not shp Is Nothing Then shp.Delete
+    MeasureTx = CDbl(Len(t)) * sz * 0.72
+End Function
+
+' Hairline to the RIGHT of a title, at the visual midline. Starts after the
+' measured glyphs plus a gap so TYPE_SCALE_OPS cannot run the stroke through
+' the last letters.
 Private Sub LeaderAfter(ByVal x0 As Double, ByVal y As Double, ByVal x1 As Double, _
                         ByVal t As String, ByVal sz As Double)
-    Dim tw As Double
-    If mTypeScale > 0.01 Then sz = sz * mTypeScale
-    tw = CDbl(Len(t)) * sz * 0.58 + 10#
+    Dim tw As Double, drawSz As Double
+    drawSz = sz
+    If mTypeScale > 0.01 Then drawSz = sz * mTypeScale
+    tw = MeasureTx(t, sz, True) + 14#
     If x0 + tw < x1 - 12# Then
-        Ln x0 + tw, y - sz * 0.35, x1, y - sz * 0.35, h("4A4A4A"), 0.55, msoLineSolid
+        Ln x0 + tw, y - drawSz * 0.35, x1, y - drawSz * 0.35, h("4A4A4A"), 0.55, msoLineSolid
     End If
 End Sub
 
@@ -2405,7 +2725,7 @@ Private Sub SecBarDark(ByVal y As Double, ByVal t As String)
 End Sub
 
 Private Sub DrawOps(dt As Worksheet)
-    Const ROW_PITCH As Double = 20#
+    Const ROW_PITCH As Double = 26#
     Dim y As Double
     Dim lx As Double, rx As Double, cw As Double
     Dim ly As Double, ry As Double
@@ -2491,14 +2811,14 @@ Private Sub DrawOps(dt As Worksheet)
         Tx x1 - 280, y + 12, "SF", 9, h("A8A8A8"), "end", True
         Tx x1 - 160, y + 12, "C2C (m)", 9, h("A8A8A8"), "end", True
         Tx x1, y + 12, "Closest C2C", 9, h("A8A8A8"), "end", True
-        Ln x0, y + 26, x1, y + 26, h("4A4A4A"), 0.5, msoLineSolid
-        y = y + 38
+        Ln x0, y + 32, x1, y + 32, h("4A4A4A"), 0.5, msoLineSolid
+        y = y + 46
         For r = 35 To 42
             If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
-                Tx x0, y, cellText(dt, "B" & r), 10, h("FFFFFF"), "start"
-                Tx x1 - 280, y, cellText(dt, "D" & r), 10, h("FFFFFF"), "end"
-                Tx x1 - 160, y, cellText(dt, "E" & r), 10, h("FFFFFF"), "end"
-                Tx x1, y, cellText(dt, "F" & r), 10, h("FFFFFF"), "end"
+                Tx x0, y, cellText(dt, "B" & r), 10, h("FFFFFF"), "start", False, (x1 - 300) - x0
+                Tx x1 - 280, y, cellText(dt, "D" & r), 10, h("FFFFFF"), "end", False, 70
+                Tx x1 - 160, y, cellText(dt, "E" & r), 10, h("FFFFFF"), "end", False, 90
+                Tx x1, y, cellText(dt, "F" & r), 10, h("FFFFFF"), "end", False, 110
                 y = y + ROW_PITCH
             End If
         Next r
@@ -2518,15 +2838,15 @@ Private Sub DrawOps(dt As Worksheet)
         Tx x1 - 280, y + 12, cellText(dt, "D44"), 9, h("A8A8A8"), "end", True
         Tx x1 - 160, y + 12, cellText(dt, "E44"), 9, h("A8A8A8"), "end", True
         Tx x1, y + 12, cellText(dt, "F44"), 9, h("A8A8A8"), "end", True
-        Ln x0, y + 26, x1, y + 26, h("4A4A4A"), 0.5, msoLineSolid
-        y = y + 38
+        Ln x0, y + 32, x1, y + 32, h("4A4A4A"), 0.5, msoLineSolid
+        y = y + 46
         For r = 45 To 55
             If Len(Trim$(cellText(dt, "B" & r))) > 0 Then
-                Tx x0, y, cellText(dt, "B" & r), 10, h("FFFFFF"), "start"
-                Tx x0 + 250, y, cellText(dt, "C" & r), 10, h("FFFFFF"), "start"
-                Tx x1 - 280, y, cellText(dt, "D" & r), 10, h("FFFFFF"), "end"
-                Tx x1 - 160, y, cellText(dt, "E" & r), 10, h("FFFFFF"), "end"
-                Tx x1, y, cellText(dt, "F" & r), 10, h("FFFFFF"), "end"
+                Tx x0, y, cellText(dt, "B" & r), 10, h("FFFFFF"), "start", False, 236
+                Tx x0 + 250, y, cellText(dt, "C" & r), 10, h("FFFFFF"), "start", False, (x1 - 300) - (x0 + 250)
+                Tx x1 - 280, y, cellText(dt, "D" & r), 10, h("FFFFFF"), "end", False, 70
+                Tx x1 - 160, y, cellText(dt, "E" & r), 10, h("FFFFFF"), "end", False, 90
+                Tx x1, y, cellText(dt, "F" & r), 10, h("FFFFFF"), "end", False, 110
                 y = y + ROW_PITCH
             End If
         Next r
@@ -2979,6 +3299,12 @@ Private Function cellText(ws As Worksheet, ByVal addr As String) As String
     ' the sheet prints its own trailing colons on labels; the panel adds its own layout
     If right$(cellText, 1) = ":" Then cellText = Left$(cellText, Len(cellText) - 1)
 End Function
+
+
+
+
+
+
 
 
 

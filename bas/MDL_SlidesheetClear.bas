@@ -7,7 +7,7 @@ Private Const BTN_CAPTION As String = "Clear Ranges"
 ' Merged Z1:Z3 - left of the plan proximity gauge which owns merged AA1:AC7
 Private Const BTN_ANCHOR As String = "Z1:Z3"
 Private Const Y_FIRST As Long = 12
-Private Const Y_LAST As Long = 305
+Private Const Y_LAST As Long = 505
 Private Const Y_DATA_FIRST As Long = 13
 Private Const Y_LABEL As String = "RKB"
 ' Sheet comment yellow (same as Module16 pale yellow). Not Excel idx-6 65535.
@@ -15,7 +15,7 @@ Private Const COMMENT_YELLOW As Long = 13434879  ' RGB(255,255,204)
 Private Const TGT_FIRST As Long = 2
 Private Const TGT_LAST As Long = 5
 Private Const PLANSEC_SHEET As String = "_OC_PlanSec"
-Private Const TGT_NAMES As String = "NUDGE,VERTICAL,KOP,TANGENT,SOT,EOT,HEEL,TD"
+Private Const TGT_NAMES As String = "NUDGE,VERTICAL,KOP,TANGENT,SOT,EOT,ICP,BUILD,HEEL,TD"
 ' Full named-target list for BURR / slide UDFs (T2:Y5 is display-only).
 Private Const FULL_TGT_MD_COL As Long = 14
 Private Const FULL_TGT_FIRST As Long = 3
@@ -36,10 +36,10 @@ Private m_measureCache As Object    ' Scripting.Dictionary: text|font|size|bold 
 Private m_lastRefreshAt As Double   ' Timer stamp of last completed auto refresh
 
 ' Clear Slidesheet survey/entry ranges:
-'   D,F,G,T,U rows 13:305
+'   D,F,G,T,U rows 13:505
 '   Sail waypoints AC14:AD33 (display AA=Inc Next, AB=Geo Window; helper AE)
 '   Targets U2:X5
-'   Comments Y12:Y305 (then restore RKB + auto slide comments)
+'   Comments Y12:Y505 (then restore RKB + auto slide comments)
 Public Sub ClearSlidesheetRanges()
     Dim ss As Worksheet
 
@@ -50,15 +50,15 @@ Public Sub ClearSlidesheetRanges()
     Application.ScreenUpdating = False
     Application.EnableEvents = False
 
-    ss.Range("D13:D305").ClearContents
-    ss.Range("F13:F305").ClearContents
-    ss.Range("G13:G305").ClearContents
-    ss.Range("T13:T305").ClearContents
-    ss.Range("U13:U305").ClearContents
+    ss.Range("D13:D" & Y_LAST).ClearContents
+    ss.Range("F13:F" & Y_LAST).ClearContents
+    ss.Range("G13:G" & Y_LAST).ClearContents
+    ss.Range("T13:T" & Y_LAST).ClearContents
+    ss.Range("U13:U" & Y_LAST).ClearContents
     ss.Range("AC14:AD33").ClearContents
     ss.Range("U2:X5").ClearContents
-    ss.Range("Y12:Y305").ClearContents
-    ss.Range("Z13:Z305").ClearContents
+    ss.Range("Y12:Y" & Y_LAST).ClearContents
+    ss.Range("Z13:Z" & Y_LAST).ClearContents
     SyncPlanTargetWindowOnSheet ss
     ss.Range("Y12").Value2 = Y_LABEL
 
@@ -69,10 +69,10 @@ Public Sub ClearSlidesheetRanges()
     Application.ScreenUpdating = True
 
     MsgBox "Cleared:" & vbCrLf & _
-           "  D/F/G/T/U 13:305" & vbCrLf & _
+           "  D/F/G/T/U 13:" & Y_LAST & vbCrLf & _
            "  Sail waypoints AC14:AD33" & vbCrLf & _
            "  Targets U2:X5" & vbCrLf & _
-           "  Comments Y12:Y305 / ROT Z13:Z305 (auto text restored where inputs exist)", _
+           "  Comments Y12:Y" & Y_LAST & " / ROT Z13:Z" & Y_LAST & " (auto text restored where inputs exist)", _
            vbInformation
     Exit Sub
 
@@ -106,7 +106,7 @@ Public Function SlideCommentsNeedRefresh(ByVal Target As Range) As Boolean
         Exit Function
     End If
 
-    Set area = Intersect(Target, ss.Range("D13:G305,T13:U305"))
+    Set area = Intersect(Target, ss.Range("D13:G" & Y_LAST & ",T13:U" & Y_LAST))
     If area Is Nothing Then Exit Function
 
     Set seen = CreateObject("Scripting.Dictionary")
@@ -142,7 +142,7 @@ End Function
 Public Sub RefreshAllRotateMetres()
     Dim ss As Worksheet
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
-    RefreshRotateMetres ss.Range("C13:C305")
+    RefreshRotateMetres ss.Range("C13:C" & Y_LAST)
 End Sub
 
 ' Z = C − T on the same row. C/D/T edits call this without a full Y rebuild.
@@ -159,7 +159,7 @@ Public Sub RefreshRotateMetres(ByVal Target As Range)
     On Error GoTo Clean
     Set ss = Target.Worksheet
     If StrComp(ss.name, SS_SHEET, vbTextCompare) <> 0 Then Exit Sub
-    Set area = Intersect(Target, ss.Range("C13:D305,T13:T305"))
+    Set area = Intersect(Target, ss.Range("C13:D" & Y_LAST & ",T13:T" & Y_LAST))
     If area Is Nothing Then Exit Sub
 
     prevEvents = Application.EnableEvents
@@ -258,6 +258,7 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     If Not forceAll Then
         If m_lastRefreshAt > 0# And Abs(Timer - m_lastRefreshAt) < 0.5 Then Exit Sub
     End If
+    ScreenBeginBusy
     m_updatingY = True
 
     ' Restore the caller's state on exit — automation runs with events off
@@ -384,6 +385,7 @@ Clean:
     Application.Calculation = prevCalc
     Application.EnableEvents = prevEvents
     m_updatingY = False
+    ScreenEndBusy
 End Sub
 
 ' Hidden AR (BURR) / AS (Metres To Slide) must start from the PROJECTED bit
@@ -633,7 +635,7 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
     lastSurvRow = 0
     bitMd = 0#
     aimMd = 0#
-    For r = 12 To 305
+    For r = 12 To Y_LAST
         vF = ss.Cells(r, "F").Value2
         If IsNumeric(vF) Then
             If Len(Trim$(CStr(vF & ""))) > 0 Then
@@ -784,6 +786,27 @@ Public Sub ResizeSlidesheetClearButton()
     On Error GoTo 0
 End Sub
 
+' Blank T2:Y5 so a new Import Plan cannot keep the previous job's TAR rows.
+Public Sub WipePlanTargetWindow()
+    Dim ss As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+
+    On Error GoTo Fail
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ss)
+    ss.Range(ss.Cells(TGT_FIRST, "T"), ss.Cells(TGT_LAST, "Y")).ClearContents
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+    Exit Sub
+Fail:
+    On Error Resume Next
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+End Sub
+
 ' Show 4 named Plan Section targets on T2:Y5. Hidden later stations slide in
 ' as the bit passes the highlighted (next) target. BURR / slide UDFs read the
 ' full named list on _OC_PlanSec N:Q (ProjTargets_*), not the 4-row window.
@@ -849,6 +872,12 @@ Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
     If startI + 3 > n Then startI = n - 3
     If startI < 1 Then startI = 1
 
+    ' VBA IsNumeric("") is True and CDbl("") is 0, so a blank Inc/Azm cell
+    ' used to compare equal to a real 0 and never get written.
+    ' DisplayZeros is a Window property, not Worksheet — do not set it here
+    ' (compile error: method or data member not found). WriteTgtNumber
+    ' already formats zeros as 0.00.
+
     changed = False
     For vis = 0 To 3
         r = TGT_FIRST + vis
@@ -856,26 +885,16 @@ Private Sub SyncPlanTargetWindowOnSheet(ByVal ss As Worksheet)
             i = startI + vis
             newMd = md(i): newInc = inc(i): newAzm = azm(i)
             newTvd = tvd(i): newNm = nm(i)
+            WriteTgtLabel ss.Cells(r, "T"), "TAR" & CStr(i), changed
         Else
             newMd = "": newInc = "": newAzm = ""
             newTvd = "": newNm = ""
+            WriteTgtLabel ss.Cells(r, "T"), "", changed
         End If
-        If Not SameTgtCell(ss.Cells(r, "U").Value2, newMd) Then
-            ss.Cells(r, "U").Value2 = newMd
-            changed = True
-        End If
-        If Not SameTgtCell(ss.Cells(r, "V").Value2, newInc) Then
-            ss.Cells(r, "V").Value2 = newInc
-            changed = True
-        End If
-        If Not SameTgtCell(ss.Cells(r, "W").Value2, newAzm) Then
-            ss.Cells(r, "W").Value2 = newAzm
-            changed = True
-        End If
-        If Not SameTgtCell(ss.Cells(r, "X").Value2, newTvd) Then
-            ss.Cells(r, "X").Value2 = newTvd
-            changed = True
-        End If
+        WriteTgtNumber ss.Cells(r, "U"), newMd, changed
+        WriteTgtNumber ss.Cells(r, "V"), newInc, changed
+        WriteTgtNumber ss.Cells(r, "W"), newAzm, changed
+        WriteTgtNumber ss.Cells(r, "X"), newTvd, changed
         If Trim$(CStr(ss.Cells(r, "Y").Value2 & "")) <> newNm Then
             ss.Cells(r, "Y").Value2 = newNm
             changed = True
@@ -948,7 +967,22 @@ Private Sub WriteFullProjTargetTable(ByVal ps As Worksheet, _
     SheetReprotectAfterVba ps, wasProt
 End Sub
 
+Private Function TgtCellBlank(ByVal v As Variant) As Boolean
+    If isError(v) Then TgtCellBlank = True: Exit Function
+    If IsNull(v) Then TgtCellBlank = True: Exit Function
+    If IsEmpty(v) Then TgtCellBlank = True: Exit Function
+    TgtCellBlank = (Len(Trim$(CStr(v & ""))) = 0)
+End Function
+
 Private Function SameTgtCell(ByVal cur As Variant, ByVal neu As Variant) As Boolean
+    If TgtCellBlank(cur) And TgtCellBlank(neu) Then
+        SameTgtCell = True
+        Exit Function
+    End If
+    If TgtCellBlank(cur) Or TgtCellBlank(neu) Then
+        SameTgtCell = False
+        Exit Function
+    End If
     If IsNumeric(cur) And IsNumeric(neu) Then
         SameTgtCell = (Abs(CDbl(cur) - CDbl(neu)) < 0.005)
         Exit Function
@@ -956,11 +990,34 @@ Private Function SameTgtCell(ByVal cur As Variant, ByVal neu As Variant) As Bool
     SameTgtCell = (Trim$(CStr(cur & "")) = Trim$(CStr(neu & "")))
 End Function
 
+Private Sub WriteTgtNumber(ByVal cell As Range, ByVal neu As Variant, ByRef changed As Boolean)
+    If TgtCellBlank(neu) Then
+        If Not TgtCellBlank(cell.Value2) Then
+            cell.ClearContents
+            changed = True
+        End If
+        cell.numberFormat = "0.00"
+        Exit Sub
+    End If
+    If Not SameTgtCell(cell.Value2, neu) Then
+        cell.Value2 = CDbl(neu)
+        changed = True
+    End If
+    If CStr(cell.numberFormat & "") <> "0.00" Then cell.numberFormat = "0.00"
+End Sub
+
+Private Sub WriteTgtLabel(ByVal cell As Range, ByVal neu As String, ByRef changed As Boolean)
+    If Trim$(CStr(cell.Value2 & "")) <> neu Then
+        cell.Value2 = neu
+        changed = True
+    End If
+End Sub
+
 Private Function LastSurveyBitMd(ByVal ss As Worksheet) As Double
     Dim r As Long
     Dim vF As Variant, vD As Variant
     LastSurveyBitMd = 0#
-    For r = 12 To 305
+    For r = 12 To Y_LAST
         vF = ss.Cells(r, "F").Value2
         If IsNumeric(vF) Then
             If Len(Trim$(CStr(vF & ""))) > 0 Then
@@ -995,6 +1052,9 @@ Private Function LoadNamedPlanTargets(ByVal ps As Worksheet, _
         Else
             showNm = autoNm
         End If
+        If showNm = "" Then
+            showNm = SeedNameFromText(CStr(ps.Cells(r, 10).Value2 & ""))
+        End If
         If Not IsKnownTargetName(showNm) Then GoTo NextPs
         n = n + 1
         If n > 80 Then Exit For
@@ -1019,7 +1079,8 @@ Private Function IsKnownTargetName(ByVal s As String) As Boolean
     s = UCase$(Trim$(s))
     IsKnownTargetName = (s = "KOP" Or s = "TANGENT" Or s = "HEEL" _
                       Or s = "SOT" Or s = "EOT" Or s = "TD" _
-                      Or s = "NUDGE" Or s = "VERTICAL")
+                      Or s = "NUDGE" Or s = "VERTICAL" _
+                      Or s = "ICP" Or s = "BUILD")
 End Function
 
 Private Function PlanSecSheetExists() As Boolean
@@ -1085,6 +1146,10 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
+
+
+
 
 
 

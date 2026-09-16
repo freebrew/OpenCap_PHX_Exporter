@@ -22,3 +22,17 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
         MDL_ContDI.EnsureContDIPullButton
     End If
 End Sub
+
+Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)
+    On Error Resume Next
+    If StrComp(Sh.name, "Slidesheet", vbTextCompare) = 0 Then
+        ScreenReleaseCalcForSheet
+    End If
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    On Error Resume Next
+    ScreenReleaseCalcForSheet
+    ScreenForceReset
+    On Error GoTo 0
+End Sub

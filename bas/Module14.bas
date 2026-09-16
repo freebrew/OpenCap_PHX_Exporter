@@ -43,20 +43,20 @@ Sub NEWWWW()
     ActiveWindow.ScrollRow = 291
     ActiveWindow.ScrollRow = 294
     ActiveWindow.ScrollRow = 295
-    Range("A305").Select
-    Selection.AutoFill Destination:=Range("A12:A305"), Type:=xlFillDefault
-    Range("A12:A305").Select
+    Range("A505").Select
+    Selection.AutoFill Destination:=Range("A12:A505"), Type:=xlFillDefault
+    Range("A12:A505").Select
     ActiveWindow.SmallScroll Down:=288
-    Range("C305").Select
-    Selection.AutoFill Destination:=Range("C12:C305"), Type:=xlFillDefault
-    Range("C12:C305").Select
-    Range("E12:F305").Select
+    Range("C505").Select
+    Selection.AutoFill Destination:=Range("C12:C505"), Type:=xlFillDefault
+    Range("C12:C505").Select
+    Range("E12:F505").Select
     Selection.ClearContents
-    Range("S11:T305").Select
+    Range("S11:T505").Select
     Selection.ClearContents
-    Range("G305:H305").Select
-    Selection.AutoFill Destination:=Range("G12:H305"), Type:=xlFillDefault
-    Range("G12:H305").Select
+    Range("G505:H505").Select
+    Selection.AutoFill Destination:=Range("G12:H505"), Type:=xlFillDefault
+    Range("G12:H505").Select
     ActiveWindow.ScrollRow = 15
     ActiveWindow.ScrollRow = 25
     ActiveWindow.ScrollRow = 33
@@ -94,9 +94,9 @@ Sub NEWWWW()
     ActiveWindow.ScrollRow = 288
     ActiveWindow.ScrollRow = 291
     ActiveWindow.ScrollRow = 295
-    Range("Q305:R305").Select
-    Selection.AutoFill Destination:=Range("Q11:R305"), Type:=xlFillDefault
-    Range("Q11:R305").Select
+    Range("Q505:R505").Select
+    Selection.AutoFill Destination:=Range("Q11:R505"), Type:=xlFillDefault
+    Range("Q11:R505").Select
     ActiveWindow.ScrollRow = 13
     ActiveWindow.ScrollRow = 19
     ActiveWindow.ScrollRow = 35
@@ -115,9 +115,9 @@ Sub NEWWWW()
     ActiveWindow.ScrollRow = 285
     ActiveWindow.ScrollRow = 288
     ActiveWindow.ScrollRow = 295
-    Range("X305").Select
-    Selection.AutoFill Destination:=Range("X11:X305"), Type:=xlFillDefault
-    Range("X11:X305").Select
+    Range("X505").Select
+    Selection.AutoFill Destination:=Range("X11:X505"), Type:=xlFillDefault
+    Range("X11:X505").Select
     ActiveWindow.ScrollRow = 12
     ActiveWindow.ScrollRow = 18
     ActiveWindow.ScrollRow = 29
@@ -143,10 +143,10 @@ Sub NEWWWW()
     ActiveWindow.ScrollRow = 293
     ActiveWindow.ScrollRow = 294
     ActiveWindow.ScrollRow = 295
-    Range("Z305").Select
-    Selection.AutoFill Destination:=Range("Z11:Z305"), Type:=xlFillDefault
-    Range("Z11:Z305").Select
-    Range("AD11:AF304").Select
+    Range("Z505").Select
+    Selection.AutoFill Destination:=Range("Z11:Z505"), Type:=xlFillDefault
+    Range("Z11:Z505").Select
+    Range("AD11:AF504").Select
     Selection.ClearContents
     ActiveWindow.SmallScroll Down:=-284
     Range("E11").Select

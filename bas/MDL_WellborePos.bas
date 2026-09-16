@@ -14,7 +14,7 @@ Option Explicit
 Private Const SH_DATA As String = "Data"
 Private Const SH_SS As String = "Slidesheet"
 Private Const SURV_FIRST As Long = 13
-Private Const SURV_LAST As Long = 320
+Private Const SURV_LAST As Long = 520
 Private Const COL_GEO_AB As Long = 28  ' AB GEO Window (skip AB14)
 Private Const COL_SAIL_MD As Long = 29 ' AC sail / way-point MD
 Private Const SAIL_ROW1 As Long = 14
@@ -177,6 +177,8 @@ Private Function ReadNumericAb(ws As Worksheet, ByVal r As Long, ByRef geoM As D
     geoM = CDbl(v)
     ReadNumericAb = True
 End Function
+
+
 
 
 

@@ -1786,7 +1786,7 @@ End Sub
 
 Private Sub WriteMudMotorsFromInventory()
     Dim wsD As Worksheet
-    Dim sns() As String
+    Dim sNs() As String
     Dim seqs() As Double
     Dim n As Long
     Dim i As Long, j As Long
@@ -1813,17 +1813,17 @@ Private Sub WriteMudMotorsFromInventory()
         End If
     End If
 
-    ReDim sns(1 To 64)
+    ReDim sNs(1 To 64)
     ReDim seqs(1 To 64)
     n = 0
-    CollectMudMotorsFromInventory sns, seqs, n
-    If n = 0 Then CollectMudMotorsFromBha sns, seqs, n
+    CollectMudMotorsFromInventory sNs, seqs, n
+    If n = 0 Then CollectMudMotorsFromBha sNs, seqs, n
 
     For i = 1 To n - 1
         For j = i + 1 To n
             If seqs(j) < seqs(i) Then
                 tmpQ = seqs(i): seqs(i) = seqs(j): seqs(j) = tmpQ
-                tmpS = sns(i): sns(i) = sns(j): sns(j) = tmpS
+                tmpS = sNs(i): sNs(i) = sNs(j): sNs(j) = tmpS
             End If
         Next j
     Next i
@@ -1841,7 +1841,7 @@ Private Sub WriteMudMotorsFromInventory()
 
     If n > capacity Then n = capacity
     For i = 1 To n
-        SetMergedCellValue wsD.Cells(firstRow + i - 1, MM_COL_SERIAL), sns(i)
+        SetMergedCellValue wsD.Cells(firstRow + i - 1, MM_COL_SERIAL), sNs(i)
     Next i
 
     On Error Resume Next
@@ -1856,13 +1856,13 @@ ReprotectFail:
     SheetReprotectAfterVba wsD, wasProt
 End Sub
 
-Private Sub CollectMudMotorsFromInventory(ByRef sns() As String, _
+Private Sub CollectMudMotorsFromInventory(ByRef sNs() As String, _
                                           ByRef seqs() As Double, _
                                           ByRef n As Long)
     Dim ws As Worksheet
     Dim colSn As Long, colName As Long, colSub As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, itemName As String, subCat As String
+    Dim sN As String, itemName As String, subCat As String
     If Not SheetExists(SH_INVENTORY) Then Exit Sub
     Set ws = ThisWorkbook.Worksheets(SH_INVENTORY)
     colSn = FindHeaderCol(ws, "SerialNumber")
@@ -1873,24 +1873,24 @@ Private Sub CollectMudMotorsFromInventory(ByRef sns() As String, _
     If colSn = 0 Then Exit Sub
     lastR = ws.Cells(ws.Rows.Count, colSn).End(xlUp).Row
     For r = 2 To lastR
-        sn = Trim$(CStr(ws.Cells(r, colSn).Value2 & ""))
+        sN = Trim$(CStr(ws.Cells(r, colSn).Value2 & ""))
         itemName = ""
         subCat = ""
         If colName > 0 Then itemName = CStr(ws.Cells(r, colName).Value2 & "")
         If colSub > 0 Then subCat = CStr(ws.Cells(r, colSub).Value2 & "")
-        If IsMudMotorInventory(sn, itemName, subCat) Then
-            AddUniqueMotor sns, seqs, n, sn
+        If IsMudMotorInventory(sN, itemName, subCat) Then
+            AddUniqueMotor sNs, seqs, n, sN
         End If
     Next r
 End Sub
 
-Private Sub CollectMudMotorsFromBha(ByRef sns() As String, _
+Private Sub CollectMudMotorsFromBha(ByRef sNs() As String, _
                                     ByRef seqs() As Double, _
                                     ByRef n As Long)
     Dim ws As Worksheet
     Dim colSn As Long, colDesc As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, desc As String
+    Dim sN As String, desc As String
     If Not SheetExists(SH_BHA) Then Exit Sub
     Set ws = ThisWorkbook.Worksheets(SH_BHA)
     colSn = FindHeaderCol(ws, "Serial #")
@@ -1899,36 +1899,36 @@ Private Sub CollectMudMotorsFromBha(ByRef sns() As String, _
     If colSn = 0 Then Exit Sub
     lastR = ws.Cells(ws.Rows.Count, colSn).End(xlUp).Row
     For r = 2 To lastR
-        sn = Trim$(CStr(ws.Cells(r, colSn).Value2 & ""))
+        sN = Trim$(CStr(ws.Cells(r, colSn).Value2 & ""))
         desc = ""
         If colDesc > 0 Then desc = CStr(ws.Cells(r, colDesc).Value2 & "")
-        If IsMudMotorSerial(sn, desc) Then
-            AddUniqueMotor sns, seqs, n, sn
+        If IsMudMotorSerial(sN, desc) Then
+            AddUniqueMotor sNs, seqs, n, sN
         End If
     Next r
 End Sub
 
-Private Sub AddUniqueMotor(ByRef sns() As String, ByRef seqs() As Double, _
-                           ByRef n As Long, ByVal sn As String)
+Private Sub AddUniqueMotor(ByRef sNs() As String, ByRef seqs() As Double, _
+                           ByRef n As Long, ByVal sN As String)
     Dim i As Long
-    If Len(sn) = 0 Then Exit Sub
+    If Len(sN) = 0 Then Exit Sub
     For i = 1 To n
-        If StrComp(sns(i), sn, vbTextCompare) = 0 Then Exit Sub
+        If StrComp(sNs(i), sN, vbTextCompare) = 0 Then Exit Sub
     Next i
     n = n + 1
-    If n > UBound(sns) Then
-        ReDim Preserve sns(1 To n + 32)
+    If n > UBound(sNs) Then
+        ReDim Preserve sNs(1 To n + 32)
         ReDim Preserve seqs(1 To n + 32)
     End If
-    sns(n) = sn
-    seqs(n) = MudMotorSequenceNumber(sn)
+    sNs(n) = sN
+    seqs(n) = MudMotorSequenceNumber(sN)
 End Sub
 
 ' PHX-525010-PTS -> 525010; 24X-19722-PTS -> 19722; else sorts last.
-Private Function MudMotorSequenceNumber(ByVal sn As String) As Double
+Private Function MudMotorSequenceNumber(ByVal sN As String) As Double
     Dim s As String, p As Long, tok As String
     MudMotorSequenceNumber = 1E+99
-    s = UCase$(Trim$(sn))
+    s = UCase$(Trim$(sN))
     If right$(s, 4) <> "-PTS" Then Exit Function
     s = Left$(s, Len(s) - 4)
     p = InStrRev(s, "-")
@@ -1968,10 +1968,10 @@ Private Function IsSteerMotorText(ByVal text As String) As Boolean
                     Or (InStr(1, t, "i-Cruise", vbTextCompare) > 0)
 End Function
 
-Private Function IsMudMotorInventory(ByVal sn As String, ByVal itemName As String, _
+Private Function IsMudMotorInventory(ByVal sN As String, ByVal itemName As String, _
                                     ByVal subCat As String) As Boolean
     IsMudMotorInventory = False
-    If Len(Trim$(sn)) = 0 Then Exit Function
+    If Len(Trim$(sN)) = 0 Then Exit Function
     If InStr(1, itemName, "Mud Motor", vbTextCompare) > 0 Then
         IsMudMotorInventory = True
         Exit Function
@@ -1983,9 +1983,9 @@ Private Function IsMudMotorInventory(ByVal sn As String, ByVal itemName As Strin
     IsMudMotorInventory = IsSteerMotorText(itemName)
 End Function
 
-Private Function IsMudMotorSerial(ByVal sn As String, ByVal desc As String) As Boolean
+Private Function IsMudMotorSerial(ByVal sN As String, ByVal desc As String) As Boolean
     IsMudMotorSerial = False
-    If Len(sn) = 0 Then Exit Function
+    If Len(sN) = 0 Then Exit Function
     If InStr(1, desc, "Mud Motor", vbTextCompare) > 0 Then
         IsMudMotorSerial = True
         Exit Function
@@ -2337,15 +2337,30 @@ Public Sub ImportSurveyPlanFile(ByVal fPath As String)
     Application.StatusBar = "Importing survey plan..."
     On Error GoTo ImportPlanErr
 
+    If Len(Trim$(fPath & "")) = 0 Then
+        Err.Raise vbObjectError + 701, "ImportSurveyPlanFile", "No plan file path"
+    End If
+
     Dim ext As String
+    Dim ok As Boolean
     ext = LCase$(mid$(fPath, InStrRev(fPath, ".") + 1))
 
     If ext = "pdf" Then
-        ImportSurveyPlanPdf fPath
+        ok = ImportSurveyPlanPdf(fPath)
+        If Not ok Then
+            Application.StatusBar = "Plan import failed — previous plan left unchanged"
+            Exit Sub
+        End If
     Else
         ImportSurveyPlanCsv fPath
         BuildPlanSectionsFromSurveyComments
     End If
+
+    ' WritePlanSecSheet / EnsureHiddenSheet already Cells.Clear the hidden
+    ' stores. Blank the visible TAR window so Sync cannot keep old TAR1–4.
+    On Error Resume Next
+    MDL_SlidesheetClear.WipePlanTargetWindow
+    On Error GoTo ImportPlanErr
 
     UpdateImportPathDisplay SH_SURVEY
 
@@ -2365,6 +2380,9 @@ End Sub
 Private Function EnsureHiddenSheet(ByVal shName As String) As Worksheet
     If SheetExists(shName) Then
         Set EnsureHiddenSheet = Worksheets(shName)
+        On Error Resume Next
+        EnsureHiddenSheet.Unprotect
+        On Error GoTo 0
         EnsureHiddenSheet.Cells.Clear
     Else
         Set EnsureHiddenSheet = ThisWorkbook.sheets.Add( _
@@ -2428,7 +2446,8 @@ NextSurveyLine:
     Close #fNum
 End Sub
 
-Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
+Private Function ImportSurveyPlanPdf(ByVal fPath As String) As Boolean
+    ImportSurveyPlanPdf = False
     Dim pdfText As String
     pdfText = ExtractPdfText(fPath)
     If pdfText = "" Then
@@ -2440,7 +2459,7 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
                "  - Poppler for Windows (adds pdftotext.exe to PATH)" & Chr(10) & _
                "  - Adobe Acrobat (full version, not Reader)", _
                vbExclamation, "PDF Reader Not Available"
-        Exit Sub
+        Exit Function
     End If
 
     Dim nSec As Long
@@ -2452,7 +2471,7 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
     If nSec < 1 Then
         MsgBox "No Plan Sections / SECTION DETAILS / Plan Annotations table found in that PDF.", _
                vbExclamation, "Import Plan"
-        Exit Sub
+        Exit Function
     End If
 
     Dim aAuto() As String
@@ -2468,13 +2487,13 @@ Private Sub ImportSurveyPlanPdf(ByVal fPath As String)
     Else
         WriteSurveyFromSections fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW
     End If
-End Sub
+    ImportSurveyPlanPdf = True
+End Function
 
-' COMPASS Planning Report, in order:
-'   1) SECTION DETAILS packed table (older / full reports)
-'   2) Plan Sections visual table (newer extract: Y-grouped or layout rows)
-'   3) Plan Annotations (MD + comment only)
-' Overlay annotation comments onto (2) by matching MD.
+' COMPASS Planning Report: try SECTION DETAILS, Plan Sections, and Plan
+' Annotations independently and keep the richest set. First-hit used to lock
+' onto a plot-interleaved SECTION DETAILS (7 of 10 stations, no KOP) and
+' never read the clean Plan Sections table on the next page.
 Private Function ParsePlanSections(ByVal pdfText As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
         ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double, _
@@ -2486,17 +2505,107 @@ Private Function ParsePlanSections(ByVal pdfText As String, _
     ReDim aDls(0 To 80): ReDim aBld(0 To 80): ReDim aTrn(0 To 80)
     ReDim aAnn(0 To 80)
 
+    Dim dMd() As Double, dInc() As Double, dAzm() As Double, dTvd() As Double
+    Dim dNs() As Double, dEw() As Double, dDls() As Double, dBld() As Double
+    Dim dTrn() As Double, dAnn() As String
+    Dim tMd() As Double, tInc() As Double, tAzm() As Double, tTvd() As Double
+    Dim tNS() As Double, tEW() As Double, tDls() As Double, tBld() As Double
+    Dim tTrn() As Double, tAnn() As String
+    Dim pMD() As Double, pInc() As Double, pAzm() As Double, pTvd() As Double
+    Dim pNS() As Double, pEW() As Double, pDls() As Double, pBld() As Double
+    Dim pTrn() As Double, pAnn() As String
+    Dim nDet As Long, nTab As Long, nAnn As Long
+    Dim sDet As Double, sTab As Double, sAnn As Double, best As Double
     Dim n As Long
-    n = ParseSectionDetailsBlock(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
-    If n < 2 Then
-        n = ParsePlanSectionsTable(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
+
+    InitPlanParseBuf dMd, dInc, dAzm, dTvd, dNs, dEw, dDls, dBld, dTrn, dAnn
+    InitPlanParseBuf tMd, tInc, tAzm, tTvd, tNS, tEW, tDls, tBld, tTrn, tAnn
+    InitPlanParseBuf pMD, pInc, pAzm, pTvd, pNS, pEW, pDls, pBld, pTrn, pAnn
+
+    On Error Resume Next
+    nDet = ParseSectionDetailsBlock(pdfText, dMd, dInc, dAzm, dTvd, dNs, dEw, dDls, dBld, dTrn, dAnn)
+    If Err.Number <> 0 Then nDet = 0
+    Err.Clear
+    nTab = ParsePlanSectionsTable(pdfText, tMd, tInc, tAzm, tTvd, tNS, tEW, tDls, tBld, tTrn, tAnn)
+    If Err.Number <> 0 Then nTab = 0
+    Err.Clear
+    nAnn = ParsePlanAnnotationsBlock(pdfText, pMD, pInc, pAzm, pTvd, pNS, pEW, pDls, pBld, pTrn, pAnn)
+    If Err.Number <> 0 Then nAnn = 0
+    Err.Clear
+    On Error GoTo 0
+
+    sDet = ScorePlanParse(nDet, dMd)
+    sTab = ScorePlanParse(nTab, tMd)
+    sAnn = ScorePlanParse(nAnn, pMD)
+    best = sDet
+    If sTab > best Then best = sTab
+    If sAnn > best Then best = sAnn
+    If best < 0 Then
+        ParsePlanSections = 0
+        Exit Function
     End If
-    If n < 2 Then
-        n = ParsePlanAnnotationsBlock(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
+
+    If best = sTab Then
+        n = nTab
+        CopyPlanParse n, tMd, tInc, tAzm, tTvd, tNS, tEW, tDls, tBld, tTrn, tAnn, _
+                      aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn
+    ElseIf best = sDet Then
+        n = nDet
+        CopyPlanParse n, dMd, dInc, dAzm, dTvd, dNs, dEw, dDls, dBld, dTrn, dAnn, _
+                      aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn
+    Else
+        n = nAnn
+        CopyPlanParse n, pMD, pInc, pAzm, pTvd, pNS, pEW, pDls, pBld, pTrn, pAnn, _
+                      aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn
     End If
-    If n >= 2 Then OverlayPlanAnnotations pdfText, n, aMd, aAnn
+
+    On Error Resume Next
+    OverlayPlanAnnotations pdfText, n, aMd, aAnn
+    On Error GoTo 0
     ParsePlanSections = n
 End Function
+
+Private Sub InitPlanParseBuf(ByRef aMd() As Double, ByRef aInc() As Double, _
+        ByRef aAzm() As Double, ByRef aTvd() As Double, ByRef ans() As Double, _
+        ByRef aEW() As Double, ByRef aDls() As Double, ByRef aBld() As Double, _
+        ByRef aTrn() As Double, ByRef aAnn() As String)
+    ReDim aMd(0 To 80): ReDim aInc(0 To 80): ReDim aAzm(0 To 80)
+    ReDim aTvd(0 To 80): ReDim ans(0 To 80): ReDim aEW(0 To 80)
+    ReDim aDls(0 To 80): ReDim aBld(0 To 80): ReDim aTrn(0 To 80)
+    ReDim aAnn(0 To 80)
+End Sub
+
+Private Function ScorePlanParse(ByVal n As Long, ByRef aMd() As Double) As Double
+    Dim i As Long
+    Dim maxMd As Double
+    If n < 2 Then
+        ScorePlanParse = -1#
+        Exit Function
+    End If
+    maxMd = 0#
+    For i = 0 To n - 1
+        If aMd(i) > maxMd Then maxMd = aMd(i)
+    Next i
+    ScorePlanParse = maxMd + CDbl(n) * 5#
+End Function
+
+Private Sub CopyPlanParse(ByVal n As Long, _
+        ByRef sMD() As Double, ByRef sInc() As Double, ByRef sAzm() As Double, _
+        ByRef sTvd() As Double, ByRef sNs() As Double, ByRef sEw() As Double, _
+        ByRef sDls() As Double, ByRef sBld() As Double, ByRef sTrn() As Double, _
+        ByRef sAnn() As String, _
+        ByRef dMd() As Double, ByRef dInc() As Double, ByRef dAzm() As Double, _
+        ByRef dTvd() As Double, ByRef dNs() As Double, ByRef dEw() As Double, _
+        ByRef dDls() As Double, ByRef dBld() As Double, ByRef dTrn() As Double, _
+        ByRef dAnn() As String)
+    Dim i As Long
+    For i = 0 To n - 1
+        dMd(i) = sMD(i): dInc(i) = sInc(i): dAzm(i) = sAzm(i)
+        dTvd(i) = sTvd(i): dNs(i) = sNs(i): dEw(i) = sEw(i)
+        dDls(i) = sDls(i): dBld(i) = sBld(i): dTrn(i) = sTrn(i)
+        dAnn(i) = sAnn(i)
+    Next i
+End Sub
 
 Private Function ParseSectionDetailsBlock(ByVal pdfText As String, _
         ByRef aMd() As Double, ByRef aInc() As Double, ByRef aAzm() As Double, _
@@ -2588,7 +2697,9 @@ Private Function ParseSectionDetailsSpaced(ByVal region As String, _
         If n > 80 Then Exit For
         Dim m As Object: Set m = ms(i)
         If Not ValidPlanStation(CDbl(m.SubMatches(0)), CDbl(m.SubMatches(1)), CDbl(m.SubMatches(2))) Then GoTo NextSpaced
-        If n > 0 And CDbl(m.SubMatches(0)) + 0.05 < aMd(n - 1) Then GoTo NextSpaced
+        If n > 0 Then
+            If CDbl(m.SubMatches(0)) + 0.05 < aMd(n - 1) Then GoTo NextSpaced
+        End If
         aMd(n) = CDbl(m.SubMatches(0))
         aInc(n) = CDbl(m.SubMatches(1))
         aAzm(n) = CDbl(m.SubMatches(2))
@@ -2635,12 +2746,29 @@ Private Function ParsePlanSectionsTable(ByVal pdfText As String, _
         region = Replace(region, ". ", ".")
     Loop
 
-    Dim n As Long
-    n = ParsePlanSectionsYGrouped(region, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
-    If n < 2 Then
-        n = ParsePlanSectionsLayout(region, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
+    Dim yMd() As Double, yInc() As Double, yAzm() As Double, yTvd() As Double
+    Dim yNs() As Double, yEw() As Double, yDls() As Double, yBld() As Double
+    Dim yTrn() As Double, yAnn() As String
+    Dim lMd() As Double, lInc() As Double, lAzm() As Double, lTvd() As Double
+    Dim lNs() As Double, lEw() As Double, lDls() As Double, lBld() As Double
+    Dim lTrn() As Double, lAnn() As String
+    Dim nY As Long, nL As Long
+
+    InitPlanParseBuf yMd, yInc, yAzm, yTvd, yNs, yEw, yDls, yBld, yTrn, yAnn
+    InitPlanParseBuf lMd, lInc, lAzm, lTvd, lNs, lEw, lDls, lBld, lTrn, lAnn
+    nY = ParsePlanSectionsYGrouped(region, yMd, yInc, yAzm, yTvd, yNs, yEw, yDls, yBld, yTrn, yAnn)
+    nL = ParsePlanSectionsLayout(region, lMd, lInc, lAzm, lTvd, lNs, lEw, lDls, lBld, lTrn, lAnn)
+    If ScorePlanParse(nL, lMd) >= ScorePlanParse(nY, yMd) And ScorePlanParse(nL, lMd) >= 0 Then
+        CopyPlanParse nL, lMd, lInc, lAzm, lTvd, lNs, lEw, lDls, lBld, lTrn, lAnn, _
+                      aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn
+        ParsePlanSectionsTable = nL
+    ElseIf ScorePlanParse(nY, yMd) >= 0 Then
+        CopyPlanParse nY, yMd, yInc, yAzm, yTvd, yNs, yEw, yDls, yBld, yTrn, yAnn, _
+                      aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn
+        ParsePlanSectionsTable = nY
+    Else
+        ParsePlanSectionsTable = 0
     End If
-    ParsePlanSectionsTable = n
 End Function
 
 Private Function ParsePlanSectionsYGrouped(ByVal region As String, _
@@ -2666,8 +2794,10 @@ Private Function ParsePlanSectionsYGrouped(ByVal region As String, _
         inc = CDbl(m.SubMatches(4))
         azi = CDbl(m.SubMatches(3))
         If Not ValidPlanStation(md, inc, azi) Then GoTo NextY
-        If n > 0 And md + 0.05 < aMd(n - 1) Then GoTo NextY
-        If n > 0 And Abs(md - aMd(n - 1)) < 0.05 Then GoTo NextY
+        If n > 0 Then
+            If md + 0.05 < aMd(n - 1) Then GoTo NextY
+            If Abs(md - aMd(n - 1)) < 0.05 Then GoTo NextY
+        End If
         aEW(n) = CDbl(m.SubMatches(0))
         ans(n) = CDbl(m.SubMatches(1))
         aTvd(n) = CDbl(m.SubMatches(2))
@@ -2675,7 +2805,7 @@ Private Function ParsePlanSectionsYGrouped(ByVal region As String, _
         aInc(n) = inc
         aMd(n) = md
         aDls(n) = 0#: aBld(n) = 0#: aTrn(n) = 0#
-        aAnn(n) = CleanSectionAnnot(CStr(m.SubMatches(6)))
+        aAnn(n) = CleanSectionAnnot(SafeSubMatch(m, 6))
         n = n + 1
 NextY:
     Next i
@@ -2706,8 +2836,10 @@ Private Function ParsePlanSectionsLayout(ByVal region As String, _
         inc = CDbl(m.SubMatches(1))
         azi = CDbl(m.SubMatches(2))
         If Not ValidPlanStation(md, inc, azi) Then GoTo NextLay
-        If n > 0 And md + 0.05 < aMd(n - 1) Then GoTo NextLay
-        If n > 0 And Abs(md - aMd(n - 1)) < 0.05 Then GoTo NextLay
+        If n > 0 Then
+            If md + 0.05 < aMd(n - 1) Then GoTo NextLay
+            If Abs(md - aMd(n - 1)) < 0.05 Then GoTo NextLay
+        End If
         aMd(n) = md
         aInc(n) = inc
         aAzm(n) = azi
@@ -2717,11 +2849,16 @@ Private Function ParsePlanSectionsLayout(ByVal region As String, _
         aDls(n) = CDbl(m.SubMatches(6))
         aBld(n) = CDbl(m.SubMatches(7))
         aTrn(n) = CDbl(m.SubMatches(8))
-        aAnn(n) = CleanSectionAnnot(CStr(m.SubMatches(10)))
+        aAnn(n) = CleanSectionAnnot(SafeSubMatch(m, 10))
         n = n + 1
 NextLay:
     Next i
     ParsePlanSectionsLayout = n
+End Function
+
+Private Function SafeSubMatch(ByVal m As Object, ByVal i As Long) As String
+    On Error Resume Next
+    SafeSubMatch = CStr(m.SubMatches(i) & "")
 End Function
 
 Private Function ValidPlanStation(ByVal md As Double, ByVal inc As Double, ByVal azi As Double) As Boolean
@@ -2791,10 +2928,12 @@ Private Function ParsePlanAnnotationsBlock(ByVal pdfText As String, _
 
     Dim re As Object: Set re = CreateObject("VBScript.RegExp")
     re.Global = True
+    ' Comments include digits ("KOP, 4°/30m = 1797.80m"). Stopping at the first
+    ' digit used to drop every annotation, so Overlay never named KOP/Hold.
     re.Pattern = "(\d{1,3}(?:,\d{3})*\.\d{2})\s+(\d{1,3}(?:,\d{3})*\.\d{2})\s+" & _
                  "(-?\d{1,3}(?:,\d{3})*\.\d{2})\s+(-?\d{1,3}(?:,\d{3})*\.\d{2})\s+" & _
-                 "([A-Za-z][^0-9]{0,80}?)" & _
-                 "(?=\s+\d{1,3}(?:,\d{3})*\.\d{2}\s+\d{1,3}(?:,\d{3})*\.\d{2}|$)"
+                 "(.+?)" & _
+                 "(?=\s+\d{1,3}(?:,\d{3})*\.\d{2}\s+\d{1,3}(?:,\d{3})*\.\d{2}|\s*$)"
 
     Dim ms As Object: Set ms = re.Execute(region)
     Dim n As Long: n = 0
@@ -2894,7 +3033,9 @@ Private Sub NamePlanSectionTargets(ByVal n As Long, _
             Next i
         End If
         If eotI < 0 And lastTurn > sotI Then eotI = lastTurn
-        If eotI >= 0 And aAuto(eotI) = "" Then aAuto(eotI) = "EOT"
+        If eotI >= 0 Then
+            If aAuto(eotI) = "" Then aAuto(eotI) = "EOT"
+        End If
     End If
 
     ' NUDGE arrival: first 3–20° station after a Nudge annotation (5° / 10° hold).
@@ -2929,7 +3070,7 @@ NextTang:
     End If
 End Sub
 
-Private Function SeedNameFromText(ByVal t As String) As String
+Public Function SeedNameFromText(ByVal t As String) As String
     Dim s As String: s = LCase$(Trim$(t))
     SeedNameFromText = ""
     If s = "" Then Exit Function
@@ -2952,6 +3093,8 @@ Private Function SeedNameFromText(ByVal t As String) As String
             Or InStr(s, "btv") > 0 Then
         SeedNameFromText = "VERTICAL": Exit Function
     End If
+    If InStr(s, "icp") > 0 Then SeedNameFromText = "ICP": Exit Function
+    If InStr(s, "build") > 0 Then SeedNameFromText = "BUILD": Exit Function
 End Function
 
 Private Sub WritePlanSecSheet(ByVal fPath As String, ByVal n As Long, _
@@ -4075,6 +4218,8 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
+
 
 
 

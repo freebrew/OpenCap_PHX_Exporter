@@ -20,7 +20,7 @@ Private Const CAP_NEW As String = "New Set"
 Private Const CAP_PULL As String = "Last Survey"
 Private Const SS_SHEET As String = "Slidesheet"
 Private Const SS_FIRST As Long = 13
-Private Const SS_LAST As Long = 305
+Private Const SS_LAST As Long = 505
 
 ' Grid columns after the inter-sensor pair was inserted at J:K (rows 5:44).
 ' Targets S1:T4 and rates U1:V4 sit over the bit-projection columns.
@@ -192,7 +192,7 @@ Private Function IsGoodSurveyCell(ByVal c As Range) As Boolean
     IsGoodSurveyCell = (CLng(c.Interior.Color) = GoodSurveyFill())
 End Function
 
-' Deepest good-survey row on the Slidesheet (13:305); 0 = none.
+' Deepest good-survey row on the Slidesheet (13:505); 0 = none.
 Public Function LastSlidesheetSurveyRow() As Long
     Dim ss As Worksheet
     Dim r As Long
@@ -973,6 +973,10 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
         ws.Cells(r, COL_TVD_BIT).Formula = "=IF(AND(" & nD & ",ISNUMBER($S" & r & "),ISNUMBER($T" & r & "),ISNUMBER(B$2),ISNUMBER(E$2)),(($S" & r & "-B$2)*COS((RADIANS($T" & r & ")+RADIANS($D" & r & "))/2))+E$2,"""")"
     Next r
 End Sub
+
+
+
+
 
 
 

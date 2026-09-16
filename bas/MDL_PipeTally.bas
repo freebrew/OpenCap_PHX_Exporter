@@ -12,6 +12,13 @@ Private Const PT_LAST As Long = 315
 Private Const MIN_JOINT_M As Double = 0.1
 Private Const MAX_JOINT_M As Double = 40#
 
+' Excel cancels CutCopyMode (and empties the clipboard) as soon as a UserForm
+' takes focus. Snapshot the text while the sheet still owns the copy, then
+' reuse it when they click Paste. Selection stays even after the ants vanish.
+Private mClipCache As String
+Private mWatchOn As Boolean
+Private mWatchWhen As Date
+
 ' ---------------------------------------------------------------------------------
 ' Sheet resolution
 '
@@ -61,7 +68,9 @@ Public Sub ShowPipeTallyForm()
     End If
 
     On Error GoTo Fail
+    CachePipeTallyClipboard
     frmPipeTally.Show vbModeless
+    StartPipeTallyClipWatch
     Exit Sub
 Fail:
     Dim msg As String
@@ -79,9 +88,90 @@ End Sub
 ' Dismiss the modeless form (also useful if it is left stranded on screen).
 Public Sub ClosePipeTallyFormIfOpen()
     On Error Resume Next
+    StopPipeTallyClipWatch
     Unload frmPipeTally
     On Error GoTo 0
 End Sub
+
+Public Sub CachePipeTallyClipboard()
+    Dim t As String
+    t = GetClipboardText()
+    If Len(Trim$(t)) > 0 Then mClipCache = t
+End Sub
+
+Public Sub StartPipeTallyClipWatch()
+    mWatchOn = True
+    SchedulePipeTallyClipWatch
+End Sub
+
+Public Sub StopPipeTallyClipWatch()
+    mWatchOn = False
+    On Error Resume Next
+    If mWatchWhen <> 0 Then Application.OnTime EarliestTime:=mWatchWhen, _
+        Procedure:="MDL_PipeTally.PipeTallyClipWatchTick", Schedule:=False
+    On Error GoTo 0
+    mWatchWhen = 0
+End Sub
+
+Public Sub PipeTallyClipWatchTick()
+    On Error Resume Next
+    CachePipeTallyClipboard
+    If mWatchOn Then SchedulePipeTallyClipWatch
+End Sub
+
+Private Sub SchedulePipeTallyClipWatch()
+    On Error Resume Next
+    mWatchWhen = Now + TimeSerial(0, 0, 1)
+    Application.OnTime EarliestTime:=mWatchWhen, _
+        Procedure:="MDL_PipeTally.PipeTallyClipWatchTick"
+End Sub
+
+' Live clipboard, then the snapshot taken before Excel flushed CutCopyMode,
+' then the current sheet selection (copy-ants go away; the range does not).
+Public Function GetPipeTallyPasteText() As String
+    Dim t As String
+    t = GetClipboardText()
+    If Len(Trim$(t)) > 0 Then
+        mClipCache = t
+        GetPipeTallyPasteText = t
+        Exit Function
+    End If
+    If Len(Trim$(mClipCache)) > 0 Then
+        GetPipeTallyPasteText = mClipCache
+        Exit Function
+    End If
+    GetPipeTallyPasteText = SelectionColumnText()
+End Function
+
+Private Function SelectionColumnText() As String
+    Dim rng As Range
+    Dim area As Range
+    Dim c As Range
+    Dim buf As String
+    Dim n As Long
+
+    SelectionColumnText = ""
+    On Error Resume Next
+    Set rng = Application.Selection
+    On Error GoTo 0
+    If rng Is Nothing Then Exit Function
+    If TypeName(rng) <> "Range" Then Exit Function
+    If rng.Areas.Count <> 1 Then Exit Function
+    Set area = rng.Columns(1)
+    On Error Resume Next
+    Set area = Intersect(area, area.Worksheet.UsedRange)
+    On Error GoTo 0
+    If area Is Nothing Then Exit Function
+
+    For Each c In area.Cells
+        If n >= 400 Then Exit For
+        If Len(Trim$(CStr(c.Value2 & ""))) = 0 Then GoTo NextSel
+        n = n + 1
+        buf = buf & CStr(c.Value2) & vbLf
+NextSel:
+    Next c
+    SelectionColumnText = buf
+End Function
 
 ' Form-control button on Slidesheet, in merged Z4:Z6 (under Clear Ranges in Z1:Z3).
 Public Sub EnsurePipeTallyFormButton()
@@ -393,7 +483,7 @@ Public Sub AppendTallyBitDepths()
 
     ScreenBeginBusy "Pipe tally: adding bit depths..."
     For i = 1 To nVals
-        If destRow > 305 Then
+        If destRow > 505 Then
             truncated = True
             Exit For
         End If
@@ -408,7 +498,7 @@ Public Sub AppendTallyBitDepths()
 
     If truncated Then
         MsgBox "Stopped after " & CStr(nAdded) & _
-               " values: Slidesheet bit-depth rows only go through D305.", _
+               " values: Slidesheet bit-depth rows only go through D505.", _
                vbExclamation
     End If
     MsgBox "Added " & CStr(nAdded) & " bit depth(s) to Slidesheet starting at D" & _
@@ -484,14 +574,18 @@ Private Function LastBitDepthRow(ss As Worksheet) As Long
     Dim r As Long
     Dim last As Long
     last = 11
-    ' Survey bit depths live in D12:D305; D306+ are summary LOOKUPs.
-    For r = 12 To 305
+    ' Survey bit depths live in D12:D505; D506+ are summary LOOKUPs.
+    For r = 12 To 505
         If Len(Trim$(CStr(ss.Cells(r, "D").text))) > 0 Then
             last = r
         End If
     Next r
     LastBitDepthRow = last
 End Function
+
+
+
+
 
 
 

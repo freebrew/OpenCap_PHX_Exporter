@@ -40,7 +40,7 @@ Private Const FS_AXIS As Single = 10
 Private Const FS_CAP As Single = 10
 Private Const CROSSOVER_INC As Double = 5#
 Private Const SURV_ROW_FIRST As Long = 13
-Private Const SURV_ROW_LAST As Long = 320
+Private Const SURV_ROW_LAST As Long = 520
 Private Const WP_ROW_FIRST As Long = 14
 Private Const WP_ROW_LAST As Long = 33
 Private Const WP_COL_MD As Long = 29          ' AC
@@ -81,7 +81,7 @@ End Function
 ' --------------------------------------------------------------------------------
 Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
                    ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
-                   ByRef dv As Double, ByRef dN As Double, ByRef dE As Double)
+                   ByRef dV As Double, ByRef dN As Double, ByRef dE As Double)
     Dim r1 As Double, r2 As Double, b1 As Double, b2 As Double
     Dim cosDL As Double, beta As Double, h As Double
     r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
@@ -97,7 +97,7 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     Else
         h = (md2 - md1) / 2#
     End If
-    dv = h * (Cos(r1) + Cos(r2))
+    dV = h * (Cos(r1) + Cos(r2))
     dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
     dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
@@ -322,7 +322,7 @@ End Function
 
 Private Function ActualAtLastSurvey(ws As Worksheet, _
         ByRef sMD As Double, ByRef sInc As Double, ByRef sAzi As Double, _
-        ByRef sn As Double, ByRef se As Double, ByRef sV As Double, _
+        ByRef sN As Double, ByRef sE As Double, ByRef sV As Double, _
         ByRef lastRow As Long) As Long
     Dim n As Long: n = 0
     Dim prevMD As Double, prevInc As Double, prevAzi As Double
@@ -348,9 +348,9 @@ Private Function ActualAtLastSurvey(ws As Worksheet, _
         Dim mdv As Double: mdv = CDbl(vMd)
         If mdv <= prevMD Then GoTo NextSurveyRow
 
-        Dim dv As Double, dN As Double, dE As Double
-        McStep prevMD, prevInc, prevAzi, mdv, CDbl(vInc), CDbl(vAzi), dv, dN, dE
-        curN = curN + dN: curE = curE + dE: curV = curV + dv
+        Dim dV As Double, dN As Double, dE As Double
+        McStep prevMD, prevInc, prevAzi, mdv, CDbl(vInc), CDbl(vAzi), dV, dN, dE
+        curN = curN + dN: curE = curE + dE: curV = curV + dV
         prevMD = mdv: prevInc = CDbl(vInc): prevAzi = CDbl(vAzi)
         lastRow = r
         n = n + 1
@@ -358,7 +358,7 @@ NextSurveyRow:
     Next r
 
     sMD = prevMD: sInc = prevInc: sAzi = prevAzi
-    sn = curN: se = curE: sV = curV
+    sN = curN: sE = curE: sV = curV
     ActualAtLastSurvey = n
 End Function
 
@@ -399,7 +399,9 @@ End Function
 ' --------------------------------------------------------------------------------
 Public Sub RenderPlanGauge()
     On Error Resume Next
+    ScreenBeginBusy
     RenderPlanGaugeCore
+    ScreenEndBusy
     On Error GoTo 0
 End Sub
 
@@ -414,9 +416,9 @@ Private Sub RenderPlanGaugeCore()
     Dim nPlan As Long
     nPlan = LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
     Dim sMD As Double, sInc As Double, sAzi As Double
-    Dim sn As Double, se As Double, sV As Double
+    Dim sN As Double, sE As Double, sV As Double
     Dim lastRow As Long, nSurv As Long
-    nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sn, se, sV, lastRow)
+    nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sN, sE, sV, lastRow)
 
     If nPlan < 2 Or nSurv < 1 Then
         DrawGauge ws, False, 0, 0, "", False, 0, 0, _
@@ -436,8 +438,8 @@ Private Sub RenderPlanGaugeCore()
     End If
 
     Dim dN As Double, dE As Double, dTvdUp As Double
-    dN = sn - plN
-    dE = se - plE
+    dN = sN - plN
+    dE = sE - plE
     dTvdUp = plV - actTvd
 
     ' Sail-calculator mode: the waypoint geo corridor is active. The window is
@@ -479,8 +481,8 @@ Private Sub RenderPlanGaugeCore()
             End If
 
             Dim bDN As Double, bDE As Double, bUp As Double
-            bDN = (sn + stepN) - pbN
-            bDE = (se + stepE) - pbE
+            bDN = (sN + stepN) - pbN
+            bDE = (sE + stepE) - pbE
             bUp = pbV - bitTvd
             ' PTB rides the same frame as the survey marker (sail = TVD).
             Dim frameIncB As Double
@@ -918,8 +920,8 @@ End Sub
 
 Public Sub PG_McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
                      ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
-                     ByRef dv As Double, ByRef dN As Double, ByRef dE As Double)
-    McStep md1, i1, a1, md2, i2, a2, dv, dN, dE
+                     ByRef dV As Double, ByRef dN As Double, ByRef dE As Double)
+    McStep md1, i1, a1, md2, i2, a2, dV, dN, dE
 End Sub
 
 Public Sub PG_FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Double, _
@@ -941,6 +943,10 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
+
+
 
 
 

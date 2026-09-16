@@ -21,7 +21,7 @@ Private Const PLAN_SHEET As String = "_OC_Survey"
 Private Const DATA_SHEET As String = "Data"
 
 Private Const SURV_ROW_FIRST As Long = 13
-Private Const SURV_ROW_LAST As Long = 320
+Private Const SURV_ROW_LAST As Long = 520
 
 Private Const SS_COL_BIT_MD As Long = 4    ' D
 Private Const SS_COL_MD As Long = 5        ' E
@@ -36,7 +36,7 @@ Private Const TD_ROW_PLANNED As Long = 54
 Private Const TD_ROW_EST As Long = 55
 Private Const TD_COL_FIRST As Long = 9     ' I
 
-Private Const SURVEY_BLOCK As String = "Slidesheet!$D$13:$AQ$320"
+Private Const SURVEY_BLOCK As String = "Slidesheet!$D$13:$AQ$520"
 Private Const TGT_BLOCK As String = "Slidesheet!$T$2:$Y$5"
 Private Const PLANNED_BLOCK As String = "Data!$I$54:$M$54"
 
@@ -253,7 +253,7 @@ Private Function LastActualAtBit(ByRef md As Double, ByRef inc As Double, _
     Dim nSurv As Long
     Dim vMd As Variant, vInc As Variant, vAzi As Variant
     Dim mdv As Double
-    Dim dv As Double, dN As Double, dE As Double
+    Dim dV As Double, dN As Double, dE As Double
     Dim bitMd As Double, bitInc As Double, bitAzm As Double
     Dim vD As Variant, vW As Variant, vX As Variant, vH As Variant
 
@@ -276,8 +276,8 @@ Private Function LastActualAtBit(ByRef md As Double, ByRef inc As Double, _
         If Len(CStr(vMd & "")) = 0 Or Len(CStr(vInc & "")) = 0 Or Len(CStr(vAzi & "")) = 0 Then GoTo NextSurvey
         mdv = CDbl(vMd)
         If mdv <= prevMD Then GoTo NextSurvey
-        McStep prevMD, prevInc, prevAzi, mdv, CDbl(vInc), CDbl(vAzi), dv, dN, dE
-        curN = curN + dN: curE = curE + dE: curV = curV + dv
+        McStep prevMD, prevInc, prevAzi, mdv, CDbl(vInc), CDbl(vAzi), dV, dN, dE
+        curN = curN + dN: curE = curE + dE: curV = curV + dV
         prevMD = mdv: prevInc = CDbl(vInc): prevAzi = CDbl(vAzi)
         lastR = r
         nSurv = nSurv + 1
@@ -304,8 +304,8 @@ NextSurvey:
     If IsNumeric(vX) And Len(CStr(vX & "")) > 0 Then bitAzm = CDbl(vX) Else bitAzm = prevAzi
 
     If bitMd > prevMD + 0.005 Then
-        McStep prevMD, prevInc, prevAzi, bitMd, bitInc, bitAzm, dv, dN, dE
-        n = n + dN: e = e + dE: tvd = tvd + dv
+        McStep prevMD, prevInc, prevAzi, bitMd, bitInc, bitAzm, dV, dN, dE
+        n = n + dN: e = e + dE: tvd = tvd + dV
         md = bitMd: inc = bitInc: azm = bitAzm
     ElseIf bitMd > 0# Then
         md = bitMd
@@ -491,7 +491,7 @@ End Function
 
 Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
                    ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
-                   ByRef dv As Double, ByRef dN As Double, ByRef dE As Double)
+                   ByRef dV As Double, ByRef dN As Double, ByRef dE As Double)
     Dim r1 As Double, r2 As Double, b1 As Double, b2 As Double
     Dim cosDL As Double, beta As Double, h As Double
     r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
@@ -505,10 +505,12 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     Else
         h = (md2 - md1) / 2#
     End If
-    dv = h * (Cos(r1) + Cos(r2))
+    dV = h * (Cos(r1) + Cos(r2))
     dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
     dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
+
+
 
 
 

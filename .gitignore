@@ -43,6 +43,8 @@ backups/
 *.bak_REAL_SENSITIVE_*
 
 # Field workbook — real job data; NEVER commit (Demo is the GitHub workbook)
+Slide Sheet - 35781.xlsm
+**/Slide Sheet - 35781.xlsm
 Slide Sheet - 35780.xlsm
 **/Slide Sheet - 35780.xlsm
 Slide Sheet - 34801.xlsm
@@ -82,6 +84,11 @@ docs/architecture/
 docs/daily_*.png
 docs/ac_table_bands.png
 
+# AC corridor standalone POC (job-parsed sheets + renders)
+docs/ac_poc/*.xlsm
+docs/ac_poc/*.png
+docs/ac_poc/_*.txt
+
 # Older packaged extension zips (keep latest only in git)
 dist/OpenCap_DataExporter_v3.1.6.zip
 dist/OpenCap_DataExporter_v3.1.7.zip
@@ -98,4 +105,9 @@ bas/_*.ps1
 !bas/_dual_export_caches.ps1
 !bas/_dual_diff_vba.ps1
 !bas/_dual_mirror_demo_to_field.ps1
+!bas/_build_ac_poc_workbook.ps1
+!bas/_run_ac_poc.ps1
 bas/live/
+# Perspective example renders (may be built from Field data - never commit)
+docs/corridor_ex_*.png
+docs/corridor_field_*.png

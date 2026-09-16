@@ -63,6 +63,7 @@ Private Const TOOLS_TITLE_TOKEN As String = "3rd Party"
 Private Const MOTOR_TITLE_TOKEN As String = "Enter Motors"
 Private Const TITLE_TYPO As String = "Toosl"
 Private Const TITLE_FIX As String = "Tools"
+Private Const FMT_HRS As String = "#####.00""Hrs"";-#####.00""Hrs"";"
 
 Private Const TR_SERIAL As Long = 1
 Private Const TR_KIND As Long = 2
@@ -184,10 +185,10 @@ Private Function TrackerLastRow(ByVal tr As Worksheet) As Long
     TrackerLastRow = r
 End Function
 
-Private Function TrackerFindRow(ByVal tr As Worksheet, ByVal sn As String) As Long
+Private Function TrackerFindRow(ByVal tr As Worksheet, ByVal sN As String) As Long
     Dim r As Long, lastR As Long, key As String
     TrackerFindRow = 0
-    key = NormSerial(sn)
+    key = NormSerial(sN)
     If Len(key) = 0 Then Exit Function
     lastR = TrackerLastRow(tr)
     For r = 2 To lastR
@@ -198,17 +199,17 @@ Private Function TrackerFindRow(ByVal tr As Worksheet, ByVal sn As String) As Lo
     Next r
 End Function
 
-Private Function TrackerUpsert(ByVal tr As Worksheet, ByVal sn As String, _
+Private Function TrackerUpsert(ByVal tr As Worksheet, ByVal sN As String, _
                                ByVal kind As String) As Long
     Dim r As Long
     TrackerUpsert = 0
-    If Not LooksLikeSerial(sn) Then Exit Function
-    r = TrackerFindRow(tr, sn)
+    If Not LooksLikeSerial(sN) Then Exit Function
+    r = TrackerFindRow(tr, sN)
     If r = 0 Then
         r = TrackerLastRow(tr) + 1
         If r < 2 Then r = 2
         tr.Cells(r, TR_SERIAL).numberFormat = "@"
-        tr.Cells(r, TR_SERIAL).Value = sn
+        tr.Cells(r, TR_SERIAL).Value = sN
         tr.Cells(r, TR_PREJOB).Value = 0
         tr.Cells(r, TR_JOB).Value = 0
         tr.Cells(r, TR_TOTAL).Value = 0
@@ -232,37 +233,37 @@ End Sub
 Private Sub HarvestRange(ByVal ws As Worksheet, ByVal tr As Worksheet, _
                          ByVal firstR As Long, ByVal lastR As Long, ByVal kind As String)
     Dim r As Long, trR As Long
-    Dim sn As String
+    Dim sN As String
     Dim prev As Double
     For r = firstR To lastR
-        sn = SerialAt(ws, r)
-        If LooksLikeSerial(sn) Then
+        sN = SerialAt(ws, r)
+        If LooksLikeSerial(sN) Then
             prev = NumOrZero(ws.Cells(r, COL_PREV).Value)
-            trR = TrackerUpsert(tr, sn, kind)
+            trR = TrackerUpsert(tr, sN, kind)
             If prev > 0 Then tr.Cells(trR, TR_PREJOB).Value = prev
         End If
     Next r
 End Sub
 
-Private Function LooksLikeSerial(ByVal sn As String) As Boolean
+Private Function LooksLikeSerial(ByVal sN As String) As Boolean
     LooksLikeSerial = False
-    sn = Trim$(sn)
-    If Len(NormSerial(sn)) < 3 Then Exit Function
-    If InStr(1, sn, "hours below", vbTextCompare) > 0 Then Exit Function
-    If StrComp(sn, "Serial Number", vbTextCompare) = 0 Then Exit Function
+    sN = Trim$(sN)
+    If Len(NormSerial(sN)) < 3 Then Exit Function
+    If InStr(1, sN, "hours below", vbTextCompare) > 0 Then Exit Function
+    If StrComp(sN, "Serial Number", vbTextCompare) = 0 Then Exit Function
     LooksLikeSerial = True
 End Function
 
 Private Sub DedupTracker(ByVal tr As Worksheet)
     Dim r As Long, other As Long
-    Dim sn As String, key As String
+    Dim sN As String, key As String
     For r = TrackerLastRow(tr) To 2 Step -1
-        sn = CanonicalSerial(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
-        If LooksLikeSerial(sn) Then
+        sN = CanonicalSerial(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
+        If LooksLikeSerial(sN) Then
             tr.Cells(r, TR_SERIAL).numberFormat = "@"
-            tr.Cells(r, TR_SERIAL).Value = sn
+            tr.Cells(r, TR_SERIAL).Value = sN
         End If
-        key = NormSerial(sn)
+        key = NormSerial(sN)
         If Len(key) = 0 Then GoTo NextDedup
         For other = 2 To r - 1
             If NormSerial(CStr(tr.Cells(other, TR_SERIAL).Value & "")) = key Then
@@ -290,7 +291,7 @@ Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
     Dim bhaWs As Worksheet
     Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long, cSub As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, src As String, desc As String, subDesc As String
+    Dim sN As String, src As String, desc As String, subDesc As String
     Dim cat As String, subCat As String, itemName As String, ship As String
 
     PurgeBadTrackerRows tr
@@ -306,20 +307,20 @@ Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
         If cSn > 0 Then
             lastR = bhaWs.Cells(bhaWs.Rows.Count, cSn).End(xlUp).Row
             For r = 2 To lastR
-                sn = CellSerial(bhaWs.Cells(r, cSn))
-                If LooksLikeSerial(sn) Then
+                sN = CellSerial(bhaWs.Cells(r, cSn))
+                If LooksLikeSerial(sN) Then
                     src = ""
                     desc = ""
                     subDesc = ""
                     If cSrc > 0 Then src = CStr(bhaWs.Cells(r, cSrc).Value & "")
                     If cDesc > 0 Then desc = CStr(bhaWs.Cells(r, cDesc).Value & "")
                     If cSub > 0 Then subDesc = CStr(bhaWs.Cells(r, cSub).Value & "")
-                    InventoryMeta sn, cat, subCat, itemName, ship
+                    InventoryMeta sN, cat, subCat, itemName, ship
                     If Len(Trim$(subCat)) = 0 Then subCat = subDesc
-                    If IsMotorLike(sn, desc, cat, subCat, itemName) Then
-                        TrackerUpsert tr, sn, KIND_MOTOR
-                    ElseIf IsThirdPartySeed(src, sn, desc, cat, subCat, itemName) Then
-                        TrackerUpsert tr, sn, KIND_TOOL
+                    If IsMotorLike(sN, desc, cat, subCat, itemName) Then
+                        TrackerUpsert tr, sN, KIND_MOTOR
+                    ElseIf IsThirdPartySeed(src, sN, desc, cat, subCat, itemName) Then
+                        TrackerUpsert tr, sN, KIND_TOOL
                     End If
                 End If
             Next r
@@ -333,7 +334,7 @@ Private Sub UpsertMotorsFromInventory(ByVal tr As Worksheet)
     Dim inv As Worksheet
     Dim cSn As Long, cName As Long, cSub As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, itemName As String, subCat As String
+    Dim sN As String, itemName As String, subCat As String
 
     If Not SheetExistsTH(SH_INVENTORY) Then Exit Sub
     Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
@@ -345,14 +346,14 @@ Private Sub UpsertMotorsFromInventory(ByVal tr As Worksheet)
     If cSn = 0 Then Exit Sub
     lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
     For r = 2 To lastR
-        sn = CellSerial(inv.Cells(r, cSn))
+        sN = CellSerial(inv.Cells(r, cSn))
         itemName = ""
         subCat = ""
         If cName > 0 Then itemName = CStr(inv.Cells(r, cName).Value & "")
         If cSub > 0 Then subCat = CStr(inv.Cells(r, cSub).Value & "")
-        If Len(sn) > 0 Then
-            If IsMotorLike(sn, itemName, "", subCat, itemName) Then
-                TrackerUpsert tr, sn, KIND_MOTOR
+        If Len(sN) > 0 Then
+            If IsMotorLike(sN, itemName, "", subCat, itemName) Then
+                TrackerUpsert tr, sN, KIND_MOTOR
             End If
         End If
     Next r
@@ -362,7 +363,7 @@ Private Sub RecomputeJobHours(ByVal tr As Worksheet, ByVal curBha As Long, ByVal
     Dim bhaHrs As Collection
     Dim bhaMembers As Collection
     Dim lastR As Long, r As Long
-    Dim sn As String, key As String
+    Dim sN As String, key As String
     Dim job As Double
     Dim bhas As String
     Dim v As Variant
@@ -371,8 +372,8 @@ Private Sub RecomputeJobHours(ByVal tr As Worksheet, ByVal curBha As Long, ByVal
     Set bhaMembers = BhaMembersMap()
     lastR = TrackerLastRow(tr)
     For r = 2 To lastR
-        sn = Trim$(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
-        key = NormSerial(sn)
+        sN = Trim$(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
+        key = NormSerial(sN)
         job = 0
         bhas = ""
         If Len(key) > 0 Then
@@ -451,7 +452,7 @@ Private Function BhaMembersMap() As Collection
     Dim cNum As Long, cSn As Long
     Dim lastR As Long, r As Long
     Dim n As Long
-    Dim sn As String, key As String, cur As String
+    Dim sN As String, key As String, cur As String
 
     Set BhaMembersMap = col
     If Not SheetExistsTH(SH_BHA) Then Exit Function
@@ -462,8 +463,8 @@ Private Function BhaMembersMap() As Collection
     lastR = ws.Cells(ws.Rows.Count, cSn).End(xlUp).Row
     For r = 2 To lastR
         n = BhaNumber(ws.Cells(r, cNum).Value)
-        sn = CellSerial(ws.Cells(r, cSn))
-        key = NormSerial(sn)
+        sN = CellSerial(ws.Cells(r, cSn))
+        key = NormSerial(sN)
         If n > 0 And Len(key) > 0 Then
             cur = ""
             On Error Resume Next
@@ -481,17 +482,17 @@ End Function
 
 Private Sub WriteMotorList(ByVal tr As Worksheet)
     Dim lastR As Long, r As Long, dest As Long
-    Dim sn As String
+    Dim sN As String
 
     tr.Range("M2:M80").ClearContents
     dest = 2
     lastR = TrackerLastRow(tr)
     For r = 2 To lastR
         If StrComp(CStr(tr.Cells(r, TR_KIND).Value & ""), KIND_MOTOR, vbTextCompare) = 0 Then
-            sn = Trim$(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
-            If Len(sn) > 0 Then
+            sN = Trim$(CStr(tr.Cells(r, TR_SERIAL).Value & ""))
+            If Len(sN) > 0 Then
                 tr.Cells(dest, TR_MOTOR_LIST).numberFormat = "@"
-                tr.Cells(dest, TR_MOTOR_LIST).Value = sn
+                tr.Cells(dest, TR_MOTOR_LIST).Value = sN
                 dest = dest + 1
             End If
         End If
@@ -583,15 +584,15 @@ Private Sub PaintDataRows(ByVal ws As Worksheet, ByVal firstR As Long, ByVal las
 End Sub
 
 Private Sub PaintFrontTools(ByVal ws As Worksheet, ByVal tr As Worksheet, ByVal bha As Long)
-    Dim sns As Collection
+    Dim sNs As Collection
     Dim i As Long, r As Long
 
-    Set sns = ActiveBhaToolSerials(bha)
+    Set sNs = ActiveBhaToolSerials(bha)
 
     r = TOOLS_FIRST
-    For i = 1 To sns.Count
+    For i = 1 To sNs.Count
         If r > TOOLS_LAST Then Exit For
-        WriteFrontRow ws, tr, r, CStr(sns.Item(i)), KIND_TOOL
+        WriteFrontRow ws, tr, r, CStr(sNs.Item(i)), KIND_TOOL
         r = r + 1
     Next i
     For r = r To TOOLS_LAST
@@ -600,21 +601,21 @@ Private Sub PaintFrontTools(ByVal ws As Worksheet, ByVal tr As Worksheet, ByVal 
 End Sub
 
 Private Sub PaintFrontMotors(ByVal ws As Worksheet, ByVal tr As Worksheet, ByVal bha As Long)
-    Dim sns As Collection
+    Dim sNs As Collection
     Dim motorSn As String
     Dim i As Long, r As Long
 
-    Set sns = New Collection
+    Set sNs = New Collection
     motorSn = Trim$(CStr(ws.Range(CELL_MOTOR).Value & ""))
     If Len(motorSn) = 0 Then motorSn = BhaMotorSerial(bha)
-    If Len(motorSn) > 0 Then AddUnique sns, motorSn
+    If Len(motorSn) > 0 Then AddUnique sNs, motorSn
 
-    AppendBhaMotors sns, bha
+    AppendBhaMotors sNs, bha
 
     r = MOTOR_FIRST
-    For i = 1 To sns.Count
+    For i = 1 To sNs.Count
         If r > MOTOR_LAST Then Exit For
-        WriteFrontRow ws, tr, r, CStr(sns.Item(i)), KIND_MOTOR
+        WriteFrontRow ws, tr, r, CStr(sNs.Item(i)), KIND_MOTOR
         r = r + 1
     Next i
     For r = r To MOTOR_LAST
@@ -623,10 +624,10 @@ Private Sub PaintFrontMotors(ByVal ws As Worksheet, ByVal tr As Worksheet, ByVal
 End Sub
 
 Private Sub WriteFrontRow(ByVal ws As Worksheet, ByVal tr As Worksheet, _
-                          ByVal r As Long, ByVal sn As String, ByVal kind As String)
+                          ByVal r As Long, ByVal sN As String, ByVal kind As String)
     Dim trR As Long
-    trR = TrackerUpsert(tr, sn, kind)
-    SetSerialAt ws, r, sn
+    trR = TrackerUpsert(tr, sN, kind)
+    SetSerialAt ws, r, sN
     WriteNum ws, r, COL_PREV, NumOrZero(tr.Cells(trR, TR_PREJOB).Value)
     WriteNum ws, r, COL_CURRENT, NumOrZero(tr.Cells(trR, TR_JOB).Value)
 End Sub
@@ -649,7 +650,7 @@ Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
     Dim ws As Worksheet
     Dim cNum As Long, cSn As Long, cSrc As Long, cDesc As Long, cSub As Long
     Dim lastR As Long, r As Long
-    Dim sn As String, src As String, desc As String, subDesc As String
+    Dim sN As String, src As String, desc As String, subDesc As String
     Dim cat As String, subCat As String, itemName As String, ship As String
 
     Set ActiveBhaToolSerials = col
@@ -665,18 +666,18 @@ Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
     lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
     For r = 2 To lastR
         If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
-            sn = CellSerial(ws.Cells(r, cSn))
-            If LooksLikeSerial(sn) Then
+            sN = CellSerial(ws.Cells(r, cSn))
+            If LooksLikeSerial(sN) Then
                 src = ""
                 desc = ""
                 subDesc = ""
                 If cSrc > 0 Then src = CStr(ws.Cells(r, cSrc).Value & "")
                 If cDesc > 0 Then desc = CStr(ws.Cells(r, cDesc).Value & "")
                 If cSub > 0 Then subDesc = CStr(ws.Cells(r, cSub).Value & "")
-                InventoryMeta sn, cat, subCat, itemName, ship
+                InventoryMeta sN, cat, subCat, itemName, ship
                 If Len(Trim$(subCat)) = 0 Then subCat = subDesc
-                If IsThirdPartySeed(src, sn, desc, cat, subCat, itemName) Then
-                    AddUnique col, sn
+                If IsThirdPartySeed(src, sN, desc, cat, subCat, itemName) Then
+                    AddUnique col, sN
                 End If
             End If
         End If
@@ -687,7 +688,7 @@ Private Sub AppendBhaMotors(ByVal col As Collection, ByVal bha As Long)
     Dim ws As Worksheet
     Dim cNum As Long, cSn As Long, cDesc As Long
     Dim lastR As Long, r As Long
-    Dim sn As String
+    Dim sN As String
 
     If bha <= 0 Then Exit Sub
     If Not SheetExistsTH(SH_BHA) Then Exit Sub
@@ -699,10 +700,10 @@ Private Sub AppendBhaMotors(ByVal col As Collection, ByVal bha As Long)
     lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
     For r = 2 To lastR
         If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
-            sn = CellSerial(ws.Cells(r, cSn))
-            If LooksLikeSerial(sn) Then
-                If IsMotorLike(sn, CStr(ws.Cells(r, cDesc).Value & ""), "", "", "") Then
-                    AddUnique col, sn
+            sN = CellSerial(ws.Cells(r, cSn))
+            If LooksLikeSerial(sN) Then
+                If IsMotorLike(sN, CStr(ws.Cells(r, cDesc).Value & ""), "", "", "") Then
+                    AddUnique col, sN
                 End If
             End If
         End If
@@ -754,6 +755,19 @@ Private Sub FixDependentFormulas(ByVal ws As Worksheet)
     If InStr(1, f, "B45:F52", vbTextCompare) > 0 Then
         ws.Range("C24").Formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
     End If
+
+    ApplyHoursNumberFormat ws
+End Sub
+
+' Zero hours stay numeric 0 for sums; the zero section of the format is blank
+' so Motors / 3rd Party / Agitator do not print .00Hrs.
+Private Sub ApplyHoursNumberFormat(ByVal ws As Worksheet)
+    On Error Resume Next
+    ws.Range("F45:F55").numberFormat = FMT_HRS
+    ws.Range("E24:F28").numberFormat = FMT_HRS
+    ws.Range("E30:F32").numberFormat = FMT_HRS
+    ws.Range(CELL_PREV_MOTOR).numberFormat = FMT_HRS
+    On Error GoTo 0
 End Sub
 
 Private Sub SetLookup(ByVal c As Range, ByVal keyAddr As String, _
@@ -834,12 +848,12 @@ Private Function CellSerial(ByVal c As Range) As String
     CellSerial = CanonicalSerial(t)
 End Function
 
-Private Function CanonicalSerial(ByVal sn As String) As String
+Private Function CanonicalSerial(ByVal sN As String) As String
     Dim inv As Worksheet
     Dim cSn As Long, lastR As Long, r As Long
     Dim other As String, want As String
-    CanonicalSerial = Trim$(sn)
-    want = DigitKey(sn)
+    CanonicalSerial = Trim$(sN)
+    want = DigitKey(sN)
     If Len(want) = 0 Then Exit Function
     If Not SheetExistsTH(SH_INVENTORY) Then Exit Function
     Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
@@ -850,7 +864,7 @@ Private Function CanonicalSerial(ByVal sn As String) As String
     For r = 2 To lastR
         other = Trim$(CStr(inv.Cells(r, cSn).text & ""))
         If Len(other) = 0 Then other = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
-        If DigitKey(other) = want And Len(other) >= Len(sn) Then
+        If DigitKey(other) = want And Len(other) >= Len(sN) Then
             CanonicalSerial = other
             Exit Function
         End If
@@ -858,9 +872,9 @@ Private Function CanonicalSerial(ByVal sn As String) As String
 End Function
 
 ' Digit-only key with leading zeros stripped, so 0261 and 261 match.
-Private Function DigitKey(ByVal sn As String) As String
+Private Function DigitKey(ByVal sN As String) As String
     Dim s As String
-    s = NormSerial(sn)
+    s = NormSerial(sN)
     DigitKey = ""
     If Len(s) = 0 Then Exit Function
     If s Like "*[!0-9]*" Then Exit Function
@@ -870,7 +884,7 @@ Private Function DigitKey(ByVal sn As String) As String
     DigitKey = s
 End Function
 
-Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sn As String)
+Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sN As String)
     Dim c As Range
     Set c = ws.Cells(r, COL_SERIAL)
     If c.MergeCells Then
@@ -878,8 +892,8 @@ Private Sub SetSerialAt(ByVal ws As Worksheet, ByVal r As Long, ByVal sn As Stri
         Set c = c.MergeArea.Cells(1, 1)
     End If
     c.numberFormat = "@"
-    If StrComp(CStr(c.text & ""), sn, vbTextCompare) = 0 Then Exit Sub
-    c.Value = CStr(sn)
+    If StrComp(CStr(c.text & ""), sN, vbTextCompare) = 0 Then Exit Sub
+    c.Value = CStr(sN)
 End Sub
 
 Private Sub WriteNum(ByVal ws As Worksheet, ByVal r As Long, ByVal col As Long, ByVal hrs As Double)
@@ -900,11 +914,11 @@ End Sub
 Private Function CollectPicks(ByVal ws As Worksheet) As Collection
     Dim col As New Collection
     Dim c As Range
-    Dim sn As String
+    Dim sN As String
     For Each c In ws.Range(RNG_PICKS).Cells
-        sn = Trim$(CStr(c.Value & ""))
-        If Len(sn) > 0 And InStr(1, sn, "Agitator Hours", vbTextCompare) = 0 Then
-            AddUnique col, sn
+        sN = Trim$(CStr(c.Value & ""))
+        If Len(sN) > 0 And InStr(1, sN, "Agitator Hours", vbTextCompare) = 0 Then
+            AddUnique col, sN
         End If
     Next c
     Set CollectPicks = col
@@ -914,7 +928,7 @@ Private Function BhaMotorSerial(ByVal bha As Long) As String
     Dim ws As Worksheet
     Dim cNum As Long, cSn As Long, cDesc As Long
     Dim lastR As Long, r As Long
-    Dim sn As String
+    Dim sN As String
 
     BhaMotorSerial = ""
     If bha <= 0 Then Exit Function
@@ -927,10 +941,10 @@ Private Function BhaMotorSerial(ByVal bha As Long) As String
     lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
     For r = 2 To lastR
         If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
-            sn = CellSerial(ws.Cells(r, cSn))
-            If LooksLikeSerial(sn) Then
-                If IsMotorLike(sn, CStr(ws.Cells(r, cDesc).Value & ""), "", "", "") Then
-                    BhaMotorSerial = sn
+            sN = CellSerial(ws.Cells(r, cSn))
+            If LooksLikeSerial(sN) Then
+                If IsMotorLike(sN, CStr(ws.Cells(r, cDesc).Value & ""), "", "", "") Then
+                    BhaMotorSerial = sN
                     Exit Function
                 End If
             End If
@@ -938,7 +952,7 @@ Private Function BhaMotorSerial(ByVal bha As Long) As String
     Next r
 End Function
 
-Private Function InventoryMeta(ByVal sn As String, ByRef cat As String, _
+Private Function InventoryMeta(ByVal sN As String, ByRef cat As String, _
                                ByRef subCat As String, ByRef itemName As String, _
                                ByRef ship As String) As Boolean
     Dim inv As Worksheet
@@ -951,7 +965,7 @@ Private Function InventoryMeta(ByVal sn As String, ByRef cat As String, _
     itemName = ""
     ship = ""
     InventoryMeta = False
-    want = NormSerial(sn)
+    want = NormSerial(sN)
     If Len(want) = 0 Then Exit Function
     If Not SheetExistsTH(SH_INVENTORY) Then Exit Function
     Set inv = ThisWorkbook.Worksheets(SH_INVENTORY)
@@ -984,11 +998,11 @@ Private Function IsSteerMotorText(ByVal text As String) As Boolean
                     Or (InStr(1, t, "i-Cruise", vbTextCompare) > 0)
 End Function
 
-Private Function IsMotorLike(ByVal sn As String, ByVal desc As String, _
+Private Function IsMotorLike(ByVal sN As String, ByVal desc As String, _
                              ByVal cat As String, ByVal subCat As String, _
                              ByVal itemName As String) As Boolean
     IsMotorLike = False
-    If Len(Trim$(sn)) = 0 Then Exit Function
+    If Len(Trim$(sN)) = 0 Then Exit Function
     If InStr(1, desc, "Mud Motor", vbTextCompare) > 0 Then
         IsMotorLike = True
         Exit Function
@@ -1094,12 +1108,12 @@ Private Function ContainsTypeToken(ByVal blob As String, ByVal token As String) 
     ContainsTypeToken = (InStr(1, blob, token, vbTextCompare) > 0)
 End Function
 
-Private Function IsThirdPartySeed(ByVal src As String, ByVal sn As String, _
+Private Function IsThirdPartySeed(ByVal src As String, ByVal sN As String, _
                                   ByVal desc As String, ByVal cat As String, _
                                   ByVal subCat As String, ByVal itemName As String) As Boolean
     IsThirdPartySeed = False
-    If Not LooksLikeSerial(sn) Then Exit Function
-    If IsMotorLike(sn, desc, cat, subCat, itemName) Then Exit Function
+    If Not LooksLikeSerial(sN) Then Exit Function
+    If IsMotorLike(sN, desc, cat, subCat, itemName) Then Exit Function
     If IsSkippedToolKind(cat, subCat, desc, itemName) Then Exit Function
 
     IsThirdPartySeed = IsOtherToolsFamily(src, cat, subCat)
@@ -1131,7 +1145,7 @@ Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collec
     Dim inv As Worksheet
     Dim cSn As Long, cSub As Long
     Dim lastR As Long, r As Long, k As Long
-    Dim sub_ As String, sn As String
+    Dim sub_ As String, sN As String
 
     Set InventorySerialsOfKind = col
     If Not SheetExistsTH(SH_INVENTORY) Then Exit Function
@@ -1145,8 +1159,8 @@ Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collec
         sub_ = " " & Trim$(CStr(inv.Cells(r, cSub).Value & "")) & " "
         For k = LBound(kinds) To UBound(kinds)
             If InStr(1, sub_, " " & CStr(kinds(k)) & " ", vbTextCompare) > 0 Then
-                sn = CellSerial(inv.Cells(r, cSn))
-                If Len(sn) > 0 Then AddUnique col, sn
+                sN = CellSerial(inv.Cells(r, cSn))
+                If Len(sN) > 0 Then AddUnique col, sN
                 Exit For
             End If
         Next k
@@ -1165,31 +1179,31 @@ Private Function HeaderCol(ByVal ws As Worksheet, ByVal header As String) As Lon
     Next c
 End Function
 
-Private Function NormSerial(ByVal sn As String) As String
+Private Function NormSerial(ByVal sN As String) As String
     Dim i As Long, ch As String, out As String
-    For i = 1 To Len(sn)
-        ch = mid$(sn, i, 1)
+    For i = 1 To Len(sN)
+        ch = mid$(sN, i, 1)
         If ch Like "[A-Za-z0-9]" Then out = out & UCase$(ch)
     Next i
     NormSerial = out
 End Function
 
-Private Sub AddUnique(ByVal col As Collection, ByVal sn As String)
+Private Sub AddUnique(ByVal col As Collection, ByVal sN As String)
     Dim key As String
-    key = NormSerial(sn)
+    key = NormSerial(sN)
     If Len(key) = 0 Then Exit Sub
     On Error Resume Next
-    col.Add sn, key
+    col.Add sN, key
     On Error GoTo 0
 End Sub
 
-Private Function InSet(ByVal col As Collection, ByVal sn As String) As Boolean
+Private Function InSet(ByVal col As Collection, ByVal sN As String) As Boolean
     Dim v As Variant
     InSet = False
     If col Is Nothing Then Exit Function
     On Error Resume Next
-    If Len(NormSerial(sn)) = 0 Then Exit Function
-    v = col.Item(NormSerial(sn))
+    If Len(NormSerial(sN)) = 0 Then Exit Function
+    v = col.Item(NormSerial(sN))
     InSet = (Err.Number = 0)
     On Error GoTo 0
 End Function

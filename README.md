@@ -7,7 +7,7 @@
 **Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)  
 **Data Hub prospect notes:** [docs/FieldCap_Data_Hub_Prospect_Report.md](docs/FieldCap_Data_Hub_Prospect_Report.md)
 
-**Current Chrome extension revision:** `v3.2.4`
+**Current Chrome extension revision:** `v3.2.5`
 
 ---
 
@@ -30,7 +30,7 @@ Two workbooks share **one VBA codebase**:
 | Role | File | GitHub | Data |
 |------|------|--------|------|
 | **Primary (Demo)** | `Slide Sheet - Demo.xlsm` | Yes (mock / sanitized) | Fictional personnel & well data |
-| **Field mirror** | `Slide Sheet - 35780.xlsm` | **Never** | Real job data for field test |
+| **Field mirror** | `Slide Sheet - 35781.xlsm` | **Never** | Real job data for field test |
 
 **Rules**
 
@@ -47,7 +47,7 @@ powershell -NoProfile -File bas/_dual_diff_vba.ps1
 
 `Module11` mail headers (`.To` / `.CC` / `.Subject`) may differ (Demo mock vs Field real) until they are sheet-driven.
 
-When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Bind by full path if the open book is not the repo copy (e.g. `-FieldWorkbook "D:\Slide Sheet - 35780.xlsm"`). Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
+When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Bind by full path if the open book is not the repo copy (e.g. `-FieldWorkbook "D:\Slide Sheet - 35781.xlsm"`). Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
 
 **Setup sheet warning:** `RebuildSetup` / `InitSetup` clear and redraw the entire Setup tab from `MDL_Setup.bas`. Hand-tuned layout must be encoded in that module or it will be wiped.
 
@@ -69,7 +69,7 @@ GitHub ships the sanitized Demo workbook. Staged VBA lives under `bas/` (pull fr
 - **Tool hours** — 3rd-party table seeds only FieldCap **Other Tools** on the selected BHA (`H3`) (`Source`/`Category` Other Inventory, or `DD other`). PHX DD inventory, rentals, drill bits, MWD, and tubulars stay out. **Orbit RSS** and **iCruise** seed into the Motors table. Hours follow BHA Total Hrs / live `Q24`.
 - **Pipe tally, day roll, costs form, sheet protect** — supporting field ops macros.
 
-Rendered sample: `docs/corridor_24h.png` (24 h shadow box). Older full-well still: `docs/corridor_live.png`.
+Daily report PNG is generated live by `RenderCorridorPng` (EMAIL attach + CID).
 
 ---
 
@@ -190,7 +190,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Slide Sheet - Demo.xlsm  (GitHub)  │  Slide Sheet - 35780.xlsm │
+│  Slide Sheet - Demo.xlsm  (GitHub)  │  Slide Sheet - 35781.xlsm │
 │  mock data · same VBA               │  real data · local only   │
 │  Setup · Slidesheet · gauges · corridor · daily report PNG      │
 └─────────────────────────────────────────────────────────────────┘
@@ -238,7 +238,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
 PHX_FieldCap/
 ├── README.md
 ├── Slide Sheet - Demo.xlsm          ← GitHub workbook (sanitized)
-├── Slide Sheet - 35780.xlsm         ← local Field only (gitignored)
+├── Slide Sheet - 35781.xlsm         ← local Field only (gitignored)
 ├── index.html                       ← GitHub Pages showcase
 ├── bas/                             ← staged VBA + dual-sync scripts
 │   ├── MDL_*.bas / Module*.bas
@@ -288,7 +288,7 @@ PHX_FieldCap/
 
 - **Daily EMAIL PNG** — EMAIL attaches a visible `daily_report.png` (plain attachment) and inlines a second CID copy under the Data table. Outlook hides CID-referenced images from the paperclip list, so the visible file is required. No daily report PDF is generated or attached. User-pinned slots (Data `I29:I33`) still attach as before.
 - **Vertical / build 3D shadow-box** — whole-well 3D plot in the style of the classic wall/floor-shadow well-path chart: full plan, all surveys from surface, dashed minimum-curvature projection to the next T2:Y5 target, target ring marker, TVD/N/E grids, wall/floor shadows, GN arrow. Replaces the traveling-cylinder bullseye, which only showed a slice around the target. Lateral keeps the geo/AA14 room. Paper theme for print.
-- **Adopt live Field** — `_adopt_field_source_of_truth.ps1` accepts a rooted path so `D:\Slide Sheet - 35780.xlsm` can be code SOT without touching job cells.
+- **Adopt live Field** — `_adopt_field_source_of_truth.ps1` accepts a rooted path so `D:\Slide Sheet - 35781.xlsm` can be code SOT without touching job cells.
 
 ### Slide Sheet — 2026-08-28
 

@@ -16,6 +16,7 @@ Public Sub RTP_printW_Email()
     Dim prevInteractive As Boolean
     Dim prevCursor As XlMousePointer
     Dim tmpDir As String
+    Dim wasProt As Boolean
 
     On Error GoTo CleanFail
 
@@ -87,9 +88,14 @@ Public Sub RTP_printW_Email()
 
     ' I29:I31 are one-shot. Keep Attachement 4 (I32) and 5 (I33) for every email.
     ' Clear each MergeArea — ClearContents on I alone fails when I:J is merged.
+    ' Data is usually protected in the field; StoreAttachPath already unprotects
+    ' when a file is picked, but this send-path write did not.
+    wasProt = SheetUnprotectForVba(wsData)
     For r = 29 To 31
         wsData.Range("I" & r).MergeArea.ClearContents
     Next r
+    SheetReprotectAfterVba wsData, wasProt
+    wasProt = False
 
     ' Restore Excel UI before showing the mail so Outlook does not fight a locked
     ' Excel session for focus.
@@ -101,6 +107,7 @@ Public Sub RTP_printW_Email()
 
 CleanExit:
     On Error Resume Next
+    If Not wsData Is Nothing Then SheetReprotectAfterVba wsData, wasProt
     Application.Cursor = prevCursor
     Application.Interactive = prevInteractive
     Application.ScreenUpdating = prevScreenUpdating
@@ -118,6 +125,7 @@ CleanFail:
 
 CleanExitMessage:
     On Error Resume Next
+    If Not wsData Is Nothing Then SheetReprotectAfterVba wsData, wasProt
     Application.Cursor = prevCursor
     Application.Interactive = prevInteractive
     Application.ScreenUpdating = prevScreenUpdating
