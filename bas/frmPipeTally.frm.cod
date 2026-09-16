@@ -18,11 +18,17 @@ Private Sub UserForm_Activate()
     End If
 End Sub
 
+Private Sub UserForm_Terminate()
+    StopPipeTallyClipWatch
+End Sub
+
 Private Sub btnPaste_Click()
     Dim txt As String
     Dim lengths As Variant
     Dim errMsg As String
-    txt = GetClipboardText()
+    ' Do not read the Windows clipboard only — Excel already flushed it
+    ' when this click took focus off the grid (CutCopyMode).
+    txt = GetPipeTallyPasteText()
     If Not ParsePipeLengthColumn(txt, lengths, errMsg) Then
         lblStatus.Caption = errMsg
         MsgBox errMsg, vbExclamation, "Paste pipe lengths"

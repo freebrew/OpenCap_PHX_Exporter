@@ -56,6 +56,8 @@ After each logical unit of work:
 - [ ] Syntax check (VBA: `Debug → Compile`; PS: `$null = [System.Management.Automation.Language.Parser]::ParseFile(...)`)
 - [ ] Run the affected workflow end-to-end at least once
 - [ ] No new linter errors introduced
+- [ ] If the user brings a live Field `.xlsm` as source of truth: run skill `adopt-field-workbook` first (Field VBA → Demo; Field cells untouched)
+- [ ] If Slide Sheet VBA changed after that: run skill `dual-workbook-sync` (Demo → Field mirror + `_dual_diff_vba.ps1` PASS)
 
 ## When blocked
 

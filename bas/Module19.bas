@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module19"
 Sub Double_Stands()
-Attribute Double_Stands.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' Double_Stands Macro
 '
@@ -17,7 +16,6 @@ Attribute Double_Stands.VB_ProcData.VB_Invoke_Func = " \n14"
     ActiveSheet.Protect
     End Sub
 Sub Triple_Stands()
-Attribute Triple_Stands.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' Triple_Stands Macro
 '
@@ -35,7 +33,6 @@ Attribute Triple_Stands.VB_ProcData.VB_Invoke_Func = " \n14"
     ActiveSheet.Protect
 End Sub
 Sub Triple_Half_Stands()
-Attribute Triple_Half_Stands.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' Triple_Half_Stands Macro
 '

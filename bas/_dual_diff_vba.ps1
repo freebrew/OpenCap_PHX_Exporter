@@ -1,5 +1,5 @@
 # Compare Demo vs Field VBA caches. Exit 0 on PASS, 1 on illegal drift.
-# Ignores Attribute VB_* lines and trailing whitespace.
+# Ignores all Attribute * lines (VB_Name, VB_ProcData, WithEvents) and trailing whitespace.
 # Allowlists Module11 .To / .CC / .Subject assignment lines only.
 param(
     [string]$DemoCache = "",
@@ -24,7 +24,7 @@ function Get-NormalizedLines([string]$Path) {
     $lines = $raw -split "`r?`n"
     $kept = New-Object System.Collections.Generic.List[string]
     foreach ($ln in $lines) {
-        if ($ln -match '^Attribute VB_') { continue }
+        if ($ln -match '^\s*Attribute\s+') { continue }
         [void]$kept.Add($ln.TrimEnd())
     }
     while ($kept.Count -gt 0 -and [string]::IsNullOrWhiteSpace($kept[$kept.Count - 1])) {

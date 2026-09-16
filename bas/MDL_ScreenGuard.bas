@@ -25,7 +25,10 @@ Private mPrevEvents As Boolean
 Private mPrevCalc As Long
 Private mPrevAlerts As Boolean
 Private mPrevCursor As Long
+Private mPrevAnim As Boolean
 Private mHaveState As Boolean
+Private mSheetHold As Boolean
+Private mSheetPrevCalc As Long
 
 Public Sub ScreenBeginBusy(Optional ByVal statusText As String = "")
     If mDepth = 0 Then
@@ -45,6 +48,9 @@ Public Sub ScreenBeginBusy(Optional ByVal statusText As String = "")
         Application.EnableEvents = False
         Application.Calculation = xlCalculationManual
         Application.Cursor = xlWait
+        On Error Resume Next
+        mPrevAnim = Application.EnableAnimations
+        Application.EnableAnimations = False
         On Error GoTo 0
     End If
 
@@ -63,16 +69,42 @@ Public Sub ScreenEndBusy()
     RestoreState
 End Sub
 
-' Emergency reset: use in error handlers where the nesting depth is unknown,
-' or from the VBE if a crash left the screen frozen.
-Public Sub ScreenForceReset()
-    mDepth = 0
-    RestoreState
-End Sub
-
 Public Function ScreenBusyDepth() As Long
     ScreenBusyDepth = mDepth
 End Function
+
+' While Slidesheet is active, keep Application calc Manual so committing a
+' survey does not auto-recalc the whole book (and paint) before Change can
+' freeze the screen and run one Calculate.
+Public Sub ScreenHoldCalcForSheet()
+    On Error Resume Next
+    If Not mSheetHold Then
+        mSheetPrevCalc = Application.Calculation
+        If Err.Number <> 0 Then mSheetPrevCalc = xlCalculationAutomatic
+        mSheetHold = True
+    End If
+    Application.Calculation = xlCalculationManual
+    On Error GoTo 0
+End Sub
+
+Public Sub ScreenReleaseCalcForSheet()
+    If Not mSheetHold Then Exit Sub
+    On Error Resume Next
+    Application.Calculation = mSheetPrevCalc
+    On Error GoTo 0
+    mSheetHold = False
+End Sub
+
+Public Sub ScreenForceReset()
+    mDepth = 0
+    If mSheetHold Then
+        On Error Resume Next
+        Application.Calculation = mSheetPrevCalc
+        On Error GoTo 0
+        mSheetHold = False
+    End If
+    RestoreState
+End Sub
 
 Private Sub RestoreState()
     On Error Resume Next
@@ -81,11 +113,13 @@ Private Sub RestoreState()
         Application.EnableEvents = mPrevEvents
         Application.DisplayAlerts = mPrevAlerts
         Application.Cursor = mPrevCursor
+        Application.EnableAnimations = mPrevAnim
     Else
         Application.Calculation = xlCalculationAutomatic
         Application.EnableEvents = True
         Application.DisplayAlerts = True
         Application.Cursor = xlDefault
+        Application.EnableAnimations = True
     End If
     Application.StatusBar = False
     Application.ScreenUpdating = True

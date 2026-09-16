@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module12"
 Sub data_PDF()
-Attribute data_PDF.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' Data_PDF Macro
 '
@@ -8,13 +7,12 @@ Attribute data_PDF.VB_ProcData.VB_Invoke_Func = " \n14"
 '
     Range("A1:Y63").Select
     ActiveSheet.PageSetup.PrintArea = "$A$1:$Y$63"
-    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, FileName:= _
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
         "G:\My Drive\Work\Current Wells\Axiom\30971\Paperwork.pdf", Quality:= _
         xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
 End Sub
 Sub CLEAR_DATA()
-Attribute CLEAR_DATA.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' CLEAR_DATA Macro
 '
@@ -47,3 +45,6 @@ Sub CLEAR_TIMETABLE()
     Selection.ClearContents
     ActiveWindow.SmallScroll Down:=0
 End Sub
+
+
+

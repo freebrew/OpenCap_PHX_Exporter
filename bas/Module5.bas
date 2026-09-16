@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module5"
 Sub NEW_DATA()
-Attribute NEW_DATA.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' NEW_DATA Macro
 '

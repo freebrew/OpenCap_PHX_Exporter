@@ -181,20 +181,16 @@ Enter the sail waypoints once; the calculator keeps geo high/low and the dial’
 
 ### Target table → BURR → slide advisor (Comments)
 
-Build guidance is driven by the **plan target table** (build targets in **T2:Y5** and related aim columns), not freehand guesswork:
+Build guidance is driven by the **full named plan list** on `_OC_PlanSec` (`ProjTargets_*`), not the four-row **T2:Y5** display window. First KOP / TANGENT MD is `ProjBuildStartMd`. **Do not use `$U$2` as a build-start gate.** Canonical formulas: [README — Slide advisor math](../README.md#slide-advisor-math-burr-slide-toolface-rotate).
 
-1. **Active target** — the next unexhausted station ahead of the bit (`ProjActiveTargetMd` / highlight on the target block).
-2. **BURR** — build-up rate required (°/30 m) to that aim (`ProjBurr`). With bit TVD available this is the constant-build (circular-arc) rate that lands target inclination at target TVD; the aim is *not* walked forward, so BURR answers “what does the next target demand,” even when the motor cannot deliver it.
-3. **Metres to slide / remain to rotate** — `|BURR| / motor output × course`, then course remainder (`ProjMetersToSlide`, `ProjMetersRemainToRotate`).
-4. **Required toolface** — gravity/magnetic TF mode from bit inclination; required TF text feeds the advisor.
-5. **Slide advisor in Comments (column Y)** — auto lines such as  
-   `Sliding 12.25m @ L90` … `BURR 2.40`  
-   via `ProjSlideComment` + `RefreshSlideComments`. Effective slide metres are corrected by `|cos(required TF)|` so off-highside toolface asks for more slide. On tangent / zero-slide holds, Comments still show **TF + BURR** (`Sliding 0.00m @ …`) so the column does not go blank when metres-to-slide is zero.
-6. **Slide footage below the survey** — `ProjSlideMetersBetween` sums slide intervals between the last survey and the bit, so projections account for slide the survey has not seen yet (MtrBelow).
+1. **Active target** — stay on a build station while `inc_bit + 0.5° < target INC`. Do not skip TANGENT to SOT because leftover MD is small.
+2. **BURR** — `(I_tgt − I_bit) × 30 / dMD`. If dMD &lt; this stand’s **C** and inc is still short, **dMD = C** (never a 10 m floor). TVD-arc rate when enough TVD remains.
+3. **Metres to slide (AS)** — `|BURR| / Q × C`, capped at C.
+4. **Comment metres (Y)** — `AS / |cos(AT)|`, then **hard-capped at C** (2 decimals, no 0.25 snap). Off-highside TF can *ask* for more than C; the instruction cannot exceed this stand.
+5. **Remain to rotate (Z)** — `C − instructed`. Full-course slide → `0.00m ROT`. Column T (already slid) is history, not the instruction.
+6. **Required toolface (AT)** — gravity TF bit → aim. Y shows that TF, not user U.
 
-Active-target highlighting keeps the row’s BURR aim and the lit target cell on the same station — the advisor and the table stay locked together.
-
-That is the difference between “we have surveys” and “we know what to tell the directional hand next stand.”
+Active-target highlighting keeps the row’s BURR aim and the lit target cell on the same station.
 
 ### Plan import, AC, pipe tally, clear
 
@@ -205,7 +201,7 @@ That is the difference between “we have surveys” and “we know what to tell
 
 ### Corridor graphic for the office
 
-`MDL_CorridorImage` builds a cabinet-oblique “room” of the hole: back-wall TVD corridor (sloping geo ± band), floor lateral corridor, left-wall shadow looking down the hole, forward required vs hold projections, plus a dark ops band for day/BHA/motor/AC chips. It is the Slidesheet’s spatial argument — portable as a PNG.
+`MDL_CorridorImage` **VERTICAL / BUILD** is a three-wall shadow box (back, left, floor): plan + last 24 h as-drilled, named targets on the plan (ring perpendicular to the wellbore), shadows on all three walls. Camera is the report-day footage, not surface-to-TD. **LATERAL** keeps the geo ± / AA14 room. Portable as the daily EMAIL PNG (`docs/corridor_24h.png`).
 
 ---
 

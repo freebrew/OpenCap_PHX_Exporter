@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module9"
 Sub NEW_SS()
-Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' NEW_SS Macro
 '
@@ -12,7 +11,7 @@ Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
         
     Application.GoTo Reference:="Print_Area"
 
-    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, FileName:=name, _
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=name, _
     Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
     Range("B7:B25").Select
@@ -33,25 +32,25 @@ Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
     sheets("Slidesheet").Select
     Range("C11:L11").Select
     Selection.ClearContents
-    Range("C12:C305").Select
+    Range("C12:C505").Select
     Selection.ClearContents
-    Range("E12:F305").Select
-    Range("F305").Activate
+    Range("E12:F505").Select
+    Range("F505").Activate
     Selection.ClearContents
     Range("B11").Select
     Selection.ClearContents
-    Range("U11:V305").Select
+    Range("U11:V505").Select
     Selection.ClearContents
-    Range("Z197:Z305").Select
-    Range("Z305").Activate
+    Range("Z197:Z505").Select
+    Range("Z505").Activate
     ActiveWindow.SmallScroll Down:=129
-    Range("Z305").Select
-    Selection.AutoFill Destination:=Range("Z11:Z305"), Type:=xlFillDefault
-    Range("Z11:Z305").Select
+    Range("Z505").Select
+    Selection.AutoFill Destination:=Range("Z11:Z505"), Type:=xlFillDefault
+    Range("Z11:Z505").Select
     Range("S12").Select
     Selection.AutoFill Destination:=Range("S11:S12"), Type:=xlFillDefault
     Range("S11:S12").Select
-    Range("AF11:AH304").Select
+    Range("AF11:AH504").Select
     Selection.ClearContents
     Range("W2:X4").Select
     Selection.ClearContents
@@ -95,3 +94,8 @@ Attribute NEW_SS.VB_ProcData.VB_Invoke_Func = " \n14"
     Range("B11").Select
     
 End Sub
+
+
+
+
+

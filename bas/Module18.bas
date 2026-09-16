@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module18"
 Sub cleartally()
-Attribute cleartally.VB_ProcData.VB_Invoke_Func = " \n14"
 '
 ' cleartally Macro
 '
