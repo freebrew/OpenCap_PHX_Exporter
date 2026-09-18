@@ -11,7 +11,9 @@ Attribute VB_Exposed = True
 ' InitSetup / BuildSetupUI wipe Setup (formatting, AC table, notes).
 ' Use Setup buttons: REFRESH CSVs or REBUILD when a rebuild is wanted.
 Private Sub Workbook_Open()
-    ' no auto InitSetup
+    On Error Resume Next
+    Application.Calculation = xlCalculationAutomatic
+    On Error GoTo 0
 End Sub
 
 ' Cont DI tabs painted before the "Last Survey" button existed get it on first
@@ -20,7 +22,20 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     On Error Resume Next
     If StrComp(Sh.name, MDL_ContDI.SH_CONTDI, vbTextCompare) = 0 Then
         MDL_ContDI.EnsureContDIPullButton
+        ScreenReleaseCalcForSheet
+        ScreenCalcOnSheetArrive
     End If
+End Sub
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    On Error Resume Next
+    If ScreenBusyDepth() > 0 Then Exit Sub
+    If StrComp(Sh.name, MDL_ContDI.SH_CONTDI, vbTextCompare) <> 0 Then Exit Sub
+    ScreenBeginBusy
+    ScreenCalcStaggered
+    ScreenEndBusy
+    ScreenReleaseCalcForSheet
+    On Error GoTo 0
 End Sub
 
 Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)

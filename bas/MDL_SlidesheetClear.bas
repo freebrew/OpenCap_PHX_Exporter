@@ -137,15 +137,29 @@ Private Function RowHasSlideAim(ByVal ss As Worksheet, ByVal r As Long) As Boole
                   Or IsNumberValue(ss.Cells(r, "AR").Value2)
 End Function
 
-' Rewrite Z on every stand row (C − T). Used after the formula change so
-' existing leftover-rotate values catch up without a survey keystroke.
+' Rewrite Z on every stand row (next-row C − this-row T). Used after the
+' formula change so leftover-rotate values catch up without a survey keystroke.
 Public Sub RefreshAllRotateMetres()
     Dim ss As Worksheet
+    Dim r As Long
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+
+    On Error GoTo Clean
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
-    RefreshRotateMetres ss.Range("C13:C" & Y_LAST)
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ss)
+    For r = Y_DATA_FIRST To Y_LAST
+        WriteRotateMetresOnSheet ss, r
+    Next r
+Clean:
+    On Error Resume Next
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
 End Sub
 
-' Z = C − T on the same row. C/D/T edits call this without a full Y rebuild.
+' Z[r] = C[r+1] − T[r]. C/D/T edits call this without a full Y rebuild.
 Public Sub RefreshRotateMetres(ByVal Target As Range)
     Dim ss As Worksheet
     Dim area As Range
@@ -169,9 +183,34 @@ Public Sub RefreshRotateMetres(ByVal Target As Range)
     For Each cell In area.Cells
         r = cell.Row
         If r >= Y_DATA_FIRST And r <= Y_LAST Then
-            If Not seen.Exists(r) Then
-                seen.Add r, True
-                WriteRotateMetresOnSheet ss, r
+            ' T on this row feeds leftover Z on this row.
+            If cell.Column = 20 Then
+                If Not seen.Exists(r) Then
+                    seen.Add r, True
+                    WriteRotateMetresOnSheet ss, r
+                End If
+            End If
+            ' C on this row is the course for leftover Z on the row above.
+            If cell.Column = 3 Then
+                If r - 1 >= Y_DATA_FIRST Then
+                    If Not seen.Exists(r - 1) Then
+                        seen.Add r - 1, True
+                        WriteRotateMetresOnSheet ss, r - 1
+                    End If
+                End If
+            End If
+            ' D (MD) can change C on this row and C on the next row.
+            If cell.Column = 4 Then
+                If r - 1 >= Y_DATA_FIRST Then
+                    If Not seen.Exists(r - 1) Then
+                        seen.Add r - 1, True
+                        WriteRotateMetresOnSheet ss, r - 1
+                    End If
+                End If
+                If Not seen.Exists(r) Then
+                    seen.Add r, True
+                    WriteRotateMetresOnSheet ss, r
+                End If
             End If
         End If
     Next cell
@@ -182,8 +221,9 @@ Clean:
     Application.EnableEvents = prevEvents
 End Sub
 
-' Same-row leftover rotate: course (C) minus already-slid (T). Blank T = 0.
-' Leaves a hand-typed Z alone. Clamps at 0 when T > C.
+' Leftover rotate on this row: next stand's course (C one row down) minus
+' already-slid (T on this row). Blank T = 0. Leaves a hand-typed Z alone.
+' Clamps at 0 when T > next C.
 Private Sub WriteRotateMetresOnSheet(ByVal ss As Worksheet, ByVal r As Long)
     Dim course As Double
     Dim slid As Double
@@ -191,21 +231,23 @@ Private Sub WriteRotateMetresOnSheet(ByVal ss As Worksheet, ByVal r As Long)
     Dim rotTxt As String
     Dim zCell As Range
     Dim hasC As Boolean
+    Dim courseRow As Long
 
     Set zCell = ss.Cells(r, "Z")
     If Not IsAutoRotText(Trim$(CStr(zCell.Value2 & ""))) Then Exit Sub
 
+    courseRow = r + 1
     On Error Resume Next
-    ss.Cells(r, "C").Calculate
+    If courseRow <= Y_LAST Then ss.Cells(courseRow, "C").Calculate
     On Error GoTo 0
 
-    hasC = IsNumberValue(ss.Cells(r, "C").Value2)
+    hasC = (courseRow <= Y_LAST) And IsNumberValue(ss.Cells(courseRow, "C").Value2)
     If Not hasC Then
         If Len(Trim$(CStr(zCell.Value2 & ""))) > 0 Then zCell.ClearContents
         Exit Sub
     End If
 
-    course = CDbl(ss.Cells(r, "C").Value2)
+    course = CDbl(ss.Cells(courseRow, "C").Value2)
     slid = 0#
     If IsNumberValue(ss.Cells(r, "T").Value2) Then slid = CDbl(ss.Cells(r, "T").Value2)
 
@@ -279,6 +321,7 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
     Application.Calculation = xlCalculationManual
     wasProt = SheetUnprotectForVba(ss)
     EnsureProjAimFormulasOnSheet ss
+    EnsureLastSurveyAzmLookup ss
     ss.Calculate
 
     ' Keep / restore label row
@@ -333,7 +376,7 @@ Public Sub RefreshSlideComments(Optional ByVal forceAll As Boolean = False)
             End If
         End If
 
-        ' Z: leftover rotate = this stand's C minus T (already slid).
+        ' Z: leftover rotate = next-row C minus this-row T (already slid).
         WriteRotateMetresOnSheet ss, r
 
         curTxt = Trim$(CStr(yArr(i, 1) & ""))
@@ -437,6 +480,15 @@ Private Sub EnsureProjAimFormulasOnSheet(ByVal ss As Worksheet)
         If dirty Then rng.Formula = arr
     Next col
 Done:
+End Sub
+
+' Data!E9 is =Slidesheet!G506. E/F/H/J on row 506 are last-survey LOOKUPs keyed
+' off INC (F). If G506 is a leftover value, EMAIL prints that instead of AZM.
+Private Sub EnsureLastSurveyAzmLookup(ByVal ss As Worksheet)
+    Dim f As String
+    f = UCase$(CStr(ss.Range("G506").Formula & ""))
+    If InStr(1, f, "LOOKUP") > 0 And InStr(1, f, "G12:G505") > 0 Then Exit Sub
+    ss.Range("G506").Formula = "=LOOKUP(2,1/(F12:F505<>""""),G12:G505)"
 End Sub
 
 ' Pad left/right text with spaces so the right part sits on the cell's right edge.
@@ -1146,6 +1198,7 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
 
 
 

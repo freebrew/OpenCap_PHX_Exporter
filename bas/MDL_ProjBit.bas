@@ -1109,7 +1109,7 @@ End Function
 ' Comments: left & Chr(1) & BURR for the Y cell.
 '   left  = "Sliding <this stand C, 2 dp> @ <TF>"
 '   right = "BURR 0.00"
-' Slide metres = ProjInstructedSlideM (capped at C). Leftover rotate is column Z = C − slide.
+' Slide metres = ProjInstructedSlideM (capped at C). Leftover rotate is column Z = next-row C − slide.
 Public Function ProjSlideComment(ByVal metersToSlide As Variant, ByVal tfText As Variant, _
                                  ByVal burr As Variant, _
                                  Optional ByVal widthChars As Double = 0#, _

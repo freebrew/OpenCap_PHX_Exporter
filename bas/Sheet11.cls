@@ -43,12 +43,27 @@ Private Sub CommandButton1_Click()
 
 End Sub
 
-Private Sub Worksheet_Change(ByVal Target As Range)
+Private Sub Worksheet_Activate()
     On Error Resume Next
+    ScreenReleaseCalcForSheet
+    ScreenCalcOnSheetArrive
+    On Error GoTo 0
+End Sub
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    On Error GoTo Fail
+    ScreenBeginBusy
     PdmConf_OnDataChange Target
     DayRoll_OnDataChange Target
     ToolHours_OnDataChange Target
-    On Error GoTo 0
+    ScreenCalcStaggered
+    ScreenEndBusy
+    ScreenReleaseCalcForSheet
+    Exit Sub
+Fail:
+    On Error Resume Next
+    ScreenEndBusy
+    ScreenReleaseCalcForSheet
 End Sub
 
 

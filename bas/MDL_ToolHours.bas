@@ -17,7 +17,7 @@ Option Explicit
 '   M2:M50   motor serials (dropdown source for Motors On Location)
 '
 ' Hours:
-'   Q Previous = PreJob (typed once; auto-filled when a serial is reused)
+'   Q Previous = user-typed only. Never painted from the tracker / inventory.
 '   R Current  = this-job hours: sum of BHA Total Hrs for every BHA that
 '                carried the serial, with the selected BHA using live Q24
 '   S Total    = Q + R
@@ -240,7 +240,8 @@ Private Sub HarvestRange(ByVal ws As Worksheet, ByVal tr As Worksheet, _
         If LooksLikeSerial(sN) Then
             prev = NumOrZero(ws.Cells(r, COL_PREV).Value)
             trR = TrackerUpsert(tr, sN, kind)
-            If prev > 0 Then tr.Cells(trR, TR_PREJOB).Value = prev
+            ' Blank/zero Previous means the DD has not entered carry-in hours.
+            tr.Cells(trR, TR_PREJOB).Value = prev
         End If
     Next r
 End Sub
@@ -626,9 +627,14 @@ End Sub
 Private Sub WriteFrontRow(ByVal ws As Worksheet, ByVal tr As Worksheet, _
                           ByVal r As Long, ByVal sN As String, ByVal kind As String)
     Dim trR As Long
+    Dim oldSn As String
+    oldSn = SerialAt(ws, r)
     trR = TrackerUpsert(tr, sN, kind)
     SetSerialAt ws, r, sN
-    WriteNum ws, r, COL_PREV, NumOrZero(tr.Cells(trR, TR_PREJOB).Value)
+    ' Previous stays whatever the DD typed. A new serial on this row starts blank.
+    If StrComp(NormSerial(oldSn), NormSerial(sN), vbTextCompare) <> 0 Then
+        ws.Cells(r, COL_PREV).ClearContents
+    End If
     WriteNum ws, r, COL_CURRENT, NumOrZero(tr.Cells(trR, TR_JOB).Value)
 End Sub
 
@@ -1229,6 +1235,9 @@ Private Function SheetExistsTH(ByVal name As String) As Boolean
     On Error GoTo 0
     SheetExistsTH = Not ws Is Nothing
 End Function
+
+
+
 
 
 

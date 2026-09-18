@@ -11,11 +11,14 @@ Option Explicit
 
 Private Sub Worksheet_Activate()
     On Error Resume Next
-    ScreenHoldCalcForSheet
+    ' Stay Automatic on Slidesheet — Manual here forced F9 between edits.
+    ScreenReleaseCalcForSheet
     ScreenBeginBusy
+    ScreenCalcStaggered
     ResizeSlidesheetClearButton
     MDL_PlanGauge.RenderPlanGauge
     ScreenEndBusy
+    ScreenReleaseCalcForSheet
     On Error GoTo 0
 End Sub
 
@@ -26,15 +29,12 @@ Private Sub Worksheet_Deactivate()
 End Sub
 
 Private Sub Worksheet_Change(ByVal Target As Range)
-    ' Hold calc + freeze paint for the whole handler. Committing a survey
-    ' used to auto-recalc the book and redraw gauges/comments with the
-    ' screen live — that is the stall on field laptops.
+    ' Freeze paint for the handler. Calc stays Automatic on this tab so
+    ' formulas do not wait for F9; BeginBusy is Manual only during the work.
     On Error GoTo Fail
-    ScreenHoldCalcForSheet
     ScreenBeginBusy "Slidesheet: calculating..."
-    ' One book calc on this tab: V/W/X @ bit, sail AA/AB, waypoints, BURR.
-    ' Do not leave Slidesheet — comments + gauge paint from that calc.
-    Application.Calculate
+    ' Slidesheet first, then Data / Cont DI with the screen still frozen.
+    ScreenCalcStaggered
     If Not Intersect(Target, Me.Range("AA:AB")) Is Nothing Then
         ResizeSlidesheetClearButton
     End If
@@ -53,9 +53,11 @@ Private Sub Worksheet_Change(ByVal Target As Range)
         MDL_PlanGauge.RenderPlanGauge
     End If
     ScreenEndBusy
+    ScreenReleaseCalcForSheet
     Exit Sub
 Fail:
     On Error Resume Next
     ScreenEndBusy
+    ScreenReleaseCalcForSheet
     On Error GoTo 0
 End Sub

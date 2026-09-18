@@ -73,9 +73,8 @@ Public Function ScreenBusyDepth() As Long
     ScreenBusyDepth = mDepth
 End Function
 
-' While Slidesheet is active, keep Application calc Manual so committing a
-' survey does not auto-recalc the whole book (and paint) before Change can
-' freeze the screen and run one Calculate.
+' Optional Manual hold. Slidesheet no longer uses this — staying Manual
+' on that tab forced F9 between edits. Data / Cont DI still Release to Auto.
 Public Sub ScreenHoldCalcForSheet()
     On Error Resume Next
     If Not mSheetHold Then
@@ -87,12 +86,50 @@ Public Sub ScreenHoldCalcForSheet()
     On Error GoTo 0
 End Sub
 
+' Leave Slidesheet (or finish an update on Data / Cont DI): Automatic again
+' so those tabs do not sit waiting for F9.
 Public Sub ScreenReleaseCalcForSheet()
-    If Not mSheetHold Then Exit Sub
     On Error Resume Next
-    Application.Calculation = mSheetPrevCalc
-    On Error GoTo 0
     mSheetHold = False
+    Application.Calculation = xlCalculationAutomatic
+    On Error GoTo 0
+End Sub
+
+' Active sheet first, then Slidesheet / Data / Cont DI. Does not Activate
+' the other tabs, so Excel does not paint them. Caller holds ScreenUpdating off.
+Public Sub ScreenCalcStaggered()
+    Dim ws As Worksheet
+    Dim nm As Variant
+    Dim activeName As String
+
+    On Error Resume Next
+    If Application.ScreenUpdating Then Application.ScreenUpdating = False
+
+    activeName = ""
+    If Not ActiveSheet Is Nothing Then
+        If ActiveSheet.Parent Is ThisWorkbook Then
+            activeName = ActiveSheet.name
+            ActiveSheet.Calculate
+        End If
+    End If
+
+    For Each nm In Array("Slidesheet", "Data", MDL_ContDI.SH_CONTDI)
+        If StrComp(CStr(nm), activeName, vbTextCompare) <> 0 Then
+            Set ws = Nothing
+            Set ws = ThisWorkbook.Worksheets(CStr(nm))
+            If Not ws Is Nothing Then
+                If ws.Visible <> xlSheetVeryHidden Then ws.Calculate
+            End If
+        End If
+    Next nm
+    On Error GoTo 0
+End Sub
+
+Public Sub ScreenCalcOnSheetArrive()
+    If ScreenBusyDepth() > 0 Then Exit Sub
+    ScreenBeginBusy
+    ScreenCalcStaggered
+    ScreenEndBusy
 End Sub
 
 Public Sub ScreenForceReset()
