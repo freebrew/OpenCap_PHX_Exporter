@@ -327,79 +327,16 @@ End Function
 
 Private Function PlanAtMd(ByVal md As Double, ByRef inc As Double, ByRef azm As Double, _
         ByRef n As Double, ByRef e As Double, ByRef tvd As Double) As Boolean
-    Dim plan As Worksheet
-    Dim cMD As Long, cInc As Long, cAzi As Long, cTvd As Long, cNS As Long, cEW As Long
-    Dim c As Long, lastR As Long, r As Long
-    Dim md1 As Double, md2 As Double, f As Double
-    Dim i As Long
-
-    PlanAtMd = False
-    On Error Resume Next
-    Set plan = ThisWorkbook.Worksheets(PLAN_SHEET)
-    On Error GoTo 0
-    If plan Is Nothing Then Exit Function
-
-    For c = 1 To 20
-        Select Case UCase$(Trim$(CStr(plan.Cells(2, c).Value2 & "")))
-            Case "MD":         cMD = c
-            Case "INC":        cInc = c
-            Case "AZI", "AZM": cAzi = c
-            Case "TVD":        cTvd = c
-            Case "NS":         cNS = c
-            Case "EW":         cEW = c
-        End Select
-    Next c
-    If cMD = 0 Or cNS = 0 Or cEW = 0 Then Exit Function
-
-    lastR = plan.Cells(plan.Rows.Count, cMD).End(xlUp).Row
-    If lastR < 4 Then Exit Function
-
+    Dim nPlan As Long
     Dim pMD() As Double, pInc() As Double, pAzi() As Double
     Dim pTvd() As Double, pNS() As Double, pEW() As Double
-    Dim k As Long
-    ReDim pMD(1 To lastR): ReDim pInc(1 To lastR): ReDim pAzi(1 To lastR)
-    ReDim pTvd(1 To lastR): ReDim pNS(1 To lastR): ReDim pEW(1 To lastR)
-    k = 0
-    For r = 3 To lastR
-        If IsNumeric(plan.Cells(r, cMD).Value2) Then
-            k = k + 1
-            pMD(k) = CDbl(plan.Cells(r, cMD).Value2)
-            If cInc > 0 Then pInc(k) = NumOr(plan.Cells(r, cInc).Value2, 0#)
-            If cAzi > 0 Then pAzi(k) = NumOr(plan.Cells(r, cAzi).Value2, 0#)
-            If cTvd > 0 Then pTvd(k) = NumOr(plan.Cells(r, cTvd).Value2, 0#)
-            pNS(k) = NumOr(plan.Cells(r, cNS).Value2, 0#)
-            pEW(k) = NumOr(plan.Cells(r, cEW).Value2, 0#)
-        End If
-    Next r
-    If k < 1 Then Exit Function
 
-    If md <= pMD(1) Then
-        inc = pInc(1): azm = pAzi(1): n = pNS(1): e = pEW(1): tvd = pTvd(1)
-        PlanAtMd = True
-        Exit Function
-    End If
-    If md >= pMD(k) Then
-        inc = pInc(k): azm = pAzi(k): n = pNS(k): e = pEW(k): tvd = pTvd(k)
-        PlanAtMd = True
-        Exit Function
-    End If
-    For i = 1 To k - 1
-        If md >= pMD(i) And md <= pMD(i + 1) Then
-            md1 = pMD(i): md2 = pMD(i + 1)
-            If Abs(md2 - md1) < EPS Then
-                f = 0#
-            Else
-                f = (md - md1) / (md2 - md1)
-            End If
-            inc = pInc(i) + f * (pInc(i + 1) - pInc(i))
-            azm = pAzi(i) + f * (pAzi(i + 1) - pAzi(i))
-            n = pNS(i) + f * (pNS(i + 1) - pNS(i))
-            e = pEW(i) + f * (pEW(i + 1) - pEW(i))
-            tvd = pTvd(i) + f * (pTvd(i + 1) - pTvd(i))
-            PlanAtMd = True
-            Exit Function
-        End If
-    Next i
+    PlanAtMd = False
+    nPlan = MDL_PlanGauge.PG_LoadPlan(pMD, pInc, pAzi, pTvd, pNS, pEW)
+    If nPlan < 2 Then Exit Function
+    MDL_PlanGauge.PG_PlanAt md, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, _
+                            n, e, tvd, azm, inc
+    PlanAtMd = True
 End Function
 
 Private Function ReadPlannedTd(ByRef md As Double, ByRef inc As Double, _
@@ -509,6 +446,10 @@ Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, 
     dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
     dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
 End Sub
+
+
+
+
 
 
 

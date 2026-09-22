@@ -185,11 +185,48 @@ Private Function GoodSurveyFill() As Long
     GoodSurveyFill = RGB(204, 255, 204)
 End Function
 
+Private Function FillLooksGreen(ByVal c As Range) As Boolean
+    Dim fill As Long
+    Dim idx As Long
+    FillLooksGreen = False
+    On Error Resume Next
+    idx = CLng(c.Interior.ColorIndex)
+    fill = CLng(c.Interior.Color)
+    If idx = 35 Or fill = GoodSurveyFill() Then
+        FillLooksGreen = True
+        Exit Function
+    End If
+    idx = CLng(c.DisplayFormat.Interior.ColorIndex)
+    fill = CLng(c.DisplayFormat.Interior.Color)
+    On Error GoTo 0
+    FillLooksGreen = (idx = 35 Or fill = GoodSurveyFill())
+End Function
+
 Private Function IsGoodSurveyCell(ByVal c As Range) As Boolean
     IsGoodSurveyCell = False
     If Not IsNumberValue(c.Value2) Then Exit Function
-    If c.Interior.Pattern <> xlSolid Then Exit Function
-    IsGoodSurveyCell = (CLng(c.Interior.Color) = GoodSurveyFill())
+    IsGoodSurveyCell = FillLooksGreen(c)
+End Function
+
+' True when Inc (F) and Azm (G) are numeric and painted survey-green.
+' Any other fill is a user projection / note and is not a survey.
+Public Function IsSlidesheetGoodSurveyRow(ByVal r As Long) As Boolean
+    Dim ss As Worksheet
+    IsSlidesheetGoodSurveyRow = False
+    On Error GoTo Done
+    If r < SS_FIRST Or r > SS_LAST Then Exit Function
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    IsSlidesheetGoodSurveyRow = IsGoodSurveyCell(ss.Cells(r, "F")) _
+                             And IsGoodSurveyCell(ss.Cells(r, "G"))
+Done:
+End Function
+
+Public Function IsSlidesheetGoodSurveyRowOn(ByVal ss As Worksheet, ByVal r As Long) As Boolean
+    IsSlidesheetGoodSurveyRowOn = False
+    If ss Is Nothing Then Exit Function
+    If r < SS_FIRST Or r > SS_LAST Then Exit Function
+    IsSlidesheetGoodSurveyRowOn = IsGoodSurveyCell(ss.Cells(r, "F")) _
+                               And IsGoodSurveyCell(ss.Cells(r, "G"))
 End Function
 
 ' Deepest good-survey row on the Slidesheet (13:505); 0 = none.
@@ -973,6 +1010,10 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
         ws.Cells(r, COL_TVD_BIT).Formula = "=IF(AND(" & nD & ",ISNUMBER($S" & r & "),ISNUMBER($T" & r & "),ISNUMBER(B$2),ISNUMBER(E$2)),(($S" & r & "-B$2)*COS((RADIANS($T" & r & ")+RADIANS($D" & r & "))/2))+E$2,"""")"
     Next r
 End Sub
+
+
+
+
 
 
 

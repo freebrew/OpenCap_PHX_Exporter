@@ -24,6 +24,7 @@ Private Const SH_UI   As String = "DD Tools"
 Private Const SH_BHA  As String = "_FC_BHA"
 Private Const SH_CREW As String = "_FC_Crew"
 Private Const SH_JOB  As String = "_FC_Job"
+Private Const SH_INV  As String = "_OC_Inventory"
 
 ' Layout: row anchors (tight, no wasted space)
 Private Const R_TOOLBAR As Long = 1   ' title + all buttons in one row
@@ -144,6 +145,12 @@ Public Sub RefreshData()
     On Error Resume Next
     ToolHours_SeedFromInventory
     ToolHours_Sync
+    On Error GoTo ErrHandler
+
+    ' Data!X2:AB serial-hours table (BHA-tab items: circ + hours since service)
+    Application.StatusBar = "Refresh: building Data serial-hours table..."
+    On Error Resume Next
+    BuildDataSerialHoursTable
     On Error GoTo ErrHandler
 
     On Error Resume Next
@@ -982,122 +989,17 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         .Borders.LineStyle = xlNone
     End With
 
-    If Not SheetExists(SH_BHA) Then Exit Sub
-
-    Dim bhaWs As Worksheet
-    Set bhaWs = Worksheets(SH_BHA)
-
-    Dim cBNum As Long: cBNum = FindCol(bhaWs, "BHA #")
-    Dim cSer As Long: cSer = FindCol(bhaWs, "Serial #")
-    Dim cCod As Long: cCod = FindCol(bhaWs, "Item Code")
-    Dim cDes As Long: cDes = FindCol(bhaWs, "Description")
-    Dim cTot As Long: cTot = FindCol(bhaWs, "BHA Total Hrs")
-    Dim cSld As Long: cSld = FindCol(bhaWs, "BHA Hrs Slid")
-    Dim cRot As Long: cRot = FindCol(bhaWs, "BHA Hrs Rot")
-    Dim cMtr As Long: cMtr = FindCol(bhaWs, "Metres Drilled")
-
-    Dim lastRow As Long
-    lastRow = bhaWs.Cells(bhaWs.Rows.Count, cBNum).End(xlUp).Row
-
-    ' Rollup arrays (serial-first fatigue model)
-    Dim rSerial() As String
-    Dim rDesc() As String
-    Dim rCode() As String
-    Dim rTot() As Double
-    Dim rSld() As Double
-    Dim rRot() As Double
-    Dim rMtr() As Double
-    Dim rCnt() As Long
-    Dim rSz As Long: rSz = 0
-
-    ReDim rSerial(0): ReDim rDesc(0): ReDim rCode(0)
-    ReDim rTot(0): ReDim rSld(0)
-    ReDim rRot(0): ReDim rMtr(0): ReDim rCnt(0)
-
-    If cSer = 0 Then Exit Sub
-
-    Dim seenSerialBha As New Collection
-    Dim dr As Long
-    For dr = 2 To lastRow
-        If Not IsNumeric(bhaWs.Cells(dr, cBNum).Value) Then GoTo SkipRow
-        Dim bNum As Long: bNum = CLng(bhaWs.Cells(dr, cBNum).Value)
-
-        Dim srl As String
-        srl = Trim(SafeStr(bhaWs.Cells(dr, cSer)))
-        If srl = "" Then GoTo SkipRow
-
-        Dim sbKey As String
-        sbKey = srl & "|" & CStr(bNum)
-        On Error Resume Next
-        seenSerialBha.Add 1, sbKey
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo SkipRow
-        End If
-        On Error GoTo 0
-
-        Dim idx As Long: idx = -1
-        Dim k As Long
-        For k = 0 To rSz - 1
-            If rSerial(k) = srl Then
-                idx = k
-                Exit For
-            End If
-        Next k
-
-        Dim codPart As String
-        codPart = ""
-        If cCod > 0 Then codPart = SafeStr(bhaWs.Cells(dr, cCod))
-
-        If idx = -1 Then
-            idx = rSz
-            rSz = rSz + 1
-            ReDim Preserve rSerial(rSz - 1): ReDim Preserve rDesc(rSz - 1): ReDim Preserve rCode(rSz - 1)
-            ReDim Preserve rTot(rSz - 1): ReDim Preserve rSld(rSz - 1)
-            ReDim Preserve rRot(rSz - 1): ReDim Preserve rMtr(rSz - 1)
-            ReDim Preserve rCnt(rSz - 1)
-            rSerial(idx) = srl
-            rDesc(idx) = SafeStr(bhaWs.Cells(dr, cDes))
-            rCode(idx) = codPart
-        Else
-            ' Pick up item code from any row for this serial if still blank
-            If rCode(idx) = "" And codPart <> "" Then rCode(idx) = codPart
-        End If
-
-        rCnt(idx) = rCnt(idx) + 1
-
-        Dim bfr As Long: bfr = GetFirstBHARow(bNum)
-        If bfr > 0 Then
-            rTot(idx) = rTot(idx) + GetNum(bhaWs.Cells(bfr, cTot))
-            rSld(idx) = rSld(idx) + GetNum(bhaWs.Cells(bfr, cSld))
-            rRot(idx) = rRot(idx) + GetNum(bhaWs.Cells(bfr, cRot))
-            rMtr(idx) = rMtr(idx) + GetBHAMetricValue(bhaWs, cBNum, cMtr, bNum)
-        End If
-SkipRow:
-    Next dr
-
+    Dim aSer() As String, aDes() As String
+    Dim aCirc() As Double, aHsls() As Double
+    Dim aBha() As Long
+    Dim rSz As Long
+    rSz = CollectBhaTabSerialRows(aSer, aDes, aCirc, aHsls, aBha)
     If rSz = 0 Then Exit Sub
 
-    ' Sort descending by total hours
-    Dim swapped As Boolean
-    Do
-        swapped = False
-        For k = 0 To rSz - 2
-            If rTot(k) < rTot(k + 1) Then
-                SwapS rSerial, k, k + 1: SwapS rDesc, k, k + 1: SwapS rCode, k, k + 1
-                SwapD rTot, k, k + 1: SwapD rSld, k, k + 1
-                SwapD rRot, k, k + 1: SwapD rMtr, k, k + 1
-                SwapL rCnt, k, k + 1
-                swapped = True
-            End If
-        Next k
-    Loop While swapped
-
-    ' Render cumulative section
     Dim r As Long: r = cStart
+    Dim k As Long
 
-    ' Section header (same width as data columns)
+    ' Section header
     ws.Rows(r).rowHeight = 18
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cGrayBg()
@@ -1105,7 +1007,7 @@ SkipRow:
         .Font.bold = True
         .Font.Size = 10
     End With
-    ws.Cells(r, 1).Value = "CUMULATIVE SERIAL HOURS (All BHAs)"
+    ws.Cells(r, 1).Value = "SERIAL HOURS PER BHA (BHA-tab items)"
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
         .Color = cTeal()
@@ -1113,7 +1015,7 @@ SkipRow:
     End With
     r = r + 1
 
-    ' Column headers ? match top table: #, SERIAL, ITEM CODE, DESCRIPTION, HRS SLD, HRS ROT, TOTAL HRS, BHAs
+    ' Column headers: #, SERIAL #, DESCRIPTION, HRS CIRC, HSLS, BHA #
     ws.Rows(r).rowHeight = 15
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cGrayBg()
@@ -1124,15 +1026,12 @@ SkipRow:
     ws.Cells(r, 1).Value = "#"
     ws.Cells(r, 1).HorizontalAlignment = xlHAlignCenter
     ws.Cells(r, 2).Value = "SERIAL #"
-    ws.Cells(r, 3).Value = "ITEM CODE"
-    ws.Cells(r, 4).Value = "DESCRIPTION"
-    ws.Cells(r, 5).Value = "HRS SLD"
-    ws.Cells(r, 5).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, 6).Value = "HRS ROT"
+    ws.Cells(r, 3).Value = "DESCRIPTION"
+    ws.Cells(r, 6).Value = "HRS CIRC"
     ws.Cells(r, 6).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, 7).Value = "TOTAL HRS"
+    ws.Cells(r, 7).Value = "HSLS"
     ws.Cells(r, 7).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, COL_DATA_LAST).Value = "BHAs"
+    ws.Cells(r, COL_DATA_LAST).Value = "BHA #"
     ws.Cells(r, COL_DATA_LAST).HorizontalAlignment = xlHAlignRight
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
@@ -1141,33 +1040,27 @@ SkipRow:
     End With
     r = r + 1
 
-    ' Data rows
-    Dim ri As Long
-    For ri = 0 To rSz - 1
+    Dim bg As Long
+    For k = 0 To rSz - 1
         ws.Rows(r).rowHeight = 15
-
-        Dim bg As Long
-        If (ri + 1) Mod 2 = 0 Then bg = cGrayBg() Else bg = cWhite()
+        If (k + 1) Mod 2 = 0 Then bg = cGrayBg() Else bg = cWhite()
         ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Interior.Color = bg
 
-        PutCell ws, r, 1, CStr(ri + 1), bg, cGrayDk(), False, xlHAlignCenter
-        PutCell ws, r, 2, rSerial(ri), bg, cBlack(), False, xlHAlignLeft
-        PutCell ws, r, 3, rCode(ri), bg, cGrayDk(), False, xlHAlignLeft
-        PutCell ws, r, 4, rDesc(ri), bg, cBlack(), False, xlHAlignLeft
+        PutCell ws, r, 1, CStr(k + 1), bg, cGrayDk(), False, xlHAlignCenter
+        PutCell ws, r, 2, aSer(k), bg, cBlack(), False, xlHAlignLeft
+        PutCell ws, r, 3, aDes(k), bg, cBlack(), False, xlHAlignLeft
+        PutNum ws, r, 6, aCirc(k), bg
 
-        PutNum ws, r, 5, rSld(ri), bg
-        PutNum ws, r, 6, rRot(ri), bg
-
-        ' Total hours - bold if > 0, red if > 300
+        ' HSLS: bold, red past 300 h since service
         With ws.Cells(r, 7)
-            .Value = Format(rTot(ri), "0.00")
+            .Value = Format(aHsls(k), "0.00")
             .Interior.Color = bg
             .HorizontalAlignment = xlHAlignRight
             .Font.Size = 9
-            If rTot(ri) > 300 Then
+            If aHsls(k) > 300 Then
                 .Font.Color = cRed()
                 .Font.bold = True
-            ElseIf rTot(ri) > 0 Then
+            ElseIf aHsls(k) > 0 Then
                 .Font.Color = cBlack()
                 .Font.bold = True
             Else
@@ -1176,16 +1069,14 @@ SkipRow:
             End If
         End With
 
-        ' BHAs count (last column)
         With ws.Cells(r, COL_DATA_LAST)
-            .Value = rCnt(ri)
+            .Value = aBha(k)
             .Interior.Color = bg
             .Font.Color = cGrayDk()
             .HorizontalAlignment = xlHAlignRight
         End With
-
         r = r + 1
-    Next ri
+    Next k
 
     ' Bottom border
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeTop)
@@ -1195,49 +1086,7 @@ SkipRow:
     End With
     r = r + 1
 
-    ' ========================================================================
-    ' OVER-LIMIT COMPONENTS (>300h) - fatigue warning
-    ' ========================================================================
-    Dim oSerial() As String, oDesc() As String, oCode() As String
-    Dim oTot() As Double, oBhaCnt() As Long
-    Dim oSz As Long: oSz = 0
-    ReDim oSerial(0): ReDim oDesc(0): ReDim oCode(0)
-    ReDim oTot(0): ReDim oBhaCnt(0)
-
-    For k = 0 To rSz - 1
-        If rTot(k) > 300# Then
-            oSz = oSz + 1
-            ReDim Preserve oSerial(oSz - 1)
-            ReDim Preserve oDesc(oSz - 1)
-            ReDim Preserve oCode(oSz - 1)
-            ReDim Preserve oTot(oSz - 1)
-            ReDim Preserve oBhaCnt(oSz - 1)
-            oSerial(oSz - 1) = rSerial(k)
-            oDesc(oSz - 1) = rDesc(k)
-            oCode(oSz - 1) = rCode(k)
-            oTot(oSz - 1) = rTot(k)
-            oBhaCnt(oSz - 1) = rCnt(k)
-        End If
-    Next k
-
-    ' Sort over-limit descending
-    If oSz > 1 Then
-        Do
-            swapped = False
-            For k = 0 To oSz - 2
-                If oTot(k) < oTot(k + 1) Then
-                    SwapS oSerial, k, k + 1
-                    SwapS oDesc, k, k + 1
-                    SwapS oCode, k, k + 1
-                    SwapD oTot, k, k + 1
-                    SwapL oBhaCnt, k, k + 1
-                    swapped = True
-                End If
-            Next k
-        Loop While swapped
-    End If
-
-    ' Section header
+    ' OVER-LIMIT (>300h since service): one warning row per serial
     ws.Rows(r).rowHeight = 18
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cWhite()
@@ -1245,7 +1094,7 @@ SkipRow:
         .Font.bold = True
         .Font.Size = 10
     End With
-    ws.Cells(r, 1).Value = "OVER-LIMIT (>300h Serial Hrs)"
+    ws.Cells(r, 1).Value = "OVER-LIMIT (>300h since service)"
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
         .Color = cRed()
@@ -1253,62 +1102,36 @@ SkipRow:
     End With
     r = r + 1
 
-    If oSz = 0 Then
-        ws.Cells(r, 1).Value = "No components over 300h."
+    Dim seenOver As New Collection
+    Dim nOver As Long: nOver = 0
+    For k = 0 To rSz - 1
+        If aHsls(k) > 300# Then
+            On Error Resume Next
+            seenOver.Add 1, UCase$(aSer(k))
+            If Err.Number = 0 Then
+                On Error GoTo 0
+                nOver = nOver + 1
+                ws.Rows(r).rowHeight = 15
+                PutCell ws, r, 1, CStr(nOver), cWhite(), cGrayDk(), False, xlHAlignCenter
+                PutCell ws, r, 2, aSer(k), cWhite(), cRed(), True, xlHAlignLeft
+                PutCell ws, r, 3, aDes(k), cWhite(), cBlack(), False, xlHAlignLeft
+                With ws.Cells(r, 7)
+                    .Value = Format(aHsls(k), "0.00")
+                    .HorizontalAlignment = xlHAlignRight
+                    .Font.Color = cRed()
+                    .Font.bold = True
+                End With
+                r = r + 1
+            Else
+                Err.Clear
+                On Error GoTo 0
+            End If
+        End If
+    Next k
+    If nOver = 0 Then
+        ws.Cells(r, 1).Value = "No components over 300h since service."
         ws.Cells(r, 1).Font.Color = cGrayDk()
         r = r + 1
-    Else
-        ' Column headers ? aligned with tables above
-        ws.Rows(r).rowHeight = 14
-        ws.Cells(r, 1).Value = "#"
-        ws.Cells(r, 1).Font.bold = True
-        ws.Cells(r, 1).Font.Size = 8
-        ws.Cells(r, 1).Font.Color = cGrayDk()
-        ws.Cells(r, 1).HorizontalAlignment = xlHAlignCenter
-        ws.Cells(r, 2).Value = "SERIAL #"
-        ws.Cells(r, 2).Font.bold = True
-        ws.Cells(r, 2).Font.Size = 8
-        ws.Cells(r, 2).Font.Color = cGrayDk()
-        ws.Cells(r, 3).Value = "ITEM CODE"
-        ws.Cells(r, 3).Font.bold = True
-        ws.Cells(r, 3).Font.Size = 8
-        ws.Cells(r, 3).Font.Color = cGrayDk()
-        ws.Cells(r, 4).Value = "DESCRIPTION"
-        ws.Cells(r, 4).Font.bold = True
-        ws.Cells(r, 4).Font.Size = 8
-        ws.Cells(r, 4).Font.Color = cGrayDk()
-        ws.Cells(r, 7).Value = "SERIAL HRS"
-        ws.Cells(r, 7).Font.bold = True
-        ws.Cells(r, 7).Font.Size = 8
-        ws.Cells(r, 7).Font.Color = cGrayDk()
-        ws.Cells(r, 7).HorizontalAlignment = xlHAlignRight
-        ws.Cells(r, COL_DATA_LAST).Value = "BHAs"
-        ws.Cells(r, COL_DATA_LAST).Font.bold = True
-        ws.Cells(r, COL_DATA_LAST).Font.Size = 8
-        ws.Cells(r, COL_DATA_LAST).Font.Color = cGrayDk()
-        ws.Cells(r, COL_DATA_LAST).HorizontalAlignment = xlHAlignRight
-        r = r + 1
-
-        ' Data rows
-        For k = 0 To oSz - 1
-            ws.Rows(r).rowHeight = 15
-            PutCell ws, r, 1, CStr(k + 1), cWhite(), cGrayDk(), False, xlHAlignCenter
-            PutCell ws, r, 2, oSerial(k), cWhite(), cRed(), True, xlHAlignLeft
-            PutCell ws, r, 3, oCode(k), cWhite(), cGrayDk(), False, xlHAlignLeft
-            PutCell ws, r, 4, oDesc(k), cWhite(), cBlack(), False, xlHAlignLeft
-            With ws.Cells(r, 7)
-                .Value = Format(oTot(k), "0.00")
-                .HorizontalAlignment = xlHAlignRight
-                .Font.Color = cRed()
-                .Font.bold = True
-            End With
-            With ws.Cells(r, COL_DATA_LAST)
-                .Value = oBhaCnt(k)
-                .HorizontalAlignment = xlHAlignRight
-                .Font.Color = cGrayDk()
-            End With
-            r = r + 1
-        Next k
     End If
 
     ' Final border
@@ -1317,6 +1140,255 @@ SkipRow:
         .Color = cGrayMed()
         .Weight = xlHairline
     End With
+End Sub
+
+' Rows for the serial-hours tables: only components on the FieldCap BHA tab.
+' DD-category serials (plus Other Inventory tagged "DD ..." - bit, jar,
+' agitator, X/O) qualify; the MWD surface kit (laptops, receiver, pulser,
+' barrels, wifi, MWD kit) is excluded. Circ hours come from the component's
+' BHA row; HSLS prefers the BHA CSV column (new exports) and falls back to
+' _OC_Inventory HrsSinceService. Sorted BHA# descending, then HSLS descending.
+Private Function CollectBhaTabSerialRows(ByRef aSer() As String, ByRef aDes() As String, _
+        ByRef aCirc() As Double, ByRef aHsls() As Double, ByRef aBha() As Long) As Long
+    CollectBhaTabSerialRows = 0
+    If Not SheetExists(SH_BHA) Then Exit Function
+
+    Dim bhaWs As Worksheet
+    Set bhaWs = Worksheets(SH_BHA)
+    Dim cBNum As Long: cBNum = FindCol(bhaWs, "BHA #")
+    Dim cSer As Long: cSer = FindCol(bhaWs, "Serial #")
+    Dim cDes As Long: cDes = FindCol(bhaWs, "Description")
+    Dim cSub As Long: cSub = FindCol(bhaWs, "Sub Description")
+    Dim cCrc As Long: cCrc = FindCol(bhaWs, "BHA Hrs Circ")
+    Dim cHsl As Long: cHsl = FindCol(bhaWs, "HSLS")
+    Dim cCat As Long: cCat = FindCol(bhaWs, "Category")
+    If cBNum = 0 Or cSer = 0 Then Exit Function
+
+    ' Inventory lookup: UCase(serial) -> Category / SubCategory / HrsSinceService
+    Dim invCat As New Collection
+    Dim invSub As New Collection
+    Dim invHrs As New Collection
+    If SheetExists(SH_INV) Then
+        Dim inv As Worksheet
+        Set inv = Worksheets(SH_INV)
+        Dim iSer As Long: iSer = FindCol(inv, "SerialNumber")
+        Dim iCat As Long: iCat = FindCol(inv, "Category")
+        Dim iSub As Long: iSub = FindCol(inv, "SubCategory")
+        Dim iHrs As Long: iHrs = FindCol(inv, "HrsSinceService")
+        If iSer > 0 Then
+            Dim iLast As Long
+            iLast = inv.Cells(inv.Rows.Count, iSer).End(xlUp).Row
+            Dim ir As Long
+            Dim ky As String
+            For ir = 2 To iLast
+                ky = UCase$(Trim$(SafeStr(inv.Cells(ir, iSer))))
+                If Len(ky) > 0 Then
+                    On Error Resume Next
+                    If iCat > 0 Then invCat.Add SafeStr(inv.Cells(ir, iCat)), ky
+                    If iSub > 0 Then invSub.Add SafeStr(inv.Cells(ir, iSub)), ky
+                    If iHrs > 0 Then invHrs.Add GetNum(inv.Cells(ir, iHrs)), ky
+                    On Error GoTo 0
+                End If
+            Next ir
+        End If
+    End If
+
+    Dim lastRow As Long
+    lastRow = bhaWs.Cells(bhaWs.Rows.Count, cBNum).End(xlUp).Row
+
+    Dim n As Long: n = 0
+    ReDim aSer(0 To lastRow): ReDim aDes(0 To lastRow)
+    ReDim aCirc(0 To lastRow): ReDim aHsls(0 To lastRow)
+    ReDim aBha(0 To lastRow)
+
+    Dim seen As New Collection
+    Dim r As Long
+    Dim srl As String, ku As String
+    Dim cat As String, subD As String
+    Dim keep As Boolean
+    Dim bNum As Long
+    Dim dupKey As String
+    Dim hsls As Double
+    For r = 2 To lastRow
+        If Not IsNumeric(bhaWs.Cells(r, cBNum).Value) Then GoTo NextRow
+        srl = Trim$(SafeStr(bhaWs.Cells(r, cSer)))
+        If srl = "" Then GoTo NextRow
+        ku = UCase$(srl)
+
+        ' Category: prefer the BHA CSV column (new exports), else inventory
+        cat = ""
+        If cCat > 0 Then cat = UCase$(Trim$(SafeStr(bhaWs.Cells(r, cCat))))
+        If cat = "" Then cat = UCase$(Trim$(LookupStr(invCat, ku)))
+        subD = UCase$(Trim$(SafeStr(bhaWs.Cells(r, cSub))))
+        If subD = "" Then subD = UCase$(Trim$(LookupStr(invSub, ku)))
+
+        If cat = "DD" Then
+            keep = True
+        ElseIf cat = "MWD" Then
+            keep = False
+        Else
+            keep = (Left$(subD, 2) = "DD")
+        End If
+        If Not keep Then GoTo NextRow
+
+        bNum = CLng(bhaWs.Cells(r, cBNum).Value)
+        dupKey = ku & "|" & CStr(bNum)
+        On Error Resume Next
+        seen.Add 1, dupKey
+        If Err.Number <> 0 Then
+            Err.Clear
+            On Error GoTo 0
+            GoTo NextRow
+        End If
+        On Error GoTo 0
+
+        hsls = 0
+        If cHsl > 0 Then hsls = GetNum(bhaWs.Cells(r, cHsl))
+        If hsls = 0 Then hsls = LookupNum(invHrs, ku)
+
+        aSer(n) = srl
+        aDes(n) = SafeStr(bhaWs.Cells(r, cDes))
+        If cCrc > 0 Then aCirc(n) = GetNum(bhaWs.Cells(r, cCrc))
+        aHsls(n) = hsls
+        aBha(n) = bNum
+        n = n + 1
+NextRow:
+    Next r
+
+    If n = 0 Then Exit Function
+
+    ' Sort: BHA# descending, then HSLS descending
+    Dim swapped As Boolean, k As Long
+    Dim later As Boolean
+    Do
+        swapped = False
+        For k = 0 To n - 2
+            later = (aBha(k) < aBha(k + 1)) Or _
+                    (aBha(k) = aBha(k + 1) And aHsls(k) < aHsls(k + 1))
+            If later Then
+                SwapS aSer, k, k + 1
+                SwapS aDes, k, k + 1
+                SwapD aCirc, k, k + 1
+                SwapD aHsls, k, k + 1
+                SwapL aBha, k, k + 1
+                swapped = True
+            End If
+        Next k
+    Loop While swapped
+
+    CollectBhaTabSerialRows = n
+End Function
+
+Private Function LookupStr(ByVal col As Collection, ByVal key As String) As String
+    On Error Resume Next
+    LookupStr = CStr(col.Item(key))
+    On Error GoTo 0
+End Function
+
+Private Function LookupNum(ByVal col As Collection, ByVal key As String) As Double
+    On Error Resume Next
+    LookupNum = CDbl(col.Item(key))
+    On Error GoTo 0
+End Function
+
+' Data!X2:AB serial-hours table. Header X2:AB2, rows from X3; BHA# descending
+' then HSLS descending. Replaces the old free-text notes in X10:X37.
+Public Sub BuildDataSerialHoursTable()
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+
+    On Error GoTo Done
+    Set ws = ThisWorkbook.Worksheets("Data")
+
+    Dim aSer() As String, aDes() As String
+    Dim aCirc() As Double, aHsls() As Double
+    Dim aBha() As Long
+    Dim n As Long
+    n = CollectBhaTabSerialRows(aSer, aDes, aCirc, aHsls, aBha)
+
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ws)
+
+    ' Old notes lived in X10:X37; the table owns X2:AB. Clear well past any
+    ' realistic row count so a shrinking table never leaves stale rows below.
+    ' Reset formats too - those cells carried red 16pt fonts and underlines.
+    With ws.Range("X2:AB400")
+        .ClearContents
+        .ClearFormats
+        .Font.name = "Calibri"
+        .Font.Size = 11
+        .Font.Color = RGB(0, 0, 0)
+        .Interior.ColorIndex = xlColorIndexNone
+        .Borders.LineStyle = xlNone
+        .HorizontalAlignment = xlHAlignCenter
+    End With
+
+    ' Header styled like the sheet's other tables: gray fill, bold, boxed.
+    ws.Range("X2").Value = "Serial"
+    ws.Range("Y2").Value = "Description"
+    ws.Range("Z2").Value = "Circ Hours"
+    ws.Range("AA2").Value = "HSLS"
+    ws.Range("AB2").Value = "BHA#"
+    With ws.Range("X2:AB2")
+        .Font.bold = True
+        .Interior.Color = RGB(217, 217, 217)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+    End With
+
+    Dim r As Long, k As Long
+    Dim bandOn As Boolean
+    Dim prevBha As Long
+    r = 3
+    prevBha = -1
+    bandOn = False
+    For k = 0 To n - 1
+        ' Alternate the sheet's light green per BHA group so runs read together.
+        If aBha(k) <> prevBha Then
+            If prevBha >= 0 Then bandOn = Not bandOn
+            prevBha = aBha(k)
+        End If
+
+        ws.Cells(r, 24).Value = aSer(k)
+        ws.Cells(r, 25).Value = aDes(k)
+        ws.Cells(r, 26).Value = aCirc(k)
+        ws.Cells(r, 26).numberFormat = "0.00"
+        ws.Cells(r, 27).Value = aHsls(k)
+        ws.Cells(r, 27).numberFormat = "0.00"
+        ws.Cells(r, 28).Value = aBha(k)
+        ws.Cells(r, 28).numberFormat = "0"
+
+        With ws.Range(ws.Cells(r, 24), ws.Cells(r, 28))
+            .Font.bold = True
+            .Borders.LineStyle = xlContinuous
+            .Borders.Weight = xlThin
+            If bandOn Then .Interior.Color = RGB(226, 239, 218)
+        End With
+        ws.Cells(r, 25).HorizontalAlignment = xlHAlignLeft
+        r = r + 1
+    Next k
+
+    ' Fit to the actual content, clamp the extremes, and shrink what is left
+    ' so long serials / descriptions can never spill into the next column.
+    If r > 3 Then
+        ws.Range(ws.Cells(2, 24), ws.Cells(r - 1, 28)).Columns.AutoFit
+        If ws.Columns(24).ColumnWidth > 21 Then ws.Columns(24).ColumnWidth = 21
+        If ws.Columns(24).ColumnWidth < 12 Then ws.Columns(24).ColumnWidth = 12
+        If ws.Columns(25).ColumnWidth > 52 Then ws.Columns(25).ColumnWidth = 52
+        If ws.Columns(25).ColumnWidth < 30 Then ws.Columns(25).ColumnWidth = 30
+        If ws.Columns(26).ColumnWidth < 10.5 Then ws.Columns(26).ColumnWidth = 10.5
+        If ws.Columns(27).ColumnWidth < 9.5 Then ws.Columns(27).ColumnWidth = 9.5
+        If ws.Columns(28).ColumnWidth < 6.5 Then ws.Columns(28).ColumnWidth = 6.5
+        ws.Range(ws.Cells(3, 24), ws.Cells(r - 1, 25)).ShrinkToFit = True
+    End If
+
+Done:
+    On Error Resume Next
+    SheetReprotectAfterVba ws, wasProt
+    Application.EnableEvents = prevEvents
+    On Error GoTo 0
 End Sub
 
 ' ================================================================================
@@ -1676,6 +1748,8 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
 
 
 

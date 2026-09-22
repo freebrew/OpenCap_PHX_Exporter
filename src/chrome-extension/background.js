@@ -1,9 +1,11 @@
-// OpenCap Data Exporter — Background Service Worker v3.2.5
+// OpenCap Data Exporter — Background Service Worker v3.2.6
 // Fetches data directly from FieldCap's OData API using the active session.
 // Produces typed CSVs including:
 //   • job-details, crew, bha-equipment
 //   • slide/rotate metres by calendar day (SurveySheetEntries × ActivityLogs — all days in one pull)
-//   • BHA Hrs Slid / Hrs Rot from Sliding / Drilling ActivityLog duration when the BHA grid is 0
+//   • BHA Hrs Slid / Hrs Rot = sum of daily Activities Duration (Sliding / Rotating)
+//     by BHA #. Footer R:/S: is the whole day — used only when one BHA is on that
+//     report. Mid-day BHA change: each row's BHA # owns its Course + Duration.
 
 importScripts("browser-api.js");
 
@@ -22,6 +24,7 @@ const KEY_CSV_TICKET_COSTS = "fieldcap_csv_ticket_costs";
 const KEY_TICKET_ENTITY = "fieldcap_ticket_entity";
 const KEY_INTERCEPT = "fieldcap_intercepted_assemblies"; // keyed by ToolAssemblyId
 const KEY_BHA_GRID = "fieldcap_bha_grid_rows"; // { [jobId]: { [bhaNumber]: canonicalRow } }
+const KEY_ACTIVITY_DAYS = "fieldcap_activity_day_totals"; // { [jobId]: { [yyyy-mm-dd]: { [bha]: patch } } }
 const KEY_JOB_RIG  = "fieldcap_job_rig_name"; // { [jobId]: "PD-538" }
 
 const KEY_SNIFF_LOG    = "fieldcap_sniff_log";
@@ -249,10 +252,21 @@ const toNum = (v) => {
 const parseHoursNum = (v) => {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "number") return v;
-  const m = String(v).match(/^(\d+):(\d{2})$/);
+  const m = String(v).trim().match(/^(\d{1,3}):(\d{2})$/);
   if (m) return parseInt(m[1], 10) + (parseInt(m[2], 10) / 60);
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+};
+
+const clockRangeHours = (s) => {
+  const m = String(s ?? "").match(/(\d{1,3}:\d{2})\s*[-–]\s*(\d{1,3}:\d{2})/);
+  if (!m) return null;
+  const a = parseHoursNum(m[1]);
+  let b = parseHoursNum(m[2]);
+  if (a === null || b === null) return null;
+  if (b < a) b += 24;
+  const d = b - a;
+  return d > 0 ? d : null;
 };
 
 const minutesToHours = (v) => {
@@ -438,17 +452,14 @@ const mergeNonEmpty = (base, patch) => {
       const prev = parseHoursNum(out[k]);
       if (prev !== null && prev > 0) continue;
     }
-    // BHA-grid HrsSld is often 0 while Sliding ActivityLogs carry the real time.
-    // Never let a zero hour wipe a filled value; never overwrite a keyed-in hour
-    // with the ActivityLog sum.
+    // BHA-grid / ToolHours leftover is often a single stand (0.73 h). Daily
+    // Activities Duration sum is the real BHA lifetime. Keep the larger value;
+    // never let a zero wipe a filled hour.
     if (HOUR_MERGE_KEYS.has(k)) {
       const next = parseHoursNum(v);
       const prev = parseHoursNum(out[k]);
-      if (next === null || next === 0) {
-        if (prev !== null && prev > 0) continue;
-        continue;
-      }
-      if (prev !== null && prev > 0) continue;
+      if (next === null || next === 0) continue;
+      if (prev !== null && prev > 0 && next <= prev + 1e-9) continue;
     }
     out[k] = v;
   }
@@ -600,96 +611,189 @@ const isRotateActivityText = (activityBlob, codeOnly) => {
   );
 };
 
-const toActivityMetresMap = (rows) => {
-  const valueFromKeyIncludes = (row, needles) => {
-    for (const [k, v] of Object.entries(row ?? {})) {
-      const nk = normalizeKey(k);
-      if (needles.some((n) => nk.includes(n))) {
-        if (v !== null && v !== undefined && v !== "") return v;
-      }
+const activityRowValueIncludes = (row, needles) => {
+  for (const [k, v] of Object.entries(row ?? {})) {
+    const nk = normalizeKey(k);
+    if (needles.some((n) => nk.includes(n))) {
+      if (v !== null && v !== undefined && v !== "") return v;
     }
-    return "";
-  };
+  }
+  return "";
+};
 
+const activityRowDay = (row) => {
+  const pre = String(row?.__calendarDay ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(pre)) return pre;
+  const raw = getByAliases(row, ["Date", "Report Date", "Activity Date", "Daily Date", "Day"]);
+  return raw ? (surveyDayBucketKey(raw) || "") : "";
+};
+
+const rowDurationHours = (row) => {
+  const direct = parseHoursNum(getByAliases(row, [
+    "Duration", "Hrs", "Hours", "Time", "Duration Hours",
+  ]));
+  if (direct !== null && direct > 0) return direct;
+  const range = clockRangeHours(getByAliases(row, [
+    "Start/End", "Start - End", "StartEnd", "From - To",
+  ]));
+  return range !== null && range > 0 ? range : 0;
+};
+
+const actTotalsToPatch = (totalsByBha) => {
+  const out = {};
+  for (const [bhaNum, v] of Object.entries(totalsByBha ?? {})) {
+    const s = v.slide ?? 0;
+    const r = v.rot ?? 0;
+    const sh = v.slideHrs ?? 0;
+    const rh = v.rotHrs ?? 0;
+    if (s <= 0 && r <= 0 && sh <= 0 && rh <= 0) continue;
+    const patch = {};
+    if (s > 0) patch.SlideMetres = Number(s.toFixed(2));
+    if (r > 0) patch.RotateMetres = Number(r.toFixed(2));
+    if (sh > 0) patch.SlideHours = Number(sh.toFixed(2));
+    if (rh > 0) patch.RotateHours = Number(rh.toFixed(2));
+    if (Object.keys(patch).length) out[bhaNum] = patch;
+  }
+  return out;
+};
+
+const addPatches = (base, patch) => {
+  const out = { ...(base ?? {}) };
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    const a = parseHoursNum(out[k]);
+    const b = parseHoursNum(v);
+    if (b === null) continue;
+    if (a === null || a === 0) {
+      out[k] = v;
+      continue;
+    }
+    out[k] = Number((a + b).toFixed(2));
+  }
+  return out;
+};
+
+const classifyActivityKind = (row) => {
+  const codeOnly = String(
+    getByAliases(row, ["Activity/Code", "Activity Code", "Code"]) || row?.Code || ""
+  ).trim();
+  const activityBlob = activityClassifyBlob(row);
+  const slideHit = isSlideActivityText(activityBlob, codeOnly);
+  const rotHit = isRotateActivityText(activityBlob, codeOnly);
+  if (slideHit && !rotHit) return "slide";
+  if (rotHit && !slideHit) return "rot";
+  if (slideHit && rotHit) {
+    return /sld|slide|slid|2\s*a|2a/i.test(activityBlob + codeOnly) ? "slide" : "rot";
+  }
+  return "";
+};
+
+const rowCourseMetres = (row) => {
+  const courseRaw = String(
+    getByAliases(row, ["Course", "Metres", "Meters", "Metres Drilled", "Meters Drilled", "Length"])
+    || activityRowValueIncludes(row, ["course", "metre", "meter", "distance", "drill"])
+    || ""
+  );
+  let course = Number((courseRaw.match(/-?\d+(\.\d+)?/) ?? [])[0]);
+  if (!Number.isFinite(course) || course <= 0) {
+    const depthRange = String(
+      getByAliases(row, ["Start - End Depth", "Start-End Depth", "Start/End Depth", "Depth Range"])
+      || activityRowValueIncludes(row, ["startenddepth", "depthrange", "startend"])
+      || ""
+    );
+    course = Number(rangeDelta(depthRange));
+  }
+  return Number.isFinite(course) && course > 0 ? course : 0;
+};
+
+// Sum Course + Duration by BHA. Footer R:/S: is the whole visible day — apply
+// it only when these rows are a single calendar day and one BHA. Two BHAs on
+// the same report: ignore the footer and let each row's BHA # own its numbers.
+const collectActivityTotals = (rows) => {
   const footerByBha = {};
+  const days = new Set();
   for (const row of rows ?? []) {
+    const day = activityRowDay(row);
+    if (day) days.add(day);
     if (!row?.__activityFooter) continue;
-    const bha = pickActivityRowBha(row, valueFromKeyIncludes);
+    const bha = pickActivityRowBha(row, activityRowValueIncludes);
     if (!bha) continue;
     const bhaNum = String(toNum(bha));
     if (!bhaNum) continue;
-    const sRaw = row.__footerSlideMetres;
-    const rRaw = row.__footerRotateMetres;
-    const s = sRaw !== "" && sRaw != null ? Number(toNum(sRaw)) : NaN;
-    const r = rRaw !== "" && rRaw != null ? Number(toNum(rRaw)) : NaN;
     footerByBha[bhaNum] = {
-      slide: Number.isFinite(s) ? s : 0,
-      rot: Number.isFinite(r) ? r : 0,
+      slide: parseHoursNum(row.__footerSlideMetres) ?? 0,
+      rot: parseHoursNum(row.__footerRotateMetres) ?? 0,
+      slideHrs: parseHoursNum(row.__footerSlideHours) ?? 0,
+      rotHrs: parseHoursNum(row.__footerRotateHours) ?? 0,
     };
   }
+  const singleDay = days.size <= 1;
 
   const map = {};
   for (const row of rows ?? []) {
     if (row?.__activityFooter) continue;
-    const bha = pickActivityRowBha(row, valueFromKeyIncludes);
+    const bha = pickActivityRowBha(row, activityRowValueIncludes);
     if (!bha) continue;
     const bhaNum = String(toNum(bha));
     if (!bhaNum) continue;
-    if (footerByBha[bhaNum]) continue;
-
-    const codeOnly = String(
-      getByAliases(row, ["Activity/Code", "Activity Code", "Code"]) || row?.Code || ""
-    ).trim();
-
-    const activityBlob = activityClassifyBlob(row);
-
-    const courseRaw = String(
-      getByAliases(row, ["Course", "Metres", "Meters", "Metres Drilled", "Meters Drilled", "Length"])
-      || valueFromKeyIncludes(row, ["course", "metre", "meter", "distance", "drill"])
-      || ""
-    );
-    let course = Number((courseRaw.match(/-?\d+(\.\d+)?/) ?? [])[0]);
-
-    // If "Course" is blank, derive meters from depth range.
-    if (!Number.isFinite(course) || course <= 0) {
-      const depthRange = String(
-        getByAliases(row, ["Start - End Depth", "Start-End Depth", "Start/End Depth", "Depth Range"])
-        || valueFromKeyIncludes(row, ["startenddepth", "depthrange", "startend"])
-        || ""
-      );
-      const delta = rangeDelta(depthRange);
-      course = Number(delta);
+    const kind = classifyActivityKind(row);
+    if (!kind) continue;
+    const course = rowCourseMetres(row);
+    const hrs = rowDurationHours(row);
+    if (course <= 0 && hrs <= 0) continue;
+    const prev = (map[bhaNum] ??= { slide: 0, rot: 0, slideHrs: 0, rotHrs: 0 });
+    if (kind === "slide") {
+      prev.slide += course;
+      prev.slideHrs += hrs;
+    } else {
+      prev.rot += course;
+      prev.rotHrs += hrs;
     }
+  }
 
-    if (!Number.isFinite(course) || course <= 0) continue;
-
-    const prev = map[bhaNum] ?? { slide: 0, rot: 0 };
-    const slideHit = isSlideActivityText(activityBlob, codeOnly);
-    const rotHit = isRotateActivityText(activityBlob, codeOnly);
-    if (slideHit && !rotHit) prev.slide += course;
-    else if (rotHit && !slideHit) prev.rot += course;
-    else if (slideHit && rotHit) {
-      if (/sld|slide|slid|2\s*a|2a/i.test(activityBlob + codeOnly)) prev.slide += course;
-      else prev.rot += course;
+  if (singleDay) {
+    for (const [bhaNum, ft] of Object.entries(footerByBha)) {
+      const prev = (map[bhaNum] ??= { slide: 0, rot: 0, slideHrs: 0, rotHrs: 0 });
+      if (ft.slide > 0) prev.slide = ft.slide;
+      if (ft.rot > 0) prev.rot = ft.rot;
+      if (ft.slideHrs > 0) prev.slideHrs = ft.slideHrs;
+      if (ft.rotHrs > 0) prev.rotHrs = ft.rotHrs;
     }
-    map[bhaNum] = prev;
   }
+  return map;
+};
 
-  for (const [bhaNum, v] of Object.entries(footerByBha)) {
-    map[bhaNum] = v;
-  }
+const toActivityMetresMap = (rows) => actTotalsToPatch(collectActivityTotals(rows));
 
-  const out = {};
-  for (const [bhaNum, v] of Object.entries(map)) {
-    const s = v.slide ?? 0;
-    const r = v.rot ?? 0;
-    if (s <= 0 && r <= 0) continue;
-    const patch = {};
-    if (s > 0) patch.SlideMetres = Number(s.toFixed(2));
-    if (r > 0) patch.RotateMetres = Number(r.toFixed(2));
-    if (Object.keys(patch).length) out[bhaNum] = patch;
+const activityRowsToDayBuckets = (rows) => {
+  const buckets = {};
+  for (const row of rows ?? []) {
+    const day = activityRowDay(row) || "_nodate";
+    (buckets[day] ??= []).push(row);
   }
-  return out;
+  return buckets;
+};
+
+const upsertActivityDayStorage = (stored, jobId, rows) => {
+  const byJob = { ...(stored ?? {}) };
+  const days = { ...(byJob[String(jobId)] ?? {}) };
+  const buckets = activityRowsToDayBuckets(rows);
+  for (const [day, dayRows] of Object.entries(buckets)) {
+    const patchMap = actTotalsToPatch(collectActivityTotals(dayRows));
+    if (Object.keys(patchMap).length === 0) continue;
+    days[day] = patchMap;
+  }
+  byJob[String(jobId)] = days;
+  return byJob;
+};
+
+const sumActivityDayStorage = (jobDays) => {
+  const life = {};
+  for (const dayMap of Object.values(jobDays ?? {})) {
+    for (const [bha, patch] of Object.entries(dayMap ?? {})) {
+      life[bha] = addPatches(life[bha] ?? {}, patch);
+    }
+  }
+  return life;
 };
 
 const collectObjectsDeep = (root, out = [], depth = 0) => {
@@ -918,13 +1022,20 @@ const mapODataActivitiesToSyntheticRows = (rows, idToBha) => {
     ].filter((x) => x !== null && x !== undefined && String(x).trim() !== "");
 
     const calendarDay = pickActivityEntityCalendarDay(r);
+    const durationRaw =
+      r.Duration ?? r.DurationHours ?? r.Hours ?? r.TotalHours ?? r.ElapsedTime ?? "";
+    const startEnd = [r.StartTime, r.EndTime, r.StartDateTime, r.EndDateTime]
+      .filter((x) => x !== null && x !== undefined && String(x).trim() !== "")
+      .slice(0, 2);
     const row = {
       BHA: bha,
       "Activity Code": parts.join(" "),
       Activity: parts.join(" "),
       Course: courseRaw,
       Code: r.Code ?? r.ActivityCode ?? "",
+      Duration: durationRaw,
     };
+    if (startEnd.length === 2) row["Start/End"] = `${startEnd[0]} - ${startEnd[1]}`;
     if (calendarDay) {
       row.Date = calendarDay;
       row.__calendarDay = calendarDay;
@@ -985,16 +1096,26 @@ const fetchAllActivityLogsForJob = async (jobId) => {
     `(ClientJobId eq ${jobId}) and (null eq DeletedBy)`,
     `(ClientJobId eq ${jobId})`,
   ];
-  const select = encodeURIComponent(
-    "ActivityLogId,ActivityType,Comments,StartDateTime,EndDateTime,ToolAssemblyId," +
-      "Custom1,Custom2,Custom3,Custom4,Custom5,Custom6,Custom7,Custom8,Custom9,Custom10"
-  );
+  const selects = [
+    "",
+    "&$select=" + encodeURIComponent(
+      "ActivityLogId,ActivityType,Comments,StartDateTime,EndDateTime,ToolAssemblyId," +
+        "ToolAssemblyNumber,BHA,Duration,Custom1,Custom2,Custom3,Custom4,Custom5," +
+        "Custom6,Custom7,Custom8,Custom9,Custom10"
+    ),
+    "&$select=" + encodeURIComponent(
+      "ActivityLogId,ActivityType,Comments,StartDateTime,EndDateTime,ToolAssemblyId," +
+        "Custom1,Custom2,Custom3,Custom4,Custom5,Custom6,Custom7,Custom8,Custom9,Custom10"
+    ),
+  ];
   for (const f of filters) {
-    try {
-      const filter = encodeURIComponent(f);
-      const rows = await odataGetAll(`ActivityLogs?$filter=${filter}&$select=${select}`);
-      if (Array.isArray(rows)) return rows;
-    } catch (_) { /* try next filter */ }
+    for (const sel of selects) {
+      try {
+        const filter = encodeURIComponent(f);
+        const rows = await odataGetAll(`ActivityLogs?$filter=${filter}${sel}`);
+        if (Array.isArray(rows) && rows.length > 0) return rows;
+      } catch (_) { /* try next shape */ }
+    }
   }
   return [];
 };
@@ -1138,21 +1259,27 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
 
   for (const log of logs) {
     const tid = log.ToolAssemblyId ? String(log.ToolAssemblyId) : "";
-    const bha = tid ? idToBha[tid] : "";
+    const taNum = log.ToolAssemblyNumber ?? log.BHA ?? log.BhaNumber;
+    const bha =
+      (tid && idToBha[tid] ? idToBha[tid] : "") ||
+      (taNum !== undefined && taNum !== "" ? String(toNum(taNum)) : "");
     if (!bha) continue;
 
-    const actType = String(log.ActivityType ?? "").trim();
-    const isSlide = actType === SLIDE_ACTIVITY_TYPE;
-    const isRot = actType === ROTATE_ACTIVITY_TYPE;
+    const actBlob = [log.ActivityType, log.Comments, log.ActivityCode, log.Code]
+      .filter(Boolean).join(" ");
+    const isSlide = activityIsSlide(actBlob) || String(log.ActivityType ?? "").trim() === SLIDE_ACTIVITY_TYPE;
+    const isRot = activityIsRotate(actBlob) || String(log.ActivityType ?? "").trim() === ROTATE_ACTIVITY_TYPE;
     if (!isSlide && !isRot) continue;
 
     const lf = (lifetime[bha] ??= surveyCellShape());
     const dayStr = surveyDayBucketKey(log.StartDateTime);
     const dc = dayStr ? ((byDay[bha] ??= {})[dayStr] ??= surveyCellShape()) : null;
 
-    // Duration is independent of MD. A Sliding row with 44 min and no Custom1/2
-    // still belongs in BHA Hrs Slid.
-    const hrs = activityLogDurationHours(log);
+    // Prefer Start/End elapsed time; fall back to Duration / clock range so a
+    // Sliding row with 2:50 in the Duration column still counts.
+    let hrs = activityLogDurationHours(log);
+    if (hrs <= 0) hrs = parseHoursNum(log.Duration) ?? 0;
+    if (hrs <= 0) hrs = clockRangeHours(log.Duration) ?? 0;
     if (hrs > 0) {
       if (isSlide) lf.slideHrs += hrs;
       if (isRot) lf.rotHrs += hrs;
@@ -1200,7 +1327,8 @@ const finalizeSurveyPatchMap = (totals) => {
 };
 
 const SLIDE_DAY_COLUMNS = [
-  "Job ID", "Date", "BHA #", "Slide Metres", "Rotate Metres", "Survey Course Sum",
+  "Job ID", "Date", "BHA #", "Slide Metres", "Rotate Metres",
+  "Slide Hours", "Rotate Hours", "Survey Course Sum",
 ];
 
 const buildSlideRotateMetresByDayCsv = (jobId, byDay, lifetimeTotals = {}) => {
@@ -1214,6 +1342,8 @@ const buildSlideRotateMetresByDayCsv = (jobId, byDay, lifetimeTotals = {}) => {
         "BHA #": bha,
         "Slide Metres": v.slide > 0 ? Number(v.slide.toFixed(2)) : "",
         "Rotate Metres": v.rot > 0 ? Number(v.rot.toFixed(2)) : "",
+        "Slide Hours": (v.slideHrs ?? 0) > 0 ? Number(v.slideHrs.toFixed(2)) : "",
+        "Rotate Hours": (v.rotHrs ?? 0) > 0 ? Number(v.rotHrs.toFixed(2)) : "",
         "Survey Course Sum": v.total > 0 ? Number(v.total.toFixed(2)) : "",
       });
     }
@@ -1227,6 +1357,8 @@ const buildSlideRotateMetresByDayCsv = (jobId, byDay, lifetimeTotals = {}) => {
         "BHA #": bha,
         "Slide Metres": v.slide > 0 ? Number(v.slide.toFixed(2)) : "",
         "Rotate Metres": v.rot > 0 ? Number(v.rot.toFixed(2)) : "",
+        "Slide Hours": (v.slideHrs ?? 0) > 0 ? Number(v.slideHrs.toFixed(2)) : "",
+        "Rotate Hours": (v.rotHrs ?? 0) > 0 ? Number(v.rotHrs.toFixed(2)) : "",
         "Survey Course Sum": v.total > 0 ? Number(v.total.toFixed(2)) : "",
       });
     }
@@ -1249,89 +1381,25 @@ const pickActivityRowCalendarDay = (row) => {
   return "";
 };
 
-// Buckets slide/rotate metres by calendar day from scraped + OData activity rows (matches daily Activities when dated).
+// Buckets slide/rotate metres + hours by calendar day from daily Activities rows.
 const buildSlideRotateMetresByDayCsvFromActivities = (rows, jobId) => {
-  const valueFromKeyIncludes = (row, needles) => {
-    for (const [k, v] of Object.entries(row ?? {})) {
-      const nk = normalizeKey(k);
-      if (needles.some((n) => nk.includes(n))) {
-        if (v !== null && v !== undefined && v !== "") return v;
-      }
-    }
-    return "";
-  };
-
-  const footerByBha = {};
-  for (const row of rows ?? []) {
-    if (!row?.__activityFooter) continue;
-    const bha = pickActivityRowBha(row, valueFromKeyIncludes);
-    if (!bha) continue;
-    const bhaNum = String(toNum(bha));
-    if (!bhaNum) continue;
-    footerByBha[bhaNum] = true;
-  }
-
-  const nested = {};
-  for (const row of rows ?? []) {
-    if (row?.__activityFooter) continue;
-    const bha = pickActivityRowBha(row, valueFromKeyIncludes);
-    if (!bha) continue;
-    const bhaNum = String(toNum(bha));
-    if (!bhaNum) continue;
-    if (footerByBha[bhaNum]) continue;
-
-    const day = pickActivityRowCalendarDay(row);
-    if (!day) continue;
-
-    const codeOnly = String(
-      getByAliases(row, ["Activity/Code", "Activity Code", "Code"]) || row?.Code || ""
-    ).trim();
-    const activityBlob = activityClassifyBlob(row);
-    const courseRaw = String(
-      getByAliases(row, ["Course", "Metres", "Meters", "Metres Drilled", "Meters Drilled", "Length"])
-      || valueFromKeyIncludes(row, ["course", "metre", "meter", "distance", "drill"])
-      || ""
-    );
-    let course = Number((courseRaw.match(/-?\d+(\.\d+)?/) ?? [])[0]);
-    if (!Number.isFinite(course) || course <= 0) {
-      const depthRange = String(
-        getByAliases(row, ["Start - End Depth", "Start-End Depth", "Start/End Depth", "Depth Range"])
-        || valueFromKeyIncludes(row, ["startenddepth", "depthrange", "startend"])
-        || ""
-      );
-      course = Number(rangeDelta(depthRange));
-    }
-    if (!Number.isFinite(course) || course <= 0) continue;
-
-    const slideHit = isSlideActivityText(activityBlob, codeOnly);
-    const rotHit = isRotateActivityText(activityBlob, codeOnly);
-    let slide = 0;
-    let rot = 0;
-    if (slideHit && !rotHit) slide = course;
-    else if (rotHit && !slideHit) rot = course;
-    else if (slideHit && rotHit) {
-      if (/sld|slide|slid|2\s*a|2a/i.test(activityBlob + codeOnly)) slide = course;
-      else rot = course;
-    }
-    if (slide <= 0 && rot <= 0) continue;
-
-    const slot = ((nested[bhaNum] ??= {})[day] ??= { slide: 0, rot: 0 });
-    slot.slide += slide;
-    slot.rot += rot;
-  }
-
+  const buckets = activityRowsToDayBuckets(rows);
   const outRows = [];
-  for (const [bha, days] of Object.entries(nested)) {
-    for (const [date, v] of Object.entries(days)) {
-      const sum = v.slide + v.rot;
-      if (sum <= 0) continue;
+  for (const [date, dayRows] of Object.entries(buckets)) {
+    if (date === "_nodate") continue;
+    const totals = collectActivityTotals(dayRows);
+    for (const [bha, v] of Object.entries(totals)) {
+      const sum = (v.slide ?? 0) + (v.rot ?? 0);
+      if (sum <= 0 && (v.slideHrs ?? 0) <= 0 && (v.rotHrs ?? 0) <= 0) continue;
       outRows.push({
         "Job ID": jobId,
         "Date": date,
         "BHA #": bha,
         "Slide Metres": v.slide > 0 ? Number(v.slide.toFixed(2)) : "",
         "Rotate Metres": v.rot > 0 ? Number(v.rot.toFixed(2)) : "",
-        "Survey Course Sum": Number(sum.toFixed(2)),
+        "Slide Hours": v.slideHrs > 0 ? Number(v.slideHrs.toFixed(2)) : "",
+        "Rotate Hours": v.rotHrs > 0 ? Number(v.rotHrs.toFixed(2)) : "",
+        "Survey Course Sum": sum > 0 ? Number(sum.toFixed(2)) : "",
       });
     }
   }
@@ -2233,7 +2301,7 @@ const BHA_COLUMNS = [
   "Serial #", "Item Code", "Description", "Sub Description",
   "Length", "Accum Length", "Top", "Bottom", "Max OD", "Min ID",
   "Job Hours", "HSLS", "Strapped", "Shipping Status", "Dispatched On", "Returned On",
-  "Source",
+  "Category", "Source",
 ];
 
 const firstNonEmpty = (...vals) => {
@@ -2249,6 +2317,14 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
   const assemblyPick = augmentAssemblyForPicking(assembly);
   const itemSerial = item?.JobTool?.ItemSerial;
   const itemRecord = item?.JobTool?.Item ?? itemSerial?.Item;
+  // Hours since last service, exactly as FieldCap's UI shows it:
+  // (TotalHsls1 + TotalHsls2 + TotalHsls3) minutes ÷ 60 on the ItemSerial
+  // (slide + rotate + circ since service). JobTool.HslsHours is usually null.
+  const serialHours = itemSerial ?? jobTool?.ItemSerial ?? {};
+  const hslsMins =
+    (serialHours.TotalHsls1 ?? 0) +
+    (serialHours.TotalHsls2 ?? 0) +
+    (serialHours.TotalHsls3 ?? 0);
   // Third-party component: separate Other Tools table, or an item-less JobTool
   const other = otherToolOf(item);
 
@@ -2358,11 +2434,14 @@ const normalizeBhaRow = (assembly, item, jobTool) => {
     "Max OD":          toNum(item?.MaxOD ?? itemRecord?.OD),
     "Min ID":          toNum(item?.MinID ?? itemRecord?.ID),
     "Job Hours":       toHours(jobTool?.JobHours),
-    "HSLS":            toHours(jobTool?.HslsHours),
+    "HSLS":            hslsMins > 0 ? Number((hslsMins / 60).toFixed(2))
+                                    : toHours(jobTool?.HslsHours),
     "Strapped":        jobTool?.Strapped ?? "",
     "Shipping Status": jobTool?.ShippingStatus ?? "",
     "Dispatched On":   toDateStr(jobTool?.DispatchedOn),
     "Returned On":     toDateStr(jobTool?.ReturnedOn),
+    "Category":        String(item?.JobTool?.Category ?? jobTool?.Category ?? "")
+                         .replace(/\|/g, "").trim(),
     "Source":          other ? OTHER_INVENTORY_TAG : "",
   };
 };
@@ -2488,7 +2567,7 @@ const fetchAll = async (
       fetchToolAssemblies(jobId),
       fetchToolAssemblyItems(jobId),
       fetchJobTools(jobId),
-      new Promise((res) => chrome.storage.local.get([KEY_INTERCEPT, KEY_BHA_GRID], res)),
+      new Promise((res) => chrome.storage.local.get([KEY_INTERCEPT, KEY_BHA_GRID, KEY_ACTIVITY_DAYS], res)),
     ]);
     prog(60, "BHA components…");
     // Resolve third-party components (no JobTool) from FieldCap's Other Tools table
@@ -2509,7 +2588,6 @@ const fetchAll = async (
     } catch (_) {
       odataActivityRows = [];
     }
-    const mergedActivityRows = [...liveActivityRows, ...odataActivityRows];
     prog(83, "Slide / rotate metres…");
     let activityLogMap = {};
     let slideByDayCsv = "";
@@ -2522,23 +2600,33 @@ const fetchAll = async (
     } catch (_) {
       activityLogMap = {};
     }
-    const activityDayCsv = buildSlideRotateMetresByDayCsvFromActivities(mergedActivityRows, jobId);
-    const activityDayLines = activityDayCsv.split("\r\n").filter((ln) => ln.length > 0);
-    if (activityDayLines.length > 1) {
-      slideByDayCsv = activityDayCsv;
-      slideByDayRowCount = activityDayLines.length - 1;
+    const odataDayCsv = buildSlideRotateMetresByDayCsvFromActivities(odataActivityRows, jobId);
+    const scrapeDayCsv = buildSlideRotateMetresByDayCsvFromActivities(liveActivityRows, jobId);
+    const odataDayLines = odataDayCsv.split("\r\n").filter((ln) => ln.length > 0);
+    const scrapeDayLines = scrapeDayCsv.split("\r\n").filter((ln) => ln.length > 0);
+    if (odataDayLines.length > 1) {
+      slideByDayCsv = odataDayCsv;
+      slideByDayRowCount = odataDayLines.length - 1;
+    } else if (scrapeDayLines.length > 1) {
+      slideByDayCsv = scrapeDayCsv;
+      slideByDayRowCount = scrapeDayLines.length - 1;
     }
     const interceptedMap = stored[KEY_INTERCEPT] ?? {};
     const bhaGridRowsByJob = stored[KEY_BHA_GRID] ?? {};
     const cachedBhaGridMap = bhaGridRowsByJob[String(jobId)] ?? {};
     const liveBhaGridMap = toBhaGridMap(liveBhaRows);
-    const liveActivityMap = toActivityMetresMap(mergedActivityRows);
+    const upsertedDays = upsertActivityDayStorage(
+      stored[KEY_ACTIVITY_DAYS] ?? {}, jobId, liveActivityRows
+    );
+    chrome.storage.local.set({ [KEY_ACTIVITY_DAYS]: upsertedDays });
+    const scrapeLifeMap = sumActivityDayStorage(upsertedDays[String(jobId)] ?? {});
+    const odataActivityMap = toActivityMetresMap(odataActivityRows);
     const itemAsmMap = mapAssemblyPatchesFromItems(items);
     const bhaGridMap = {};
     for (const [k, v] of Object.entries(cachedBhaGridMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
     for (const [k, v] of Object.entries(liveBhaGridMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
-    for (const [k, v] of Object.entries(liveActivityMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
-    // Highest-fidelity source: ActivityLogs ⨯ SurveySheetEntries time-window join.
+    for (const [k, v] of Object.entries(scrapeLifeMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
+    for (const [k, v] of Object.entries(odataActivityMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
     for (const [k, v] of Object.entries(activityLogMap)) bhaGridMap[k] = mergeNonEmpty(bhaGridMap[k], v);
     prog(92, "Building CSV…");
     results.bhaCsv      = buildBhaCsv(assemblies, items, tools, interceptedMap, bhaGridMap, customAsmMap, itemAsmMap);
@@ -2611,15 +2699,16 @@ chrome.runtime.onConnect.addListener((port) => {
       }
 
       if (flags.bha && (liveData.bhaRows.length > 0 || liveData.activityRows.length > 0)) {
-        const liveMap         = toBhaGridMap(liveData.bhaRows);
-        const liveActivityMap = toActivityMetresMap(liveData.activityRows);
-        chrome.storage.local.get([KEY_BHA_GRID], (storedGrid) => {
-          const byJob      = storedGrid[KEY_BHA_GRID] ?? {};
-          const mergedJob  = { ...(byJob[String(jobId)] ?? {}) };
-          for (const [k, v] of Object.entries(liveMap))         mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
-          for (const [k, v] of Object.entries(liveActivityMap)) mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
+        const liveMap = toBhaGridMap(liveData.bhaRows);
+        chrome.storage.local.get([KEY_BHA_GRID, KEY_ACTIVITY_DAYS], (storedGrid) => {
+          const byJob = storedGrid[KEY_BHA_GRID] ?? {};
+          const mergedJob = { ...(byJob[String(jobId)] ?? {}) };
+          for (const [k, v] of Object.entries(liveMap)) mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
           byJob[String(jobId)] = mergedJob;
-          chrome.storage.local.set({ [KEY_BHA_GRID]: byJob });
+          const days = upsertActivityDayStorage(
+            storedGrid[KEY_ACTIVITY_DAYS] ?? {}, jobId, liveData.activityRows
+          );
+          chrome.storage.local.set({ [KEY_BHA_GRID]: byJob, [KEY_ACTIVITY_DAYS]: days });
         });
       }
 
@@ -2696,14 +2785,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       if (flags.bha && (liveData.bhaRows.length > 0 || liveData.activityRows.length > 0)) {
         const liveMap = toBhaGridMap(liveData.bhaRows);
-        const liveActivityMap = toActivityMetresMap(liveData.activityRows);
-        chrome.storage.local.get([KEY_BHA_GRID], (storedGrid) => {
+        chrome.storage.local.get([KEY_BHA_GRID, KEY_ACTIVITY_DAYS], (storedGrid) => {
           const byJob = storedGrid[KEY_BHA_GRID] ?? {};
           const mergedJob = { ...(byJob[String(jobId)] ?? {}) };
           for (const [k, v] of Object.entries(liveMap)) mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
-          for (const [k, v] of Object.entries(liveActivityMap)) mergedJob[k] = mergeNonEmpty(mergedJob[k], v);
           byJob[String(jobId)] = mergedJob;
-          chrome.storage.local.set({ [KEY_BHA_GRID]: byJob });
+          const days = upsertActivityDayStorage(
+            storedGrid[KEY_ACTIVITY_DAYS] ?? {}, jobId, liveData.activityRows
+          );
+          chrome.storage.local.set({ [KEY_BHA_GRID]: byJob, [KEY_ACTIVITY_DAYS]: days });
         });
       }
 
@@ -2863,7 +2953,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false;
     }
 
-    chrome.storage.local.get([KEY_BHA_GRID, KEY_JOB_RIG], (stored) => {
+    chrome.storage.local.get([KEY_BHA_GRID, KEY_JOB_RIG, KEY_ACTIVITY_DAYS], (stored) => {
       const byJob = stored[KEY_BHA_GRID] ?? {};
       const rigByJob = stored[KEY_JOB_RIG] ?? {};
       const jobMap = byJob[jobId] ?? {};
@@ -2877,9 +2967,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         changed = true;
       }
 
-      const actMap = toActivityMetresMap(activityRows);
-      for (const [bhaNum, m] of Object.entries(actMap)) {
-        jobMap[bhaNum] = mergeNonEmpty(jobMap[bhaNum] ?? {}, m);
+      const days = upsertActivityDayStorage(stored[KEY_ACTIVITY_DAYS] ?? {}, jobId, activityRows);
+      if (JSON.stringify(days) !== JSON.stringify(stored[KEY_ACTIVITY_DAYS] ?? {})) {
+        chrome.storage.local.set({ [KEY_ACTIVITY_DAYS]: days });
         changed = true;
       }
 

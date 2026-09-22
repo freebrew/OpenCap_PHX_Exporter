@@ -111,3 +111,4 @@ bas/live/
 # Perspective example renders (may be built from Field data - never commit)
 docs/corridor_ex_*.png
 docs/corridor_field_*.png
+docs/corridor_live.png

@@ -155,6 +155,7 @@ Private Function GeoWindowAtSurvey(ByVal survRow As Long, ByRef geoM As Double) 
         If InStr(1, fE, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
         If InStr(1, fF, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
         If InStr(1, fd, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
+        If Not MDL_ContDI.IsSlidesheetGoodSurveyRowOn(ws, r) Then GoTo NextR
         If Not IsNumeric(ws.Cells(r, 5).Value2) Then GoTo NextR
         If Not IsNumeric(ws.Cells(r, 6).Value2) Then GoTo NextR
         If Not IsNumeric(ws.Cells(r, 7).Value2) Then GoTo NextR
@@ -177,6 +178,10 @@ Private Function ReadNumericAb(ws As Worksheet, ByVal r As Long, ByRef geoM As D
     geoM = CDbl(v)
     ReadNumericAb = True
 End Function
+
+
+
+
 
 
 

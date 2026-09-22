@@ -25,8 +25,14 @@ Option Explicit
 '      Plan foot at actual TVD. Y = ahead/back, X = right/left; PRP = hypot.
 '
 '  Way points: AC14:AD33 (MD/TVD). Half-width: AB14.
-'  Actual N/E from min-curvature on E/F/G; TVD prefers H. LOOKUP rows skipped.
-'  PTB bit depth = column D on that survey row.
+'  Actual N/E from min-curvature on green survey rows only (Inc/Azm fill
+'  RGB 204,255,204). Yellow / other fills are user projections and are
+'  ignored for last-survey, plan offset, and PTB. LOOKUP rows skipped.
+'  PTB bit depth = column D on that last green survey row, whenever bit MD
+'  is ahead of the survey. Not gated on U2 (next named-target MD).
+'
+'  Plan foot is ALWAYS min-curvature between _OC_Survey stations (PlanAt /
+'  PlanAtTvd). Never lerp NS/EW/TVD — section plans only store course ends.
 ' ================================================================================
 
 Private Const SS_SHEET As String = "Slidesheet"
@@ -179,19 +185,70 @@ Private Sub PlanAt(ByVal md As Double, ByVal n As Long, _
 
     Dim f As Double
     If pMD(i + 1) > pMD(i) Then f = (md - pMD(i)) / (pMD(i + 1) - pMD(i)) Else f = 0#
-    outInc = pInc(i) + f * (pInc(i + 1) - pInc(i))
-    outN = pNS(i) + f * (pNS(i + 1) - pNS(i))
-    outE = pEW(i) + f * (pEW(i + 1) - pEW(i))
-    outV = pTvd(i) + f * (pTvd(i + 1) - pTvd(i))
+    If f <= 0# Then
+        outN = pNS(i): outE = pEW(i): outV = pTvd(i)
+        outAzi = pAzi(i): outInc = pInc(i)
+        Exit Sub
+    End If
+    If f >= 1# Then
+        outN = pNS(i + 1): outE = pEW(i + 1): outV = pTvd(i + 1)
+        outAzi = pAzi(i + 1): outInc = pInc(i + 1)
+        Exit Sub
+    End If
 
-    Dim s As Double, c As Double
-    s = (1# - f) * Sin(Deg2Rad(pAzi(i))) + f * Sin(Deg2Rad(pAzi(i + 1)))
-    c = (1# - f) * Cos(Deg2Rad(pAzi(i))) + f * Cos(Deg2Rad(pAzi(i + 1)))
-    If Abs(s) < 0.0000000001 And Abs(c) < 0.0000000001 Then
-        outAzi = pAzi(i)
+    ' Section plans store only course endpoints (KOP / hold / B&T / TD).
+    ' Lerping NS/EW/TVD across a 400 m turn is not the wellpath — Well Seeker
+    ' interpolates that course with minimum curvature. Same here.
+    InterpCourseDir pInc(i), pAzi(i), pInc(i + 1), pAzi(i + 1), f, outInc, outAzi
+    Dim dV As Double, dN As Double, dE As Double
+    McStep pMD(i), pInc(i), pAzi(i), md, outInc, outAzi, dV, dN, dE
+    outN = pNS(i) + dN
+    outE = pEW(i) + dE
+    outV = pTvd(i) + dV
+End Sub
+
+' Direction at fraction f along the min-curvature arc from (i1,a1) to (i2,a2).
+Private Sub InterpCourseDir(ByVal i1 As Double, ByVal a1 As Double, _
+                            ByVal i2 As Double, ByVal a2 As Double, _
+                            ByVal f As Double, _
+                            ByRef outInc As Double, ByRef outAzi As Double)
+    Dim n1 As Double, e1 As Double, v1 As Double
+    Dim n2 As Double, e2 As Double, v2 As Double
+    Dim cosB As Double, beta As Double, s As Double
+    Dim n As Double, e As Double, v As Double
+    Dim mag As Double
+
+    n1 = Sin(Deg2Rad(i1)) * Cos(Deg2Rad(a1))
+    e1 = Sin(Deg2Rad(i1)) * Sin(Deg2Rad(a1))
+    v1 = Cos(Deg2Rad(i1))
+    n2 = Sin(Deg2Rad(i2)) * Cos(Deg2Rad(a2))
+    e2 = Sin(Deg2Rad(i2)) * Sin(Deg2Rad(a2))
+    v2 = Cos(Deg2Rad(i2))
+
+    cosB = n1 * n2 + e1 * e2 + v1 * v2
+    If cosB > 1# Then cosB = 1#
+    If cosB < -1# Then cosB = -1#
+    beta = WorksheetFunction.Acos(cosB)
+    If beta < 0.0000001 Then
+        n = n1: e = e1: v = v1
     Else
-        outAzi = WorksheetFunction.Atan2(c, s) * 180# / PI
-        If outAzi < 0 Then outAzi = outAzi + 360#
+        s = Sin(beta)
+        n = (Sin((1# - f) * beta) * n1 + Sin(f * beta) * n2) / s
+        e = (Sin((1# - f) * beta) * e1 + Sin(f * beta) * e2) / s
+        v = (Sin((1# - f) * beta) * v1 + Sin(f * beta) * v2) / s
+    End If
+    mag = Sqr(n * n + e * e + v * v)
+    If mag > 0# Then
+        n = n / mag: e = e / mag: v = v / mag
+    End If
+    If v > 1# Then v = 1#
+    If v < -1# Then v = -1#
+    outInc = WorksheetFunction.Acos(v) * 180# / PI
+    If Abs(n) < 0.0000000001 And Abs(e) < 0.0000000001 Then
+        outAzi = a1
+    Else
+        outAzi = WorksheetFunction.Atan2(n, e) * 180# / PI
+        If outAzi < 0# Then outAzi = outAzi + 360#
     End If
 End Sub
 
@@ -200,34 +257,40 @@ Private Sub PlanAtTvd(ByVal tvd As Double, ByVal n As Long, _
                       pTvd() As Double, pNS() As Double, pEW() As Double, _
                       ByRef outN As Double, ByRef outE As Double, ByRef outV As Double, _
                       ByRef outAzi As Double, ByRef outInc As Double)
-    Dim i As Long, f As Double
-    Dim lo As Double, hi As Double
-    Dim s As Double, c As Double
+    Dim i As Long
+    Dim loMd As Double, hiMd As Double, midMd As Double
+    Dim tLo As Double, tHi As Double, tMid As Double
+    Dim tvUp As Boolean
+    Dim dummyN As Double, dummyE As Double, dummyA As Double, dummyI As Double
+    Dim iter As Long
+    Dim bestI As Long
+    Dim bestD As Double
 
     For i = 0 To n - 2
-        lo = pTvd(i): hi = pTvd(i + 1)
-        If Abs(hi - lo) < 0.0001 Then GoTo NextTvdSeg
-        If (tvd >= lo And tvd <= hi) Or (tvd >= hi And tvd <= lo) Then
-            f = (tvd - lo) / (hi - lo)
-            outInc = pInc(i) + f * (pInc(i + 1) - pInc(i))
-            outN = pNS(i) + f * (pNS(i + 1) - pNS(i))
-            outE = pEW(i) + f * (pEW(i + 1) - pEW(i))
-            outV = tvd
-            s = (1# - f) * Sin(Deg2Rad(pAzi(i))) + f * Sin(Deg2Rad(pAzi(i + 1)))
-            c = (1# - f) * Cos(Deg2Rad(pAzi(i))) + f * Cos(Deg2Rad(pAzi(i + 1)))
-            If Abs(s) < 0.0000000001 And Abs(c) < 0.0000000001 Then
-                outAzi = pAzi(i)
-            Else
-                outAzi = WorksheetFunction.Atan2(c, s) * 180# / PI
-                If outAzi < 0 Then outAzi = outAzi + 360#
-            End If
+        tLo = pTvd(i): tHi = pTvd(i + 1)
+        If Abs(tHi - tLo) < 0.0001 Then GoTo NextTvdSeg
+        If (tvd >= tLo And tvd <= tHi) Or (tvd >= tHi And tvd <= tLo) Then
+            loMd = pMD(i): hiMd = pMD(i + 1)
+            tvUp = (tHi >= tLo)
+            For iter = 1 To 28
+                midMd = (loMd + hiMd) / 2#
+                PlanAt midMd, n, pMD, pInc, pAzi, pTvd, pNS, pEW, _
+                       dummyN, dummyE, tMid, dummyA, dummyI
+                If (tvUp And tMid < tvd) Or ((Not tvUp) And tMid > tvd) Then
+                    loMd = midMd
+                Else
+                    hiMd = midMd
+                End If
+            Next iter
+            PlanAt (loMd + hiMd) / 2#, n, pMD, pInc, pAzi, pTvd, pNS, pEW, _
+                   outN, outE, outV, outAzi, outInc
             Exit Sub
         End If
 NextTvdSeg:
     Next i
 
-    Dim bestI As Long: bestI = 0
-    Dim bestD As Double: bestD = Abs(pTvd(0) - tvd)
+    bestI = 0
+    bestD = Abs(pTvd(0) - tvd)
     For i = 1 To n - 1
         If Abs(pTvd(i) - tvd) < bestD Then
             bestD = Abs(pTvd(i) - tvd)
@@ -333,6 +396,7 @@ Private Function ActualAtLastSurvey(ws As Worksheet, _
     Dim r As Long
     For r = SURV_ROW_FIRST To SURV_ROW_LAST
         If IsSurveySummaryRow(ws, r) Then GoTo NextSurveyRow
+        If Not MDL_ContDI.IsSlidesheetGoodSurveyRowOn(ws, r) Then GoTo NextSurveyRow
 
         Dim vMd As Variant, vInc As Variant, vAzi As Variant
         vMd = ws.Cells(r, 5).Value2
@@ -418,6 +482,9 @@ Private Sub RenderPlanGaugeCore()
     Dim sMD As Double, sInc As Double, sAzi As Double
     Dim sN As Double, sE As Double, sV As Double
     Dim lastRow As Long, nSurv As Long
+    On Error Resume Next
+    MDL_SlidesheetClear.SyncLastGreenSurveyStrip
+    On Error GoTo 0
     nSurv = ActualAtLastSurvey(ws, sMD, sInc, sAzi, sN, sE, sV, lastRow)
 
     If nPlan < 2 Or nSurv < 1 Then
@@ -459,10 +526,9 @@ Private Sub RenderPlanGaugeCore()
     FrameComponents gravityMode, plAzi, dN, dE, dTvdUp, ax, ay, frameInc
     Dim showPtb As Boolean: showPtb = False
     Dim bx As Double, by As Double
-    Dim tarStart As Variant: tarStart = ws.Range("U2").Value2
     Dim bitMd As Variant: bitMd = ws.Cells(lastRow, 4).Value2
-    If IsNumeric(tarStart) And IsNumeric(bitMd) Then
-        If sMD >= CDbl(tarStart) And CDbl(bitMd) > sMD Then
+    If IsNumeric(bitMd) Then
+        If CDbl(bitMd) > sMD + 0.01 Then
             Dim incB As Double, azB As Double
             Dim vW As Variant: vW = ws.Cells(lastRow, 23).Value2
             Dim vX As Variant: vX = ws.Cells(lastRow, 24).Value2
@@ -470,7 +536,17 @@ Private Sub RenderPlanGaugeCore()
             If IsNumeric(vX) And Len(CStr(vX & "")) > 0 Then azB = CDbl(vX) Else azB = sAzi
 
             Dim stepV As Double, stepN As Double, stepE As Double
-            McStep sMD, sInc, sAzi, CDbl(bitMd), incB, azB, stepV, stepN, stepE
+            Dim moB As Double, walked As Boolean
+            moB = 0#
+            If IsNumeric(ws.Cells(lastRow, 35).Value2) Then moB = CDbl(ws.Cells(lastRow, 35).Value2)
+            walked = MDL_ProjBit.ProjWalkToBit(sMD, sInc, sAzi, CDbl(bitMd), moB, _
+                        ws.Range("R13:R505"), ws.Range("S13:S505"), ws.Range("U13:U505"), _
+                        incB, azB, stepV, stepN, stepE)
+            If Not walked Then
+                If IsNumeric(vW) And Len(CStr(vW & "")) > 0 Then incB = CDbl(vW) Else incB = sInc
+                If IsNumeric(vX) And Len(CStr(vX & "")) > 0 Then azB = CDbl(vX) Else azB = sAzi
+                McStep sMD, sInc, sAzi, CDbl(bitMd), incB, azB, stepV, stepN, stepE
+            End If
 
             Dim bitTvd As Double: bitTvd = actTvd + stepV
             Dim pbN As Double, pbE As Double, pbV As Double, pbAzi As Double, pbInc As Double
@@ -514,16 +590,17 @@ Private Sub RenderPlanGaugeCore()
         If scaleS < 0.5 Then scaleS = 0.5
     End If
 
+    Dim magA0 As Double, magB0 As Double
+    magA0 = Sqr(ax * ax + ay * ay)
+    magB0 = Sqr(bx * bx + by * by)
     If Not hasBand Then
         scaleS = halfW
         If scaleS <= 0# Then scaleS = 1#
-        Dim magA0 As Double, magB0 As Double
-        magA0 = Sqr(ax * ax + ay * ay)
-        magB0 = Sqr(bx * bx + by * by)
         If magA0 > scaleS Then scaleS = magA0
-        If showPtb And magB0 > scaleS Then scaleS = magB0
         If scaleS < 0.5 Then scaleS = 0.5
     End If
+    If showPtb And magB0 > scaleS Then scaleS = magB0 * 1.15
+    If scaleS < 0.5 Then scaleS = 0.5
 
     DrawGauge ws, True, ax, ay, IIf(gravityMode, "GRAV", "MAG"), showPtb, bx, by, _
               "", hasBand, yTop, yBot, scaleS
@@ -624,7 +701,7 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
         AddGaugeText ws, SHP_PREFIX & "PtbHdr", textX, yPtb, textW, FS_HDR + 1, _
                      "PTB", cGrid(), FS_HDR, True
         AddGaugeText ws, SHP_PREFIX & "PtbY", textX, yPtb + rowH, textW + 10, FS_VAL + 1, _
-                     "off target", cGrid(), FS_VAL, False
+                     "at survey", cGrid(), FS_VAL, False
     End If
 
 Reprotect:
@@ -918,6 +995,21 @@ Public Sub PG_PlanAt(ByVal md As Double, ByVal n As Long, _
     PlanAt md, n, pMD, pInc, pAzi, pTvd, pNS, pEW, outN, outE, outV, outAzi, outInc
 End Sub
 
+Public Sub PG_PlanAtTvd(ByVal tvd As Double, ByVal n As Long, _
+                        pMD() As Double, pInc() As Double, pAzi() As Double, _
+                        pTvd() As Double, pNS() As Double, pEW() As Double, _
+                        ByRef outN As Double, ByRef outE As Double, ByRef outV As Double, _
+                        ByRef outAzi As Double, ByRef outInc As Double)
+    PlanAtTvd tvd, n, pMD, pInc, pAzi, pTvd, pNS, pEW, outN, outE, outV, outAzi, outInc
+End Sub
+
+Public Sub PG_InterpCourseDir(ByVal i1 As Double, ByVal a1 As Double, _
+                              ByVal i2 As Double, ByVal a2 As Double, _
+                              ByVal f As Double, _
+                              ByRef outInc As Double, ByRef outAzi As Double)
+    InterpCourseDir i1, a1, i2, a2, f, outInc, outAzi
+End Sub
+
 Public Sub PG_McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
                      ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
                      ByRef dV As Double, ByRef dN As Double, ByRef dE As Double)
@@ -943,6 +1035,12 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
+
+
+
+
 
 
 

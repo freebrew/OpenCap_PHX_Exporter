@@ -294,10 +294,11 @@ End Function
 '                    more turn than the hole has shown it delivers)
 '   opposite sign / no N -> dial (demonstrated TF is rotary noise; trust intent)
 '   dial 0 / HS   -> 0 walk (high side turns nothing)
-' A BLANK dial never reaches here: ProjAzmAtBit / ProjIncAtBit treat a blank
-' U as a pure rotary stand (bit attitude = survey attitude, no build, no walk).
-' N/O arrive as arguments so Excel owns the recalc dependency — never read
-' via Application.Caller (no dependency edge → stale AZM on recalc).
+' A BLANK this-row dial is not "hold the survey." Leftover metres to the bit
+' were already drilled: replay each overlapping R/S slide at that row's U,
+' and hold only the rotary gaps. N/O arrive as arguments so Excel owns the
+' recalc dependency — never read via Application.Caller (no dependency edge
+' → stale AZM on recalc).
 Private Function ResolveWalkTf(ByVal tfDeg As Variant, _
                                ByVal seenTf As Variant, ByVal seenLR As Variant) As Double
     Dim tfD As Double, tfE As Double
@@ -312,19 +313,185 @@ Private Function ResolveWalkTf(ByVal tfDeg As Variant, _
     End If
 End Function
 
-' tfDeg is the parsed dial (Slidesheet AK). Blank = no slide entered on this
-' stand = PURE ROTARY: the bit is projected on the survey attitude (no build,
-' no walk). An error (unparseable U text) is passed through so W/X show it.
+' Replay already-drilled unseen hole (survey MD → bit MD): each overlapping
+' Slide From/To (R/S) uses that row's Toolface (U). Gaps are rotary holds.
+' Later rows win on overlap. tfDep is an Excel dirty hook (usually $U$13:$U$505).
+Private Sub TouchTfDep(ByVal tfDep As Variant)
+    Dim dump As Variant
+    On Error Resume Next
+    If IsMissing(tfDep) Then Exit Sub
+    If TypeName(tfDep) = "Range" Then dump = tfDep.Cells(1, 1).Value2
+    On Error GoTo 0
+End Sub
+
+Public Function ProjWalkToBit(ByVal survMd As Double, ByVal survInc As Double, _
+                              ByVal survAzm As Double, ByVal bitMd As Double, _
+                              ByVal motorOut As Double, _
+                              ByVal slideFrom As Range, ByVal slideTo As Range, _
+                              ByVal tfCol As Range, _
+                              ByRef outInc As Double, ByRef outAzm As Double, _
+                              ByRef outDt As Double, ByRef outDn As Double, _
+                              ByRef outDe As Double) As Boolean
+    ProjWalkToBit = WalkUnseenToBit(survMd, survInc, survAzm, bitMd, motorOut, _
+                                    slideFrom, slideTo, tfCol, _
+                                    outInc, outAzm, outDt, outDn, outDe)
+End Function
+
+Private Function WalkUnseenToBit(ByVal survMd As Double, ByVal survInc As Double, _
+                                 ByVal survAzm As Double, ByVal bitMd As Double, _
+                                 ByVal motorOut As Double, _
+                                 ByVal slideFrom As Range, ByVal slideTo As Range, _
+                                 ByVal tfCol As Range, _
+                                 ByRef outInc As Double, ByRef outAzm As Double, _
+                                 ByRef outDt As Double, ByRef outDn As Double, _
+                                 ByRef outDe As Double) As Boolean
+    Dim nr As Long, i As Long, j As Long, nc As Long, nB As Long
+    Dim a As Double, b As Double, mid As Double, md1 As Double, md2 As Double
+    Dim tf As Double, dB As Double, i2 As Double, a2 As Double
+    Dim sdt As Double, sdn As Double, sde As Double
+    Dim bestRow As Long, parsed As Variant
+    Dim va As Variant, vb As Variant, vu As Variant
+    Dim ca() As Double, cB() As Double, cTf() As Double, cRow() As Long
+    Dim brk() As Double
+    Dim inc As Double, azm As Double
+
+    WalkUnseenToBit = False
+    outInc = survInc: outAzm = survAzm
+    outDt = 0#: outDn = 0#: outDe = 0#
+    If bitMd <= survMd + 0.01 Then Exit Function
+    If slideFrom Is Nothing Or slideTo Is Nothing Or tfCol Is Nothing Then Exit Function
+    nr = slideFrom.Rows.Count
+    If nr < 1 Then Exit Function
+
+    ReDim ca(1 To nr)
+    ReDim cB(1 To nr)
+    ReDim cTf(1 To nr)
+    ReDim cRow(1 To nr)
+    nc = 0
+    For i = 1 To nr
+        va = slideFrom.Cells(i, 1).Value2
+        vb = slideTo.Cells(i, 1).Value2
+        If Not HasNum(va) Or Not HasNum(vb) Then GoTo NextClip
+        a = CDbl(va): b = CDbl(vb)
+        If b <= a + 0.001 Then GoTo NextClip
+        If a < survMd Then a = survMd
+        If b > bitMd Then b = bitMd
+        If b <= a + 0.001 Then GoTo NextClip
+        vu = tfCol.Cells(i, 1).Value2
+        parsed = ProjParseTF(vu)
+        If isError(parsed) Or Not HasNum(parsed) Then GoTo NextClip
+        nc = nc + 1
+        ca(nc) = a: cB(nc) = b: cTf(nc) = CDbl(parsed): cRow(nc) = i
+NextClip:
+    Next i
+
+    nB = 2 + nc * 2
+    ReDim brk(1 To nB)
+    brk(1) = survMd: brk(2) = bitMd: nB = 2
+    For i = 1 To nc
+        nB = nB + 1: brk(nB) = ca(i)
+        nB = nB + 1: brk(nB) = cB(i)
+    Next i
+    For i = 1 To nB - 1
+        For j = i + 1 To nB
+            If brk(j) < brk(i) Then
+                mid = brk(i): brk(i) = brk(j): brk(j) = mid
+            End If
+        Next j
+    Next i
+    j = 1
+    For i = 2 To nB
+        If brk(i) - brk(j) > 0.0005 Then
+            j = j + 1
+            brk(j) = brk(i)
+        End If
+    Next i
+    nB = j
+
+    inc = survInc: azm = survAzm
+    For i = 1 To nB - 1
+        md1 = brk(i): md2 = brk(i + 1)
+        If md2 - md1 < 0.001 Then GoTo NextSeg
+        mid = (md1 + md2) / 2#
+        bestRow = 0: tf = 0#
+        For j = 1 To nc
+            If ca(j) <= mid + 0.0005 And mid < cB(j) - 0.0000001 Then
+                If cRow(j) >= bestRow Then
+                    bestRow = cRow(j)
+                    tf = cTf(j)
+                End If
+            End If
+        Next j
+        If bestRow > 0 And motorOut > EPS Then
+            dB = motorOut / 30# * (md2 - md1)
+            i2 = inc + dB * Cos(Deg2Rad(tf))
+            a2 = Wrap360(azm + AzmWalkDeg(inc, dB, tf))
+        Else
+            i2 = inc: a2 = azm
+        End If
+        If i2 < 0# Then i2 = 0#
+        If i2 > 180# Then i2 = 180#
+        MinCurveStep md1, inc, azm, md2, i2, a2, sdt, sdn, sde
+        outDt = outDt + sdt: outDn = outDn + sdn: outDe = outDe + sde
+        inc = i2: azm = a2
+NextSeg:
+    Next i
+    outInc = inc: outAzm = azm
+    WalkUnseenToBit = True
+End Function
+
+Private Function TryWalkFromCaller(ByVal motorOut As Double, _
+                                   ByRef outInc As Double, ByRef outAzm As Double, _
+                                   ByRef outDt As Double, ByRef outDn As Double, _
+                                   ByRef outDe As Double) As Boolean
+    Dim c As Range, ws As Worksheet, r As Long
+    Dim survMd As Double, bitMd As Double, survInc As Double, survAzm As Double
+    Dim mo As Double
+    On Error GoTo Fail
+    TryWalkFromCaller = False
+    Set c = Application.Caller
+    If c Is Nothing Then Exit Function
+    Set ws = c.Parent
+    r = c.Row
+    If Not HasNum(ws.Cells(r, 5).Value2) Or Not HasNum(ws.Cells(r, 4).Value2) Then Exit Function
+    If Not HasNum(ws.Cells(r, 6).Value2) Or Not HasNum(ws.Cells(r, 7).Value2) Then Exit Function
+    survMd = CDbl(ws.Cells(r, 5).Value2)
+    bitMd = CDbl(ws.Cells(r, 4).Value2)
+    survInc = CDbl(ws.Cells(r, 6).Value2)
+    survAzm = CDbl(ws.Cells(r, 7).Value2)
+    mo = motorOut
+    If mo <= EPS And HasNum(ws.Cells(r, 35).Value2) Then mo = CDbl(ws.Cells(r, 35).Value2)
+    TryWalkFromCaller = WalkUnseenToBit(survMd, survInc, survAzm, bitMd, mo, _
+                                        ws.Range("R13:R505"), ws.Range("S13:S505"), _
+                                        ws.Range("U13:U505"), _
+                                        outInc, outAzm, outDt, outDn, outDe)
+    Exit Function
+Fail:
+    TryWalkFromCaller = False
+End Function
+
+' tfDeg is this-row AK (next-stand dial). Unseen hole is walked from R/S/U
+' first: leftover slide already has a recorded toolface. This-row TF only
+' applies to leftover when no overlapping R/S exists (legacy single-TF path).
+' An error (unparseable U text) is passed through so W/X show it.
 Public Function ProjIncAtBit(ByVal survInc As Variant, ByVal dls As Variant, _
                              ByVal course As Variant, ByVal mSeen As Variant, _
                              ByVal mBelow As Variant, ByVal tfDeg As Variant, _
-                             Optional ByVal motorOut As Variant) As Variant
+                             Optional ByVal motorOut As Variant, _
+                             Optional ByVal tfDep As Variant) As Variant
     Dim ci As Double, dg As Double, co As Double, ms As Double, mb As Double, tf As Double
-    Dim dB As Double
+    Dim dB As Double, mo As Double
+    Dim wI As Double, wA As Double, wt As Double, wN As Double, wE As Double
     On Error GoTo Fail
+    TouchTfDep tfDep
     If Not HasNum(survInc) Then ProjIncAtBit = "": Exit Function
     ci = CDbl(survInc)
     If isError(tfDeg) Then ProjIncAtBit = tfDeg: Exit Function
+    If HasNum(motorOut) Then mo = CDbl(motorOut) Else mo = SafeNum(dls)
+    If TryWalkFromCaller(mo, wI, wA, wt, wN, wE) Then
+        ProjIncAtBit = wI
+        Exit Function
+    End If
     If Not HasNum(tfDeg) Then ProjIncAtBit = ci: Exit Function
     dg = SafeNum(dls): co = SafeNum(course): ms = SafeNum(mSeen)
     mb = SafeNum(mBelow): tf = SafeNum(tfDeg)
@@ -345,15 +512,23 @@ Public Function ProjAzmAtBit(ByVal survInc As Variant, ByVal survAzm As Variant,
                              ByVal tfDeg As Variant, _
                              Optional ByVal seenTf As Variant, _
                              Optional ByVal seenLR As Variant, _
-                             Optional ByVal motorOut As Variant) As Variant
+                             Optional ByVal motorOut As Variant, _
+                             Optional ByVal tfDep As Variant) As Variant
     Dim ci As Double, ca As Double, dg As Double, co As Double, ms As Double, mb As Double, tf As Double
-    Dim dB As Double
+    Dim dB As Double, mo As Double
+    Dim wI As Double, wA As Double, wt As Double, wN As Double, wE As Double
     On Error GoTo Fail
+    TouchTfDep tfDep
     If Not HasNum(survInc) Or Not HasNum(survAzm) Then ProjAzmAtBit = "": Exit Function
     ci = CDbl(survInc)
     ca = CDbl(survAzm)
     If isError(tfDeg) Then ProjAzmAtBit = tfDeg: Exit Function
-    If Not HasNum(tfDeg) Then ProjAzmAtBit = ca: Exit Function   ' blank U = pure rotary
+    If HasNum(motorOut) Then mo = CDbl(motorOut) Else mo = SafeNum(dls)
+    If TryWalkFromCaller(mo, wI, wA, wt, wN, wE) Then
+        ProjAzmAtBit = wA
+        Exit Function
+    End If
+    If Not HasNum(tfDeg) Then ProjAzmAtBit = ca: Exit Function
     dg = SafeNum(dls): co = SafeNum(course): ms = SafeNum(mSeen)
     mb = SafeNum(mBelow)
     tf = ResolveWalkTf(tfDeg, seenTf, seenLR)
@@ -371,14 +546,22 @@ End Function
 Public Function ProjTvdAtBit(ByVal survMd As Variant, ByVal survInc As Variant, _
                              ByVal survAzm As Variant, ByVal survTvd As Variant, _
                              ByVal bitMd As Variant, ByVal incBit As Variant, _
-                             ByVal azmBit As Variant) As Variant
-    Dim dt As Double, dN As Double, dE As Double
+                             ByVal azmBit As Variant, _
+                             Optional ByVal tfDep As Variant) As Variant
+    Dim dt As Double, dN As Double, dE As Double, mo As Double
+    Dim wI As Double, wA As Double
     On Error GoTo Fail
+    TouchTfDep tfDep
     If Not HasNum(survMd) Or Not HasNum(survInc) Or Not HasNum(survAzm) Or Not HasNum(survTvd) Then
         ProjTvdAtBit = "": Exit Function
     End If
     If Not HasNum(bitMd) Or Not HasNum(incBit) Or Not HasNum(azmBit) Then
         ProjTvdAtBit = "": Exit Function
+    End If
+    mo = 0#
+    If TryWalkFromCaller(mo, wI, wA, dt, dN, dE) Then
+        ProjTvdAtBit = CDbl(survTvd) + dt
+        Exit Function
     End If
     MinCurveStep CDbl(survMd), CDbl(survInc), CDbl(survAzm), _
                  CDbl(bitMd), CDbl(incBit), CDbl(azmBit), dt, dN, dE
@@ -425,7 +608,7 @@ Fail:
     ProjCumE = CVErr(xlErrNum)
 End Function
 
-' Linear INC/AZM interpolate on plan (PROJBIT att)
+' Min-curvature INC/AZM at MD q on the target table (same slerp as PlanAt).
 Private Sub PlanAtt(ByRef m() As Double, ByRef i() As Double, ByRef a() As Double, _
                     ByVal n As Long, ByVal q As Double, ByRef outI As Double, ByRef outA As Double)
     Dim j As Long, t As Double
@@ -439,24 +622,34 @@ Private Sub PlanAtt(ByRef m() As Double, ByRef i() As Double, ByRef a() As Doubl
         j = j + 1
     Loop
     If j > n Then j = n
+    If Abs(m(j) - m(j - 1)) < EPS Then
+        outI = i(j): outA = a(j): Exit Sub
+    End If
     t = (q - m(j - 1)) / (m(j) - m(j - 1))
-    outI = i(j - 1) + t * (i(j) - i(j - 1))
-    outA = Wrap360(a(j - 1) + t * Wrap180(a(j) - a(j - 1)))
+    MDL_PlanGauge.PG_InterpCourseDir i(j - 1), a(j - 1), i(j), a(j), t, outI, outA
 End Sub
 
-Private Function PlanTvdLin(ByRef m() As Double, ByRef tv() As Double, _
-                            ByVal n As Long, ByVal q As Double) As Double
-    Dim j As Long, f As Double
-    If n < 1 Then PlanTvdLin = 0#: Exit Function
-    If q <= m(1) Then PlanTvdLin = tv(1): Exit Function
-    If q >= m(n) Then PlanTvdLin = tv(n): Exit Function
+' Min-curvature TVD at MD q on the target table (McStep from the course start).
+Private Function PlanTvdMc(ByRef m() As Double, ByRef i() As Double, ByRef a() As Double, _
+                           ByRef tv() As Double, ByVal n As Long, ByVal q As Double) As Double
+    Dim j As Long, t As Double
+    Dim outI As Double, outA As Double
+    Dim dTvd As Double, dN As Double, dE As Double
+    If n < 1 Then PlanTvdMc = 0#: Exit Function
+    If q <= m(1) Then PlanTvdMc = tv(1): Exit Function
+    If q >= m(n) Then PlanTvdMc = tv(n): Exit Function
     j = 2
     Do While j <= n And m(j) < q
         j = j + 1
     Loop
     If j > n Then j = n
-    f = (q - m(j - 1)) / (m(j) - m(j - 1))
-    PlanTvdLin = tv(j - 1) + f * (tv(j) - tv(j - 1))
+    If Abs(m(j) - m(j - 1)) < EPS Then
+        PlanTvdMc = tv(j): Exit Function
+    End If
+    t = (q - m(j - 1)) / (m(j) - m(j - 1))
+    MDL_PlanGauge.PG_InterpCourseDir i(j - 1), a(j - 1), i(j), a(j), t, outI, outA
+    MinCurveStep m(j - 1), i(j - 1), a(j - 1), q, outI, outA, dTvd, dN, dE
+    PlanTvdMc = tv(j - 1) + dTvd
 End Function
 
 ' Load target columns from a vertical range (MD, INC, AZM, TVD) — each a column vector
@@ -678,7 +871,7 @@ Private Function ComputeAim(ByVal bitMd As Double, ByVal incBit As Double, _
     burr = (ti - incBit) * 30# / dist
     reqTf = ToolfaceBetweenDeg(incBit, azmBit, ti, ta)
     aimInc = ti
-    aimTvd = PlanTvdLin(m, tv, n, q)
+    aimTvd = PlanTvdMc(m, i, a, tv, n, q)
     ComputeAim = True
 End Function
 
@@ -1140,11 +1333,13 @@ End Function
 
 ' Used for MtrBelow: the slide footage the survey has not seen yet.
 Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Variant, _
-                                       ByVal slideFrom As Range, ByVal slideTo As Range) As Variant
+                                       ByVal slideFrom As Range, ByVal slideTo As Range, _
+                                       Optional ByVal tfDep As Variant) As Variant
     Dim lo As Double, hi As Double, tot As Double
     Dim r As Long, a As Double, b As Double
     Dim va As Variant, vb As Variant
     On Error GoTo Fail
+    TouchTfDep tfDep
     If Not HasNum(fromMd) Or Not HasNum(toMd) Then
         ProjSlideMetersBetween = 0#
         Exit Function
@@ -1172,6 +1367,14 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
 Fail:
     ProjSlideMetersBetween = CVErr(xlErrNum)
 End Function
+
+
+
+
+
+
+
+
 
 
 

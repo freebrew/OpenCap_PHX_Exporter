@@ -49,25 +49,28 @@
     ".cdk-overlay-pane",
   ].join(",");
 
-  // Daily Activities footer (dark strip): distance totals use R:/S:/T: with decimal
-  // metres; duration columns use H:MM — match only decimal patterns so we do not
-  // confuse R: 3:35 (time) with metres.
-  const parseActivityMetreFooter = (tableEl) => {
+  // Daily Activities footer (dark strip): R:/S:/T: metres are decimals (14.36);
+  // R:/S:/T: duration is H:MM (10:58). Keep the two patterns separate.
+  const parseActivityFooter = (tableEl) => {
     const text = tableEl.innerText ?? "";
     const rm = text.match(/\bR:\s*([\d,]+\.\d{2})\b/);
     const sm = text.match(/\bS:\s*([\d,]+\.\d{2})\b/);
+    const rt = text.match(/\bR:\s*(\d{1,3}:\d{2})\b/);
+    const st = text.match(/\bS:\s*(\d{1,3}:\d{2})\b/);
     const rot = rm ? Number(rm[1].replace(/,/g, "")) : null;
     const slide = sm ? Number(sm[1].replace(/,/g, "")) : null;
     return {
       rot: Number.isFinite(rot) ? rot : null,
       slide: Number.isFinite(slide) ? slide : null,
+      rotHrs: rt ? rt[1] : "",
+      slideHrs: st ? st[1] : "",
     };
   };
 
-  const findActivityMetreFooterOnPage = () => {
+  const findActivityFooterOnPage = () => {
     for (const table of document.querySelectorAll("table")) {
-      const ft = parseActivityMetreFooter(table);
-      if (ft.slide != null || ft.rot != null) return ft;
+      const ft = parseActivityFooter(table);
+      if (ft.slide != null || ft.rot != null || ft.slideHrs || ft.rotHrs) return ft;
     }
     return null;
   };
@@ -272,34 +275,43 @@
     return s;
   };
 
-  const attachActivityBhaContext = (rawRows, ctx) =>
-    rawRows.map((r) => {
+  // Blank BHA cells mean "same assembly as the row above" when a new BHA is
+  // added mid-day. Carry the last explicit number forward; ctx is last resort.
+  const attachActivityBhaContext = (rawRows, ctx) => {
+    let lastBha = "";
+    return rawRows.map((r) => {
       const explicit = rowExplicitBha(r);
       if (explicit) {
+        lastBha = explicit;
         const { __bha, ...rest } = r;
         return rest;
       }
-      if (ctx?.bha) return { ...r, __bha: ctx.bha };
+      const fill = lastBha || ctx?.bha || "";
+      if (fill) return { ...r, __bha: fill };
       return r;
     });
+  };
 
-  // Footer R:/S: totals are for the whole visible daily table; only merge them
-  // when a single BHA is represented in the grid — otherwise they double-count
-  // across BHAs or attach the full-day total to ctx.bha only.
+  // Footer R:/S: is the whole visible day. Use it only when every row is the
+  // same BHA (or BHA is blank and carried). Two BHAs on one report → ignore
+  // the footer and sum each row's Course/Duration by that row's BHA #.
   const buildActivityRowsWithOptionalFooter = (activityRowsRaw, ctx, footerFt) => {
     const distinct = distinctExplicitBhas(activityRowsRaw);
     const multiBhaDay = distinct.size >= 2;
+    const soleBha = distinct.size === 1 ? [...distinct][0] : (ctx?.bha || "");
     const footerOk =
-      ctx &&
+      !!soleBha &&
       !multiBhaDay &&
       footerFt &&
-      (footerFt.slide != null || footerFt.rot != null);
+      (footerFt.slide != null || footerFt.rot != null || footerFt.slideHrs || footerFt.rotHrs);
     const footerRow = footerOk
       ? [{
-          __bha: ctx.bha,
+          __bha: soleBha,
           __activityFooter: true,
           __footerSlideMetres: footerFt.slide != null ? String(footerFt.slide) : "",
           __footerRotateMetres: footerFt.rot != null ? String(footerFt.rot) : "",
+          __footerSlideHours: footerFt.slideHrs || "",
+          __footerRotateHours: footerFt.rotHrs || "",
         }]
       : [];
     const body = attachActivityBhaContext(activityRowsRaw, ctx);
@@ -429,7 +441,15 @@
       const hasHdr = (re) => hKeys.some((k) => re.test(k));
       let tableType = "unknown";
 
-      if (hasHdr(/^bha\d*$/) || hasHdr(/^toolassembly\d*$/) || hasHdr(/^toolassemblynumber$/)) {
+      // Daily Activities has a BHA column — classify it as activities BEFORE
+      // the BHA-equipment grid, or Duration / Course never get scraped.
+      const looksLikeActivities =
+        (hasHdr(/^activitycode$/) || hasHdr(/^activity$/)) &&
+        (hasHdr(/^duration$/) || hasHdr(/^course$/) || hasHdr(/^startend$/));
+
+      if (looksLikeActivities) {
+        tableType = "activities";
+      } else if (hasHdr(/^bha\d*$/) || hasHdr(/^toolassembly\d*$/) || hasHdr(/^toolassemblynumber$/)) {
         tableType = "bha";
       } else if (
         (hasHdr(/^ticketdate$/) || hasHdr(/^ticketday$/)) &&
@@ -438,11 +458,6 @@
         tableType = "tickets";
       } else if (hasHdr(/^jobhours$/) || hasHdr(/^hsls$/)) {
         tableType = "tools";
-      } else if (
-        (hasHdr(/^activitycode$/) || hasHdr(/^activity$/)) &&
-        (hasHdr(/^duration$/) || hasHdr(/^course$/))
-      ) {
-        tableType = "activities";
       } else if (
         hasHdr(/course|metre|meter/i) &&
         hasHdr(/activity|code/i) &&
@@ -512,7 +527,7 @@
     const activityRowsRaw = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
     const ticketRows = tables.filter((t) => t.tableType === "tickets").flatMap((t) => t.rows);
     const ctx       = detectBhaContext();
-    const footerFt  = findActivityMetreFooterOnPage();
+    const footerFt  = findActivityFooterOnPage();
     const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
     const rigName = detectRigNameFromPage();
 
@@ -593,7 +608,7 @@
         const activityRowsRaw = tables.filter((t) => t.tableType === "activities").flatMap((t) => t.rows);
         const ticketRows = tables.filter((t) => t.tableType === "tickets").flatMap((t) => t.rows);
         const ctx      = detectBhaContext();
-        const footerFt = findActivityMetreFooterOnPage();
+        const footerFt = findActivityFooterOnPage();
         const activityRows = buildActivityRowsWithOptionalFooter(activityRowsRaw, ctx, footerFt);
         const rigName = detectRigNameFromPage();
         const componentRows = ctx

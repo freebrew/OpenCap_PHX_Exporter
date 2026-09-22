@@ -1,9 +1,10 @@
 Attribute VB_Name = "MDL_DayRoll"
 Option Explicit
 
-' Autofill a new day-row in Data!H4:V22 from the RAW BHA SUMMARY mirror
+' Autofill the current day-row in Data!H4:V22 from the RAW BHA SUMMARY mirror
 ' at Data!H35:M47 (BHA totals). Meters Sliding + Time Sliding are deltas
-' against rows already entered. Bit/Circ hours come from a Pason-totals form.
+' against prior rows. The current row is overwritten when refreshed so stale
+' zeros do not block updated OpenCap totals. Bit/Circ hours come from a form.
 '
 ' Hours units:
 '   OpenCap / mirror K column = decimal hours (fraction = hundredths of an hour,
@@ -36,6 +37,7 @@ Public gDayRoll_BHA As Long
 Public gDayRoll_Period As String
 Public gDayRoll_PriorBit As Double
 Public gDayRoll_PriorCirc As Double
+Public gDayRoll_PriorSlide As Double
 Public gDayRoll_SlideHrs As Double
 Public gDayRoll_StartDepth As Double
 Public gDayRoll_HasStartDepth As Boolean
@@ -63,7 +65,7 @@ Public Sub DayRoll_OnDataChange(ByVal Target As Range)
         period = Trim$(CStr(cell.Value & ""))
         If IsValidPeriod(period) Then
             ' Always show the End Depth / Pason hours form when H is set.
-            ' FillSlideMetrics only writes blank L/M/N; it does not overwrite.
+            ' Refresh current-row L/M/N from the active BHA mirror first.
             FillNewDayRow ws, r, period
         End If
     Next cell
@@ -74,19 +76,22 @@ CleanFail:
 End Sub
 
 ' Writes Start Depth / Meters Sliding / Time Sliding for row r.
+' Explicit calls overwrite the current row's slide values by default.
 ' Returns True when at least one of those cells was written.
-Public Function DayRoll_FillSlideMetrics(ByVal r As Long) As Boolean
+Public Function DayRoll_FillSlideMetrics(ByVal r As Long, _
+        Optional ByVal overwriteCurrent As Boolean = True) As Boolean
     Dim ws As Worksheet
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
-    DayRoll_FillSlideMetrics = FillSlideMetrics(ws, r)
+    DayRoll_FillSlideMetrics = FillSlideMetrics(ws, r, overwriteCurrent)
 End Function
 
 ' Called from RefreshData after OpenCap / DD Tools rebuild.
-' Fills blank L/M/N on daily rows for the active BHA# (H3) from the mirror
-' deltas. Never overwrites non-blank slide cells; never opens the Pason form.
+' Fills blank historical L/M/N and overwrites the latest period row for the
+' active BHA# (H3) from mirror deltas. Never opens the Pason form.
 Public Sub DayRoll_BackfillSlideMetrics()
     Dim ws As Worksheet
     Dim r As Long
+    Dim activeRow As Long
     Dim period As String
     Dim wasProt As Boolean
     Dim wrote As Boolean
@@ -99,11 +104,12 @@ Public Sub DayRoll_BackfillSlideMetrics()
     Application.Calculate
     On Error GoTo Fail
 
+    activeRow = LastValidPeriodRow(ws)
     For r = ROW_FIRST To ROW_LAST
         period = Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))
         If IsValidPeriod(period) Then
-            If NeedsSlideBackfill(ws, r) Then
-                wrote = FillSlideMetrics(ws, r)
+            If r = activeRow Or NeedsSlideBackfill(ws, r) Then
+                wrote = FillSlideMetrics(ws, r, (r = activeRow))
                 If wrote Then
                     On Error Resume Next
                     Application.Calculate
@@ -198,7 +204,7 @@ Private Sub FillNewDayRow(ByVal ws As Worksheet, ByVal r As Long, _
                           ByVal period As String)
     Dim wrote As Boolean
 
-    wrote = FillSlideMetrics(ws, r)
+    wrote = FillSlideMetrics(ws, r, True)
     If Not wrote And CellBlank(ws.Cells(r, COL_SLIDE_M)) _
                   And CellBlank(ws.Cells(r, COL_HRS)) Then
         ' Nothing useful from source; still allow Pason hours entry.
@@ -212,7 +218,8 @@ Private Sub FillNewDayRow(ByVal ws As Worksheet, ByVal r As Long, _
     On Error GoTo 0
 End Sub
 
-Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long) As Boolean
+Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long, _
+                                  Optional ByVal overwriteSlide As Boolean = False) As Boolean
     Dim srcRow As Long
     Dim bha As Long
     Dim mtrsSld As Double
@@ -259,13 +266,14 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long) As Boo
         End If
     End If
 
-    If deltaM >= 0 And CellBlank(ws.Cells(r, COL_SLIDE_M)) Then
+    If deltaM >= 0 And (overwriteSlide Or CellBlank(ws.Cells(r, COL_SLIDE_M))) Then
         ws.Cells(r, COL_SLIDE_M).Value = deltaM
         wrote = True
     End If
 
-    If deltaH >= 0 And CellBlank(ws.Cells(r, COL_HRS)) _
-                   And CellBlank(ws.Cells(r, COL_MIN)) Then
+    If deltaH >= 0 And (overwriteSlide _
+                   Or (CellBlank(ws.Cells(r, COL_HRS)) _
+                       And CellBlank(ws.Cells(r, COL_MIN)))) Then
         SplitDecimalHours deltaH, hrsPart, minPart
         ws.Cells(r, COL_HRS).Value = hrsPart
         WriteMinutesCell ws.Cells(r, COL_MIN), minPart
@@ -290,6 +298,7 @@ Private Sub PrepareFormContext(ByVal ws As Worksheet, ByVal r As Long, _
     gDayRoll_Applied = False
     gDayRoll_PriorBit = SumNumeric(ws, COL_BIT, ROW_FIRST, r - 1)
     gDayRoll_PriorCirc = SumNumeric(ws, COL_CIRC, ROW_FIRST, r - 1)
+    gDayRoll_PriorSlide = SumSlideHoursDecimal(ws, ROW_FIRST, r - 1)
 
     If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).Value) Then
         gDayRoll_BHA = CLng(ws.Cells(ROW_BHA, COL_PERIOD).Value)
@@ -350,11 +359,6 @@ Private Function ValidateHourDeltas(ByVal bitDelta As Double, _
     End If
     If circDelta + 0.0000001 < bitDelta Then
         errMsg = "Circ Hours must be >= Bit Hours for this row."
-        Exit Function
-    End If
-    If bitDelta + 0.0000001 < slideHrs Then
-        errMsg = "Bit Hours must be >= Sliding Hours (" & _
-                 Format$(slideHrs, "0.##") & ")."
         Exit Function
     End If
     If StrComp(period, "Midnight", vbTextCompare) = 0 Then
@@ -425,6 +429,17 @@ Private Function NeedsSlideBackfill(ByVal ws As Worksheet, ByVal r As Long) As B
     NeedsSlideBackfill = CellBlank(ws.Cells(r, COL_SLIDE_M)) _
                      Or (CellBlank(ws.Cells(r, COL_HRS)) _
                          And CellBlank(ws.Cells(r, COL_MIN)))
+End Function
+
+Private Function LastValidPeriodRow(ByVal ws As Worksheet) As Long
+    Dim r As Long
+    LastValidPeriodRow = 0
+    For r = ROW_LAST To ROW_FIRST Step -1
+        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))) Then
+            LastValidPeriodRow = r
+            Exit Function
+        End If
+    Next r
 End Function
 
 Private Function IsValidPeriod(ByVal s As String) As Boolean
@@ -530,6 +545,12 @@ Private Function CellBlank(ByVal cell As Range) As Boolean
         CellBlank = False
     End If
 End Function
+
+
+
+
+
+
 
 
 

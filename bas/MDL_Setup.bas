@@ -21,6 +21,8 @@ Option Explicit
 '   "_OC_Inventory" = hidden  Equipment Inventory CSV
 '   "_OC_Costs"     = hidden  Ticket Costs by Day CSV
 '   "_OC_PlanSec"   = hidden  Plan Sections (PDF) + auto/user target names
+'   "_OC_Survey"    = hidden  Planned Surveys (PDF) for proximity / PlanAt
+'   "_OC_Formations"= hidden  Formation tops (MD/TVD/Name + AER lithology)
 '
 '  LAYOUT WARNING:
 '   BuildSetupUI / RebuildSetup / InitSetup CLEAR the entire Setup sheet and
@@ -2431,11 +2433,11 @@ Private Sub ImportSurveyPlanCsv(ByVal fPath As String)
             Dim dc As Long
             For dc = 0 To UBound(fields)
                 If dc < colCount Then
-                    Dim cv As String: cv = Trim(fields(dc))
-                    If IsNumeric(cv) Then
-                        survWs.Cells(outRow, dc + 1).Value = CDbl(cv)
+                    Dim cV As String: cV = Trim(fields(dc))
+                    If IsNumeric(cV) Then
+                        survWs.Cells(outRow, dc + 1).Value = CDbl(cV)
                     Else
-                        survWs.Cells(outRow, dc + 1).Value = cv
+                        survWs.Cells(outRow, dc + 1).Value = cV
                     End If
                 End If
             Next dc
@@ -2480,13 +2482,21 @@ Private Function ImportSurveyPlanPdf(ByVal fPath As String) As Boolean
     WritePlanSecSheet fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn, aAuto
 
     Dim sibCsv As String
-    sibCsv = Left$(fPath, InStrRev(fPath, ".") - 1) & ".csv"
-    If Dir(sibCsv) <> "" Then
-        ImportSurveyPlanCsv sibCsv
-        Worksheets(SH_SURVEY).Cells(1, 1).Value = fPath
-    Else
-        WriteSurveyFromSections fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW
+    Dim nPlanned As Long, nForm As Long
+    nPlanned = MDL_PlanImport.ImportPlannedSurveysFromPdf(pdfText, fPath)
+    If nPlanned < 50 Then
+        sibCsv = Left$(fPath, InStrRev(fPath, ".") - 1) & ".csv"
+        If Dir(sibCsv) <> "" Then
+            ImportSurveyPlanCsv sibCsv
+            Worksheets(SH_SURVEY).Cells(1, 1).Value = fPath
+        Else
+            WriteSurveyFromSections fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW
+        End If
     End If
+    nForm = MDL_PlanImport.ImportFormationsFromPdf(pdfText, fPath)
+    Application.StatusBar = "Plan: " & nSec & " sections, " & _
+                            IIf(nPlanned >= 50, CStr(nPlanned) & " planned surveys", "section stations") & _
+                            ", " & nForm & " formations"
     ImportSurveyPlanPdf = True
 End Function
 
@@ -3507,11 +3517,11 @@ End Sub
 ' Finds pdftotext on PATH or in the per-user self-installed copy under
 ' %LOCALAPPDATA%\Poppler (pointer file written by the bootstrap).
 ' Returns "pdftotext" (PATH), a full exe path, or "" when unavailable.
-Private Function ResolvePdftotext(Sh As Object) As String
+Private Function ResolvePdftotext(sH As Object) As String
     ResolvePdftotext = ""
 
     On Error Resume Next
-    If Sh.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
+    If sH.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
         ResolvePdftotext = "pdftotext"
     End If
     On Error GoTo 0
@@ -3538,7 +3548,7 @@ End Function
 ' Per-user install, no admin rights required. Asks first (never downloads silently)
 ' and asks at most once per Excel session. Returns the pdftotext path on success,
 ' "" if declined or failed - callers fall back to the built-in PowerShell parser.
-Private Function OfferPopplerBootstrap(Sh As Object) As String
+Private Function OfferPopplerBootstrap(sH As Object) As String
     OfferPopplerBootstrap = ""
     If mPopplerPrompted Then Exit Function
     mPopplerPrompted = True
@@ -3565,7 +3575,7 @@ Private Function OfferPopplerBootstrap(Sh As Object) As String
 
     Application.StatusBar = "Downloading Poppler (one-time, ~16 MB)..."
     On Error Resume Next
-    Sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
+    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
     On Error GoTo 0
     Application.StatusBar = False
     On Error Resume Next: Kill tmpScript: On Error GoTo 0
@@ -3643,16 +3653,16 @@ Private Function ExtractPdfText(pdfPath As String) As String
     '   admin rights). Declining falls through to Strategy 2.
     ' ----------------------------------------------------------------
     On Error Resume Next: Kill tmpOut: On Error GoTo 0
-    Dim Sh As Object
-    Set Sh = CreateObject("WScript.Shell")
+    Dim sH As Object
+    Set sH = CreateObject("WScript.Shell")
 
     Dim p2tPath As String
-    p2tPath = ResolvePdftotext(Sh)
-    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(Sh)
+    p2tPath = ResolvePdftotext(sH)
+    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(sH)
 
     If p2tPath <> "" Then
         On Error Resume Next
-        Sh.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
+        sH.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
         On Error GoTo 0
     End If
 
@@ -3680,7 +3690,7 @@ Private Function ExtractPdfText(pdfPath As String) As String
     Print #fNum, BuildPdfExtractScript()
     Close #fNum
 
-    Sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
+    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
 
     If Dir(tmpOut) <> "" Then
         fNum = FreeFile: content = ""
@@ -4218,6 +4228,10 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
+
+
+
 
 
 

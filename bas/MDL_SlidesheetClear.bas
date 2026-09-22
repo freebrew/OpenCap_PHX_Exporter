@@ -441,8 +441,9 @@ End Sub
 '
 ' W / X (Inc@Bit / Azm@Bit) used to pass IF(AK="",0,AK): a blank dial became
 ' TF 0 = high side, so a rotary stand was projected as a full build with the
-' demonstrated N/O walk. Pass AK through so ProjIncAtBit / ProjAzmAtBit see
-' the blank and project pure rotary (bit attitude = survey attitude).
+' demonstrated N/O walk. Pass AK through so the UDFs can see a blank dial.
+' Unseen hole is still walked from R/S/U (already-drilled leftover). $U$13:$U$505
+' is a dirty hook so a prior-row TF edit recalcs W/X/AJ.
 ' Caller owns protection / EnableEvents / calc mode.
 Private Sub EnsureProjAimFormulasOnSheet(ByVal ss As Worksheet)
     Dim col As Variant
@@ -454,9 +455,11 @@ Private Sub EnsureProjAimFormulasOnSheet(ByVal ss As Worksheet)
     Dim oldTok As String
     Dim newTok As String
     Dim dirty As Boolean
+    Dim uHook As String
 
     On Error GoTo Done
-    For Each col In Array("AR", "AS", "W", "X")
+    uHook = "$U$" & Y_DATA_FIRST & ":$U$" & Y_LAST
+    For Each col In Array("AR", "AS", "W", "X", "AJ")
         Set rng = ss.Range(ss.Cells(Y_DATA_FIRST, col), ss.Cells(Y_LAST, col))
         arr = rng.Formula
         dirty = False
@@ -467,14 +470,36 @@ Private Sub EnsureProjAimFormulasOnSheet(ByVal ss As Worksheet)
                 If col = "W" Or col = "X" Then
                     oldTok = "IF(AK" & r & "="""",0,AK" & r & ")"
                     newTok = "AK" & r
-                Else
+                    If InStr(1, f, oldTok, vbBinaryCompare) > 0 Then
+                        f = Replace(f, oldTok, newTok)
+                        dirty = True
+                    End If
+                ElseIf col = "AR" Or col = "AS" Then
                     oldTok = "(D" & r & ",F" & r & ",G" & r & ","
                     newTok = "(D" & r & ",W" & r & ",X" & r & ","
+                    If InStr(1, f, oldTok, vbBinaryCompare) > 0 Then
+                        f = Replace(f, oldTok, newTok)
+                        dirty = True
+                    End If
                 End If
-                If InStr(1, f, oldTok, vbBinaryCompare) > 0 Then
-                    arr(i, 1) = Replace(f, oldTok, newTok)
-                    dirty = True
+                If InStr(1, f, uHook, vbBinaryCompare) = 0 Then
+                    If col = "W" Or col = "X" Then
+                        oldTok = "AI" & r & ")"
+                        newTok = "AI" & r & "," & uHook & ")"
+                        If InStr(1, f, oldTok, vbBinaryCompare) > 0 Then
+                            f = Replace(f, oldTok, newTok)
+                            dirty = True
+                        End If
+                    ElseIf col = "AJ" Then
+                        oldTok = "$S$" & Y_DATA_FIRST & ":$S$" & Y_LAST & ")"
+                        newTok = "$S$" & Y_DATA_FIRST & ":$S$" & Y_LAST & "," & uHook & ")"
+                        If InStr(1, f, oldTok, vbBinaryCompare) > 0 Then
+                            f = Replace(f, oldTok, newTok)
+                            dirty = True
+                        End If
+                    End If
                 End If
+                arr(i, 1) = f
             End If
         Next i
         If dirty Then rng.Formula = arr
@@ -482,13 +507,72 @@ Private Sub EnsureProjAimFormulasOnSheet(ByVal ss As Worksheet)
 Done:
 End Sub
 
-' Data!E9 is =Slidesheet!G506. E/F/H/J on row 506 are last-survey LOOKUPs keyed
-' off INC (F). If G506 is a leftover value, EMAIL prints that instead of AZM.
+Public Sub SyncProjAimFormulas()
+    Dim ss As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+    On Error GoTo Clean
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ss)
+    EnsureProjAimFormulasOnSheet ss
+    On Error Resume Next
+    ss.Range("AJ" & Y_DATA_FIRST & ":AJ" & Y_LAST).Calculate
+    ss.Range("W" & Y_DATA_FIRST & ":X" & Y_LAST).Calculate
+    ss.Range("V" & Y_DATA_FIRST & ":V" & Y_LAST).Calculate
+    On Error GoTo Clean
+Clean:
+    On Error Resume Next
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+End Sub
+
+' Public so the gauge / EMAIL path can refresh the strip without a Y rebuild.
+Public Sub SyncLastGreenSurveyStrip()
+    Dim ss As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+
+    On Error GoTo Clean
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ss)
+    EnsureLastSurveyAzmLookup ss
+Clean:
+    On Error Resume Next
+    SheetReprotectAfterVba ss, wasProt
+    Application.EnableEvents = prevEvents
+End Sub
+
+' Data!E7:E11 read Slidesheet E/F/G/H/J506. Those cells must point at the
+' last GREEN survey row (Inc/Azm fill), not LOOKUP-last-nonblank — yellow
+' projection rows are not material for Last Survey or plan distance.
 Private Sub EnsureLastSurveyAzmLookup(ByVal ss As Worksheet)
-    Dim f As String
-    f = UCase$(CStr(ss.Range("G506").Formula & ""))
-    If InStr(1, f, "LOOKUP") > 0 And InStr(1, f, "G12:G505") > 0 Then Exit Sub
-    ss.Range("G506").Formula = "=LOOKUP(2,1/(F12:F505<>""""),G12:G505)"
+    Dim r As Long
+    Dim addr As String
+    r = MDL_ContDI.LastSlidesheetSurveyRow()
+    If r < Y_DATA_FIRST Then
+        ss.Range("E506:H506,J506").ClearContents
+        Exit Sub
+    End If
+    addr = CStr(r)
+    If StrComp(CStr(ss.Range("E506").Formula & ""), "=E" & addr, vbTextCompare) <> 0 Then
+        ss.Range("E506").Formula = "=E" & addr
+    End If
+    If StrComp(CStr(ss.Range("F506").Formula & ""), "=F" & addr, vbTextCompare) <> 0 Then
+        ss.Range("F506").Formula = "=F" & addr
+    End If
+    If StrComp(CStr(ss.Range("G506").Formula & ""), "=G" & addr, vbTextCompare) <> 0 Then
+        ss.Range("G506").Formula = "=G" & addr
+    End If
+    If StrComp(CStr(ss.Range("H506").Formula & ""), "=H" & addr, vbTextCompare) <> 0 Then
+        ss.Range("H506").Formula = "=H" & addr
+    End If
+    If StrComp(CStr(ss.Range("J506").Formula & ""), "=J" & addr, vbTextCompare) <> 0 Then
+        ss.Range("J506").Formula = "=J" & addr
+    End If
 End Sub
 
 ' Pad left/right text with spaces so the right part sits on the cell's right edge.
@@ -681,7 +765,7 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
     On Error GoTo Done
     hlColor = RGB(198, 239, 206)
 
-    ' Use the last surveyed row (F filled), not the last bit-only tally row.
+    ' Use the last GREEN surveyed row, not a yellow projection or bit-only tally.
     ' Bit-only depths past a target MD would otherwise advance the highlight
     ' while BURR is still computed against the prior survey's aim (e.g. TAR2 / 8.37).
     lastSurvRow = 0
@@ -691,6 +775,7 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
         vF = ss.Cells(r, "F").Value2
         If IsNumeric(vF) Then
             If Len(Trim$(CStr(vF & ""))) > 0 Then
+                If Not MDL_ContDI.IsSlidesheetGoodSurveyRowOn(ss, r) Then GoTo NextAimRow
                 lastSurvRow = r
                 vD = ss.Cells(r, "D").Value2
                 If IsNumeric(vD) Then bitMd = CDbl(vD)
@@ -702,6 +787,7 @@ Private Sub HighlightActiveTargetOnSheet(ByVal ss As Worksheet)
                 End If
             End If
         End If
+NextAimRow:
     Next r
 
     activeRow = 0
@@ -1067,17 +1153,12 @@ End Sub
 
 Private Function LastSurveyBitMd(ByVal ss As Worksheet) As Double
     Dim r As Long
-    Dim vF As Variant, vD As Variant
+    Dim vD As Variant
     LastSurveyBitMd = 0#
-    For r = 12 To Y_LAST
-        vF = ss.Cells(r, "F").Value2
-        If IsNumeric(vF) Then
-            If Len(Trim$(CStr(vF & ""))) > 0 Then
-                vD = ss.Cells(r, "D").Value2
-                If IsNumeric(vD) Then LastSurveyBitMd = CDbl(vD)
-            End If
-        End If
-    Next r
+    r = MDL_ContDI.LastSlidesheetSurveyRow()
+    If r < Y_DATA_FIRST Then Exit Function
+    vD = ss.Cells(r, "D").Value2
+    If IsNumeric(vD) Then LastSurveyBitMd = CDbl(vD)
 End Function
 
 Private Function LoadNamedPlanTargets(ByVal ps As Worksheet, _
@@ -1198,6 +1279,14 @@ NextOv:
     Exit Sub
 Fail:
 End Sub
+
+
+
+
+
+
+
+
 
 
 
