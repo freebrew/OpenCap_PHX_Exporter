@@ -22,18 +22,20 @@ Private Const SS_SHEET As String = "Slidesheet"
 Private Const SS_FIRST As Long = 13
 Private Const SS_LAST As Long = 505
 
-' Grid columns after the inter-sensor pair was inserted at J:K (rows 5:44).
-' Targets S1:T4 and rates U1:V4 sit over the bit-projection columns.
-' Averages M3:R3 sit on PD / MWD rate columns M:R.
-Private Const COL_SENS_DLS As Long = 10   ' J  3D DLS MWD(D,E) <-> PD(G,H)
-Private Const COL_SENS_BUR As Long = 11   ' K  signed BUR, PD minus MWD
-Private Const COL_PD_DLS As Long = 12     ' L
-Private Const COL_PD_BUR As Long = 13     ' M
-Private Const COL_PD_TR As Long = 14      ' N
-Private Const COL_MWD_BURC As Long = 15   ' O
-Private Const COL_MWD_TRC As Long = 16    ' P
-Private Const COL_MWD_BURS As Long = 17   ' Q
-Private Const COL_MWD_TRS As Long = 18    ' R
+' Rate block I:R, left to right: MWD DLS | MWD Average | Between sensors |
+' PD DLS | PD Average. Targets S1:T4 and rates U1:V4 sit over the
+' bit-projection columns. Row-3 averages sit on the MWD (J:M) and PD (Q:R)
+' average columns. The Bit to Sensor Offsets box stays on M1:P2.
+Private Const COL_MWD_DLS As Long = 9     ' I
+Private Const COL_MWD_BURC As Long = 10   ' J
+Private Const COL_MWD_TRC As Long = 11    ' K
+Private Const COL_MWD_BURS As Long = 12   ' L
+Private Const COL_MWD_TRS As Long = 13    ' M
+Private Const COL_SENS_DLS As Long = 14   ' N  3D DLS MWD(D,E) <-> PD(G,H)
+Private Const COL_SENS_BUR As Long = 15   ' O  signed BUR, PD minus MWD
+Private Const COL_PD_DLS As Long = 16     ' P
+Private Const COL_PD_BUR As Long = 17     ' Q
+Private Const COL_PD_TR As Long = 18      ' R
 Private Const COL_HOLE As Long = 19       ' S
 Private Const COL_INC_BIT As Long = 20    ' T
 Private Const COL_AZ_BIT As Long = 21     ' U
@@ -521,6 +523,29 @@ Private Sub AddPaceCF(ByVal c As Range, ByVal reqAddr As String)
     End With
 End Sub
 
+' Signed turn-rate pace (+ right / - left), compared at the 2-decimal display
+' precision. On target = turning the needed way at least as fast, or within
+' TURN_DEADBAND of the required turn (so holding azimuth when the target needs
+' only a hair of turn reads green).
+Private Sub AddTurnPaceCF(ByVal c As Range, ByVal reqAddr As String)
+    Const TURN_DEADBAND As String = "0.05"
+    Dim a As String, got As String, want As String, onTarget As String
+    a = c.Address
+    got = "ROUND(" & a & ",2)"
+    want = "ROUND(" & reqAddr & ",2)"
+    onTarget = "OR(AND(SIGN(" & got & ")=SIGN(" & want & "),ABS(" & got & ")>=ABS(" & want & "))," & _
+               "ROUND(ABS(" & got & "-" & want & "),2)<=" & TURN_DEADBAND & ")"
+    With c.FormatConditions.Add(Type:=xlExpression, _
+        Formula1:="=AND(ISNUMBER(" & a & "),ISNUMBER(" & reqAddr & ")," & onTarget & ")")
+        .Interior.Color = cGood()
+    End With
+    With c.FormatConditions.Add(Type:=xlExpression, _
+        Formula1:="=AND(ISNUMBER(" & a & "),ISNUMBER(" & reqAddr & "),NOT(" & onTarget & "))")
+        .Interior.Color = cBad()
+        .Font.Color = RGB(255, 255, 255)
+    End With
+End Sub
+
 Private Sub PaintContDI(ByVal ws As Worksheet)
     Dim wasProt As Boolean
 
@@ -584,8 +609,10 @@ Private Sub PaintContDI(ByVal ws As Worksheet)
     ' -- widths / freeze -------------------------------------------------------------
     ws.Columns("A").ColumnWidth = 20
     ws.Columns("B:H").ColumnWidth = 9
-    ws.Columns("I:L").ColumnWidth = 9.5
-    ws.Columns("M:R").ColumnWidth = 9
+    ws.Columns("I").ColumnWidth = 9.5
+    ws.Columns("J:M").ColumnWidth = 9
+    ws.Columns("N:P").ColumnWidth = 9.5
+    ws.Columns("Q:R").ColumnWidth = 9
     ws.Columns("S").ColumnWidth = 10.5
     ws.Columns("T:W").ColumnWidth = 9.5
     ws.Columns("X").ColumnWidth = 9
@@ -643,30 +670,34 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
 
     On Error Resume Next
     ws.Range("B5:W5").UnMerge
-    ws.Range("I4:L4").UnMerge
-    ws.Range("M4:N4").UnMerge
-    ws.Range("O4:R4").UnMerge
+    ws.Range("I4:R4").UnMerge
     ws.Range("S5:W5").UnMerge
     On Error GoTo 0
-    ws.Range("I4").ClearContents
-    ws.Range("L4").ClearContents
+    ' Group labels are re-placed below; clear first so a merge never has to
+    ' pick between two leftover labels.
+    ws.Range("I4:R4").ClearContents
 
-    ' Averages sit on M3:R3 - directly over PD / MWD rate columns M:R.
-    With ws.Range("M3:R3")
+    ' Averages sit on J3:M3 (MWD Average) and Q3:R3 (PD Average), directly
+    ' over their rate columns. N3:P3 and I3 carry no average.
+    ws.Range("I3:R3").FormatConditions.Delete
+    ws.Range("I3:R3").Borders.LineStyle = xlNone
+    With ws.Range("J3:M3,Q3:R3")
         .Font.bold = True
         .HorizontalAlignment = xlCenter
         .Borders.LineStyle = xlContinuous
         .numberFormat = "0.00"
     End With
-    ws.Range("K3:R3").FormatConditions.Delete
-    For Each c In ws.Range("M3,O3,Q3").Cells
+    ' BUR averages pace against BRR (V1). TR averages are signed, so they pace
+    ' against the signed required turn (ContDI_Data!X2; V2 shows its size):
+    ' green only when turning the way the target needs and at least as fast.
+    For Each c In ws.Range("J3,L3,Q3").Cells
         AddPaceCF c, "$V$1"
     Next c
-    For Each c In ws.Range("N3,P3,R3").Cells
-        AddPaceCF c, "$V$2"
+    For Each c In ws.Range("K3,M3,R3").Cells
+        AddTurnPaceCF c, SH_CONTDI_DATA & "!$X$2"
     Next c
 
-    ' Rate-block bands (row 4): I:L and O:R light blue, M:N peach; all bordered.
+    ' Rate-block bands (row 4): I:P light blue, Q:R (PD Average) peach; all bordered.
     With ws.Range("I4:R4")
         .Font.bold = True
         .Font.Color = RGB(0, 0, 0)
@@ -674,18 +705,18 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cMwdBlock()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("M4:N4").Interior.Color = cPdBlock()
-    With ws.Range("J4:K4")
+    ws.Range("Q4:R4").Interior.Color = cPdBlock()
+    With ws.Range("J4:M4")
+        .Merge
+        .Value = "MWD Average"
+    End With
+    With ws.Range("N4:O4")
         .Merge
         .Value = "Between sensors"
     End With
-    With ws.Range("M4:N4")
+    With ws.Range("Q4:R4")
         .Merge
         .Value = "PD Average"
-    End With
-    With ws.Range("O4:R4")
-        .Merge
-        .Value = "MWD Average"
     End With
 
     With ws.Range("B5:H5")
@@ -697,15 +728,15 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Borders.LineStyle = xlContinuous
     End With
     ws.Range("I5").Value = "f/ survey"
-    ws.Range("J5").Value = "btw sens."
-    ws.Range("K5").Value = "btw sens."
+    ws.Range("J5").Value = "f/ cont."
+    ws.Range("K5").Value = "f/ cont."
     ws.Range("L5").Value = "f/ survey"
-    ws.Range("M5").Value = "f/ cont."
-    ws.Range("N5").Value = "f/ cont."
-    ws.Range("O5").Value = "f/ cont."
-    ws.Range("P5").Value = "f/ cont."
-    ws.Range("Q5").Value = "f/ survey"
-    ws.Range("R5").Value = "f/ survey"
+    ws.Range("M5").Value = "f/ survey"
+    ws.Range("N5").Value = "btw sens."
+    ws.Range("O5").Value = "btw sens."
+    ws.Range("P5").Value = "f/ survey"
+    ws.Range("Q5").Value = "f/ cont."
+    ws.Range("R5").Value = "f/ cont."
     With ws.Range("I5:R5")
         .Font.Size = 9
         .Font.Italic = True
@@ -714,7 +745,7 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cMwdBlock()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("M5:N5").Interior.Color = cPdBlock()
+    ws.Range("Q5:R5").Interior.Color = cPdBlock()
     With ws.Range("S5:W5")
         .Merge
         .Value = "Bit Projection f/ last survey"
@@ -732,13 +763,13 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
     ws.Range("G6").Value = "PD Inc."
     ws.Range("H6").Value = "PD Azm."
     ws.Range("I6").Value = "MWD DLS"
-    ws.Range("J6").Value = HDR_SENS_DLS
-    ws.Range("K6").Value = "Sens BUR"
-    ws.Range("L6").Value = HDR_PD_DLS
-    ws.Range("M6").Value = "BUR"
-    ws.Range("N6").Value = "TR"
-    ws.Range("O6").Value = "BUR"
-    ws.Range("P6").Value = "TR"
+    ws.Range("J6").Value = "BUR"
+    ws.Range("K6").Value = "TR"
+    ws.Range("L6").Value = "BUR"
+    ws.Range("M6").Value = "TR"
+    ws.Range("N6").Value = HDR_SENS_DLS
+    ws.Range("O6").Value = "Sens BUR"
+    ws.Range("P6").Value = HDR_PD_DLS
     ws.Range("Q6").Value = "BUR"
     ws.Range("R6").Value = "TR"
     ws.Range("S6").Value = "Hole Depth"
@@ -754,13 +785,13 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
     ws.Range("G7").Value = deg
     ws.Range("H7").Value = deg
     ws.Range("I7").Value = "f/ survey"
-    ws.Range("J7").Value = "PD-D&I"
+    ws.Range("J7").Value = degRate
     ws.Range("K7").Value = degRate
-    ws.Range("L7").Value = "f/ survey"
+    ws.Range("L7").Value = degRate
     ws.Range("M7").Value = degRate
-    ws.Range("N7").Value = degRate
+    ws.Range("N7").Value = "PD-D&I"
     ws.Range("O7").Value = degRate
-    ws.Range("P7").Value = degRate
+    ws.Range("P7").Value = "f/ survey"
     ws.Range("Q7").Value = degRate
     ws.Range("R7").Value = degRate
     ws.Range("S7").Value = "(m)"
@@ -780,7 +811,7 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cMwdBlock()
         .Font.Color = RGB(0, 0, 0)
     End With
-    ws.Range("M6:N7").Interior.Color = cPdBlock()
+    ws.Range("Q6:R7").Interior.Color = cPdBlock()
     ws.Range("S6:W7").Interior.Color = cBandLt()
 
     With ws.Range("B8:W44")
@@ -862,14 +893,14 @@ Private Sub EnsureHeaderShift(ByVal ws As Worksheet)
 End Sub
 
 Private Sub ApplyLookupsAndRates(ByVal ws As Worksheet)
-    ws.Range("K3:L3").Clear
-    ws.Range("M3").Formula = "=IFERROR(AVERAGE(M9:M44),"""")"
-    ws.Range("N3").Formula = "=IFERROR(AVERAGE(N9:N44),"""")"
-    ws.Range("O3").Formula = "=IFERROR(AVERAGE(O9:O44),"""")"
-    ws.Range("P3").Formula = "=IFERROR(AVERAGE(P9:P44),"""")"
-    ws.Range("Q3").Formula = "=IFERROR(AVERAGE(Q9:Q44),"""")"
-    ws.Range("R3").Formula = "=IFERROR(AVERAGE(R9:R44),"""")"
-    ws.Range("M3:R3").numberFormat = "0.00"
+    ' Averages ride with their rate columns: MWD Average J:M, PD Average Q:R.
+    ' I3 and N3:P3 (MWD DLS, Between sensors, PD DLS) carry none.
+    Dim avgCol As Variant
+    ws.Range("I3:R3").ClearContents
+    For Each avgCol In Array("J", "K", "L", "M", "Q", "R")
+        ws.Range(avgCol & "3").Formula = "=IFERROR(AVERAGE(" & avgCol & "9:" & avgCol & "44),"""")"
+    Next avgCol
+    ws.Range("J3:M3,Q3:R3").numberFormat = "0.00"
 
     ' Diagnostics live on very-hidden ContDI_Data (T:W), not on the grid.
     Dim h As Worksheet
@@ -900,6 +931,8 @@ Private Sub ApplyLookupsAndRates(ByVal ws As Worksheet)
     ' yellow-box INC/AZM over remaining MD). V2/V4 stay yellow-box TRR / TFR.
     ws.Range("V1").Formula = "=IFERROR(ROUND(ProjLandingBurr(ContDI_Data!T1,ContDI_Data!T4,ContDI_Data!U4,ContDI_Data!V1,IF(ISNUMBER(ContDI_Data!X1),ContDI_Data!X1,19.2),ProjTargets_MD,ProjTargets_INC,ProjTargets_AZM,ProjTargets_TVD),2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
     ws.Range("V2").Formula = "=IFERROR(ROUND(ABS(MOD(T3-ContDI_Data!U4+180,360)-180)/ContDI_Data!U1*30,2),"""")"
+    ' Signed twin of TRR (+ right / - left) for the turn-average colouring.
+    h.Range("X2").Formula = "=IFERROR(ROUND((MOD(" & cd & "T3-U4+180,360)-180)/U1*30,2),"""")"
     ws.Range("V3").Formula = "=IFERROR(ROUND(ProjDoglegDeg(ContDI_Data!T4,ContDI_Data!U4,T2,T3)/ContDI_Data!U1*30,2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
     ws.Range("V4").Formula = "=IFERROR(ProjTfToTarget(ContDI_Data!T4,ContDI_Data!U4,T2,T3,5),"""")"
     HideContDIHelpers ws
@@ -961,6 +994,7 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
     Dim pD As String, pE As String, pG As String, pH As String
     Dim stepMWD As String, stepPD As String
     Dim sens As String
+    Dim sensBur As String, mwdBurs As String
     tie = "ISNUMBER($B$2)"
     sens = "ISNUMBER($P$2),ISNUMBER($N$2),$P$2<>$N$2"   ' both offsets present and distinct
     For r = FIRST_DATA To LAST_DATA
@@ -975,11 +1009,11 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
         stepPD = "ISNUMBER(F" & r & "),ISNUMBER(F" & p & "),F" & r & "<>F" & p
         ws.Cells(r, 3).Formula = "=IF(ISNUMBER(B" & r & "),B" & r & "-$P$2,"""")"
         ws.Cells(r, 6).Formula = "=IF(ISNUMBER(B" & r & "),B" & r & "-$N$2,"""")"
-        ' I: MWD DLS f/ survey. L: PD DLS f/ survey.
-        ws.Cells(r, 9).Formula = "=IF(AND(" & tie & "," & nD & "," & nE & "," & dMWD & "),(30/(C" & r & "-$B$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($C$2))*COS(RADIANS(D" & r & "))+SIN(RADIANS($C$2))*SIN(RADIANS(D" & r & "))*COS(RADIANS(E" & r & "-$D$2)))))),"""")"
+        ' MWD DLS f/ survey (I) and PD DLS f/ survey (P).
+        ws.Cells(r, COL_MWD_DLS).Formula = "=IF(AND(" & tie & "," & nD & "," & nE & "," & dMWD & "),(30/(C" & r & "-$B$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($C$2))*COS(RADIANS(D" & r & "))+SIN(RADIANS($C$2))*SIN(RADIANS(D" & r & "))*COS(RADIANS(E" & r & "-$D$2)))))),"""")"
         ws.Cells(r, COL_PD_DLS).Formula = "=IF(AND(" & tie & "," & nG & "," & nH & "," & dPD & "),(30/(F" & r & "-$B$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($C$2))*COS(RADIANS(G" & r & "))+SIN(RADIANS($C$2))*SIN(RADIANS(G" & r & "))*COS(RADIANS(H" & r & "-$D$2)))))),"""")"
-        ' J / K: dogleg and signed BUR between the PD sensor (G,H) and the D&I
-        ' (D,E) over P2-N2. Blank either sensor -> "".
+        ' Sens DLS / Sens BUR: dogleg and signed BUR between the PD sensor (G,H)
+        ' and the D&I (D,E) over P2-N2. Blank either sensor -> "".
         ws.Cells(r, COL_SENS_DLS).Formula = "=IF(AND(" & nD & "," & nE & "," & nG & "," & nH & ",ISNUMBER($P$2),ISNUMBER($N$2),$P$2<>$N$2),ProjDoglegDeg(D" & r & ",E" & r & ",G" & r & ",H" & r & ")/ABS($P$2-$N$2)*30,"""")"
         ws.Cells(r, COL_SENS_BUR).Formula = "=IF(AND(" & nD & "," & nG & ",ISNUMBER($P$2),ISNUMBER($N$2),$P$2<>$N$2),(G" & r & "-D" & r & ")/($P$2-$N$2)*30,"""")"
         If r = FIRST_DATA Then
@@ -995,21 +1029,94 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
             ws.Cells(r, COL_MWD_TRC).Formula = "=IF(AND(" & nE & "," & pE & "," & stepMWD & "),(MOD(E" & r & "-E" & p & "+180,360)-180)/(C" & r & "-C" & p & ")*30,"""")"
         End If
         ws.Cells(r, COL_MWD_BURS).Formula = "=IF(AND(" & tie & "," & nD & "," & dMWD & "),(D" & r & "-$C$2)/(C" & r & "-$B$2)*30,"""")"
-        ws.Cells(r, COL_MWD_TRS).Formula = "=IF(AND(" & tie & "," & nE & "," & dMWD & "),ABS(MOD(E" & r & "-$D$2+180,360)-180)/(C" & r & "-$B$2)*30,"""")"
+        ' Signed like the f/ cont. TR columns: + right, - left.
+        ws.Cells(r, COL_MWD_TRS).Formula = "=IF(AND(" & tie & "," & nE & "," & dMWD & "),(MOD(E" & r & "-$D$2+180,360)-180)/(C" & r & "-$B$2)*30,"""")"
         ws.Cells(r, COL_HOLE).Formula = "=IF(ISNUMBER(B" & r & "),B" & r & ","""")"
         ' Inc / Az @ Bit: the PD sensor is N2 (~2 m) off the bit, so walk the
-        ' PD reading over N2 at the rate seen BETWEEN the sensors (K = Sens BUR;
+        ' PD reading over N2 at the rate seen BETWEEN the sensors (Sens BUR;
         ' inter-sensor walk inline). Only when there is no PD reading fall back
         ' to carrying the MWD reading over the whole D&I offset (P2) at the
-        ' f/ survey rate - projecting 35 m at 6.4 deg/30m put a 36.75 PD inc at
-        ' 43.7 deg @ bit.
-        ws.Cells(r, COL_INC_BIT).Formula = "=IF(" & nG & ",IF(ISNUMBER(K" & r & "),G" & r & "+(K" & r & "/30)*$N$2,G" & r & ")," & _
-            "IF(NOT(" & nD & "),"""",IF(ISNUMBER(Q" & r & "),(Q" & r & "/30)*P$2+$D" & r & ",$D" & r & ")))"
+        ' f/ survey rate (MWD BUR f/ survey) - projecting 35 m at 6.4 deg/30m
+        ' put a 36.75 PD inc at 43.7 deg @ bit.
+        sensBur = ColLetter(COL_SENS_BUR) & r
+        mwdBurs = ColLetter(COL_MWD_BURS) & r
+        ws.Cells(r, COL_INC_BIT).Formula = "=IF(" & nG & ",IF(ISNUMBER(" & sensBur & "),G" & r & "+(" & sensBur & "/30)*$N$2,G" & r & ")," & _
+            "IF(NOT(" & nD & "),"""",IF(ISNUMBER(" & mwdBurs & "),(" & mwdBurs & "/30)*P$2+$D" & r & ",$D" & r & ")))"
         ws.Cells(r, COL_AZ_BIT).Formula = "=IF(" & nH & ",IF(AND(" & nE & "," & sens & "),MOD(H" & r & "+(MOD(H" & r & "-E" & r & "+180,360)-180)/($P$2-$N$2)*$N$2,360),MOD(H" & r & ",360))," & _
             "IF(NOT(" & nE & "),"""",IF(AND(" & tie & "," & dMWD & "),MOD(((MOD(E" & r & "-$D$2+180,360)-180)/(C" & r & "-$B$2))*P$2+E" & r & ",360),MOD(E" & r & ",360))))"
-        ws.Cells(r, COL_TVD_BIT).Formula = "=IF(AND(" & nD & ",ISNUMBER($S" & r & "),ISNUMBER($T" & r & "),ISNUMBER(B$2),ISNUMBER(E$2)),(($S" & r & "-B$2)*COS((RADIANS($T" & r & ")+RADIANS($D" & r & "))/2))+E$2,"""")"
+        ' TVD @ Bit: minimum curvature tie-on -> every D&I reading so far -> this
+        ' row's PD reading -> bit. One average-angle course from the tie-on read
+        ' 1.4 m shallow after 65 m of build.
+        ws.Cells(r, COL_TVD_BIT).Formula = "=IF(AND(ISNUMBER($S" & r & "),ISNUMBER($T" & r & "),ISNUMBER($U" & r & ")," & _
+            "ISNUMBER($B$2),ISNUMBER($C$2),ISNUMBER($D$2),ISNUMBER($E$2))," & _
+            "ContDITvdAtBit($S" & r & ",$T" & r & ",$U" & r & ",$B$2,$C$2,$D$2,$E$2,$N$2," & _
+            "$C$" & FIRST_DATA & ":$C" & r & ",$D$" & FIRST_DATA & ":$D" & r & ",$E$" & FIRST_DATA & ":$E" & r & "," & _
+            "$G" & r & ",$H" & r & "),"""")"
     Next r
 End Sub
+
+' TVD @ Bit for one Cont DI row by minimum curvature through every measured
+' station: tie-on, each D&I reading up to this row (MD = MWD SD), this row's
+' PD reading (MD = bit - PD offset), then the bit. Stations that are blank or
+' do not advance in MD are skipped.
+Public Function ContDITvdAtBit(ByVal bitMd As Double, ByVal bitInc As Double, ByVal bitAzm As Double, _
+                               ByVal tieMd As Double, ByVal tieInc As Double, ByVal tieAzm As Double, _
+                               ByVal tieTvd As Double, ByVal pdOffset As Variant, _
+                               ByVal diMd As Range, ByVal diInc As Range, ByVal diAzm As Range, _
+                               ByVal pdInc As Variant, ByVal pdAzm As Variant) As Variant
+    Dim k As Long
+    Dim lastMd As Double, lastInc As Double, lastAzm As Double
+    Dim tvd As Double
+    Dim m As Variant, i As Variant, a As Variant
+
+    On Error GoTo Fail
+    If bitMd <= tieMd Then ContDITvdAtBit = "": Exit Function
+    lastMd = tieMd: lastInc = tieInc: lastAzm = tieAzm
+    tvd = tieTvd
+
+    For k = 1 To diMd.Rows.Count
+        m = diMd.Cells(k, 1).Value2
+        i = diInc.Cells(k, 1).Value2
+        a = diAzm.Cells(k, 1).Value2
+        If IsNumericCell(m) And IsNumericCell(i) And IsNumericCell(a) Then
+            If CDbl(m) > lastMd And CDbl(m) < bitMd Then
+                AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(i), CDbl(a)
+            End If
+        End If
+    Next k
+
+    If IsNumericCell(pdOffset) And IsNumericCell(pdInc) And IsNumericCell(pdAzm) Then
+        m = bitMd - CDbl(pdOffset)
+        If m > lastMd And m < bitMd Then
+            AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(pdInc), CDbl(pdAzm)
+        End If
+    End If
+
+    AddTvdStep tvd, lastMd, lastInc, lastAzm, bitMd, bitInc, bitAzm
+    ContDITvdAtBit = tvd
+    Exit Function
+Fail:
+    ContDITvdAtBit = ""
+End Function
+
+Private Sub AddTvdStep(ByRef tvd As Double, ByRef lastMd As Double, ByRef lastInc As Double, _
+                       ByRef lastAzm As Double, ByVal md As Double, ByVal inc As Double, ByVal azm As Double)
+    Dim dV As Double, dN As Double, dE As Double
+    MDL_PlanGauge.PG_McStep lastMd, lastInc, lastAzm, md, inc, azm, dV, dN, dE
+    tvd = tvd + dV
+    lastMd = md: lastInc = inc: lastAzm = azm
+End Sub
+
+Private Function IsNumericCell(ByVal v As Variant) As Boolean
+    If IsError(v) Or IsEmpty(v) Then Exit Function
+    If VarType(v) = vbString Then Exit Function
+    IsNumericCell = IsNumeric(v)
+End Function
+
+' Column number -> letter (1..26 only; the Cont DI grid ends at W).
+Private Function ColLetter(ByVal col As Long) As String
+    ColLetter = Chr$(64 + col)
+End Function
 
 
 
