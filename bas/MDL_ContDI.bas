@@ -503,10 +503,11 @@ Private Function cTarget() As Long: cTarget = RGB(255, 255, 0): End Function
 Private Function cGood() As Long: cGood = RGB(146, 208, 80): End Function
 Private Function cBad() As Long: cBad = RGB(255, 0, 0): End Function
 Private Function cGridLine() As Long: cGridLine = RGB(150, 150, 150): End Function
-' Rate-block tints adopted from the 35780 field tab (Sep 2026): PD block
-' peach, MWD / DLS / between-sensors blocks light blue, black bold labels.
+' Rate-block tints: Between sensors stays light blue; MWD Average (incl. DLS)
+' and PD Average (incl. PD DLS) use the green the DD painted on Field.
 Private Function cPdBlock() As Long: cPdBlock = RGB(248, 203, 173): End Function
 Private Function cMwdBlock() As Long: cMwdBlock = RGB(217, 225, 242): End Function
+Private Function cRateHead() As Long: cRateHead = RGB(198, 224, 180): End Function
 
 ' Green when the seen average keeps pace with the required rate, red when short.
 Private Sub AddPaceCF(ByVal c As Range, ByVal reqAddr As String)
@@ -697,7 +698,8 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         AddTurnPaceCF c, SH_CONTDI_DATA & "!$X$2"
     Next c
 
-    ' Rate-block bands (row 4): I:P light blue, Q:R (PD Average) peach; all bordered.
+    ' Rate-block bands (row 4): I:M MWD Average green, N:O Between blue,
+    ' P:R PD Average green. Group labels include the DLS columns.
     With ws.Range("I4:R4")
         .Font.bold = True
         .Font.Color = RGB(0, 0, 0)
@@ -705,8 +707,9 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cMwdBlock()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("Q4:R4").Interior.Color = cPdBlock()
-    With ws.Range("J4:M4")
+    ws.Range("I4:M4").Interior.Color = cRateHead()
+    ws.Range("P4:R4").Interior.Color = cRateHead()
+    With ws.Range("I4:M4")
         .Merge
         .Value = "MWD Average"
     End With
@@ -714,7 +717,7 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Merge
         .Value = "Between sensors"
     End With
-    With ws.Range("Q4:R4")
+    With ws.Range("P4:R4")
         .Merge
         .Value = "PD Average"
     End With
@@ -739,13 +742,15 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
     ws.Range("R5").Value = "f/ cont."
     With ws.Range("I5:R5")
         .Font.Size = 9
+        .Font.bold = True
         .Font.Italic = True
         .Font.Color = RGB(0, 0, 0)
         .HorizontalAlignment = xlCenter
         .Interior.Color = cMwdBlock()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("Q5:R5").Interior.Color = cPdBlock()
+    ws.Range("I5:M5").Interior.Color = cRateHead()
+    ws.Range("P5:R5").Interior.Color = cRateHead()
     With ws.Range("S5:W5")
         .Merge
         .Value = "Bit Projection f/ last survey"
@@ -811,7 +816,8 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cMwdBlock()
         .Font.Color = RGB(0, 0, 0)
     End With
-    ws.Range("Q6:R7").Interior.Color = cPdBlock()
+    ws.Range("I6:M7").Interior.Color = cRateHead()
+    ws.Range("P6:R7").Interior.Color = cRateHead()
     ws.Range("S6:W7").Interior.Color = cBandLt()
 
     With ws.Range("B8:W44")
@@ -1108,7 +1114,7 @@ Private Sub AddTvdStep(ByRef tvd As Double, ByRef lastMd As Double, ByRef lastIn
 End Sub
 
 Private Function IsNumericCell(ByVal v As Variant) As Boolean
-    If IsError(v) Or IsEmpty(v) Then Exit Function
+    If isError(v) Or IsEmpty(v) Then Exit Function
     If VarType(v) = vbString Then Exit Function
     IsNumericCell = IsNumeric(v)
 End Function
@@ -1117,6 +1123,8 @@ End Function
 Private Function ColLetter(ByVal col As Long) As String
     ColLetter = Chr$(64 + col)
 End Function
+
+
 
 
 

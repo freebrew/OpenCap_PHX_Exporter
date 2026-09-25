@@ -20,6 +20,10 @@ End Sub
 ' visit (shape only; no cells, no repaint, no course archive).
 Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     On Error Resume Next
+    If MDL_DownlinkTracker.DLT_IsTracker(Sh) Then
+        MDL_DownlinkTracker.DLT_EnsureButtonsIfMissing
+        Exit Sub
+    End If
     If StrComp(Sh.name, MDL_ContDI.SH_CONTDI, vbTextCompare) = 0 Then
         MDL_ContDI.EnsureContDIPullButton
         ScreenReleaseCalcForSheet
@@ -29,6 +33,11 @@ End Sub
 
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error Resume Next
+    ' DL Tracker: typed page / command / pass-fail recomputes that row's I and J.
+    If MDL_DownlinkTracker.DLT_IsTracker(Sh) Then
+        MDL_DownlinkTracker.DLT_OnSheetChange Sh, Target
+        Exit Sub
+    End If
     If ScreenBusyDepth() > 0 Then Exit Sub
     If StrComp(Sh.name, MDL_ContDI.SH_CONTDI, vbTextCompare) <> 0 Then Exit Sub
     ScreenBeginBusy

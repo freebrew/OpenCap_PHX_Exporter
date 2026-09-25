@@ -1,0 +1,597 @@
+Option Explicit
+
+' New DL Tracker entry. Controls are built at run time so the whole form
+' lives in code. Prefill comes from the last entry (MDL_DownlinkTracker hands
+' over gDLT_SourceRow / gDLT_TargetRow); bit depth from the last good survey,
+' date / time from now. I and J follow the D/L Setting; DLNK_PD offers the
+' command's two success codes (64 apart) and is cleared on FAIL.
+
+Private WithEvents cboPage As MSForms.ComboBox
+Private WithEvents cboCmd As MSForms.ComboBox
+Private WithEvents cboPass As MSForms.ComboBox
+Private WithEvents txtDate As MSForms.TextBox
+Private WithEvents txtTime As MSForms.TextBox
+Private WithEvents spnDepth As MSForms.SpinButton
+Private WithEvents spnDate As MSForms.SpinButton
+Private WithEvents spnTime As MSForms.SpinButton
+Private WithEvents btnSave As MSForms.CommandButton
+Private WithEvents btnCancel As MSForms.CommandButton
+
+Private txtRun As MSForms.TextBox
+Private cboPeriod As MSForms.ComboBox
+Private cboType As MSForms.ComboBox
+Private cboBottom As MSForms.ComboBox
+Private lblSetting As MSForms.Label
+Private txtI As MSForms.TextBox
+Private txtJ As MSForms.TextBox
+Private txtDepth As MSForms.TextBox
+Private cboCode As MSForms.ComboBox
+Private txtMon As MSForms.TextBox
+Private txtRef As MSForms.TextBox
+Private txtDrop As MSForms.TextBox
+Private txtLow As MSForms.TextBox
+Private txtRpm As MSForms.TextBox
+Private txtNote As MSForms.TextBox
+Private lblStatus As MSForms.Label
+
+Private m_ws As Worksheet
+Private m_row As Long
+Private m_src As Long
+Private m_dt As Date
+Private m_high As Boolean
+Private m_busy As Boolean
+
+Private Const X1 As Single = 12
+Private Const C1 As Single = 90
+Private Const X2 As Single = 236
+Private Const C2 As Single = 322
+Private Const ROW_H As Single = 24
+Private Const TOP0 As Single = 10
+
+' ================================================================================
+'  SETUP
+' ================================================================================
+
+Private Sub UserForm_Initialize()
+    m_busy = True
+    Set m_ws = MDL_DownlinkTracker.DltSheet()
+    m_row = MDL_DownlinkTracker.gDLT_TargetRow
+    m_src = MDL_DownlinkTracker.gDLT_SourceRow
+    BuildControls
+    LoadDefaults
+    m_busy = False
+    RefreshCommand
+    On Error Resume Next
+    cboCmd.SetFocus
+End Sub
+
+Private Sub BuildControls()
+    Me.Caption = "DL Tracker - new entry (row " & m_row & ")"
+    Me.Width = 462
+    Me.Height = TOP0 + ROW_H * 13 + 44
+
+    AddLabel "Run #", X1, RowY(0), 76
+    Set txtRun = AddText("txtRun", C1, RowY(0), 50)
+    AddLabel "DL Page", X1, RowY(1), 76
+    Set cboPage = AddCombo("cboPage", C1, RowY(1), 50)
+    AddLabel "Dnlk Cmd.", X1, RowY(2), 76
+    Set cboCmd = AddCombo("cboCmd", C1, RowY(2), 70)
+    With cboCmd
+        .ColumnCount = 2
+        .ColumnWidths = "36 pt;340 pt"
+        .ListWidth = 390
+        .ListRows = 16
+        .BoundColumn = 1
+        .TextColumn = 1
+    End With
+
+    AddLabel "D/L Setting", X1, RowY(3), 76
+    Set lblSetting = Me.Controls.Add("Forms.Label.1", "lblSetting")
+    With lblSetting
+        .Left = C1
+        .Top = RowY(3)
+        .Width = 346
+        .Height = 18
+        .Font.Size = 9
+        .Font.Bold = True
+        .BackColor = RGB(242, 242, 242)
+        .BorderStyle = fmBorderStyleSingle
+        .BorderColor = RGB(191, 191, 191)
+    End With
+
+    AddLabel "TF / INC", X1, RowY(4), 76
+    Set txtI = AddText("txtI", C1, RowY(4), 70)
+    AddLabel "SR% / AZI", X1, RowY(5), 76
+    Set txtJ = AddText("txtJ", C1, RowY(5), 70)
+    AddLabel "Bit Period", X1, RowY(6), 76
+    Set cboPeriod = AddCombo("cboPeriod", C1, RowY(6), 70)
+    AddLabel "Dnlk Type", X1, RowY(7), 76
+    Set cboType = AddCombo("cboType", C1, RowY(7), 70)
+    AddLabel "ON/OFF Bottom", X1, RowY(8), 76
+    Set cboBottom = AddCombo("cboBottom", C1, RowY(8), 70)
+    AddLabel "Low Flow / Rpm", X1, RowY(9), 76
+    Set txtLow = AddText("txtLow", C1, RowY(9), 70)
+
+    AddLabel "Bit Depth (m)", X2, RowY(0), 84
+    Set txtDepth = AddText("txtDepth", C2, RowY(0), 80)
+    Set spnDepth = AddSpin("spnDepth", C2 + 82, RowY(0))
+    AddLabel "Date", X2, RowY(1), 84
+    Set txtDate = AddText("txtDate", C2, RowY(1), 80)
+    Set spnDate = AddSpin("spnDate", C2 + 82, RowY(1))
+    AddLabel "Time", X2, RowY(2), 84
+    Set txtTime = AddText("txtTime", C2, RowY(2), 80)
+    Set spnTime = AddSpin("spnTime", C2 + 82, RowY(2))
+    AddLabel "DLNK_PD", X2, RowY(4), 84
+    Set cboCode = AddCombo("cboCode", C2, RowY(4), 80)
+    AddLabel "DL Monitor %", X2, RowY(5), 84
+    Set txtMon = AddText("txtMon", C2, RowY(5), 80)
+    AddLabel "Pass / Fail", X2, RowY(6), 84
+    Set cboPass = AddCombo("cboPass", C2, RowY(6), 80)
+    cboPass.Style = fmStyleDropDownList
+    AddLabel "Ref. Flow / Rpm", X2, RowY(7), 84
+    Set txtRef = AddText("txtRef", C2, RowY(7), 80)
+    AddLabel "% Drop", X2, RowY(8), 84
+    Set txtDrop = AddText("txtDrop", C2, RowY(8), 80)
+    AddLabel "TD RPM", X2, RowY(9), 84
+    Set txtRpm = AddText("txtRpm", C2, RowY(9), 80)
+
+    AddLabel "Comments", X1, RowY(10), 76
+    Set txtNote = AddText("txtNote", C1, RowY(10), 346)
+
+    Set lblStatus = Me.Controls.Add("Forms.Label.1", "lblStatus")
+    With lblStatus
+        .Left = X1
+        .Top = RowY(11) + 2
+        .Width = 424
+        .Height = 16
+        .Font.Size = 9
+    End With
+
+    Set btnSave = Me.Controls.Add("Forms.CommandButton.1", "btnSave")
+    With btnSave
+        .Caption = "Save Entry"
+        .Left = 256
+        .Top = RowY(12)
+        .Width = 88
+        .Height = 22
+        .Font.Bold = True
+        .Default = True
+    End With
+    Set btnCancel = Me.Controls.Add("Forms.CommandButton.1", "btnCancel")
+    With btnCancel
+        .Caption = "Cancel"
+        .Left = 350
+        .Top = RowY(12)
+        .Width = 88
+        .Height = 22
+        .Cancel = True
+    End With
+End Sub
+
+Private Sub LoadDefaults()
+    Dim src As Long
+    Dim lastSet As String, pageKey As String, cmd As String
+    Dim nextPage As String
+    Dim lo As Long, hi As Long
+    Dim d As Double
+    Dim v As Variant
+
+    ' First entry: the target row's own template values (A, Q:T), rest blank.
+    src = m_src
+    If src < MDL_DownlinkTracker.DLT_FIRST Then src = m_row
+
+    FillList cboPage, MDL_DownlinkTracker.DLT_ValidationList(m_ws.Cells(m_row, DLC_PAGE))
+    FillList cboPeriod, MDL_DownlinkTracker.DLT_ValidationList(m_ws.Cells(m_row, DLC_PERIOD))
+    FillList cboType, MDL_DownlinkTracker.DLT_ValidationList(m_ws.Cells(m_row, DLC_TYPE))
+    FillList cboBottom, MDL_DownlinkTracker.DLT_ValidationList(m_ws.Cells(m_row, DLC_BOTTOM))
+    FillList cboPass, Array("PASS", "FAIL")
+
+    txtRun.Text = CellText(src, DLC_RUN)
+    pageKey = MDL_DownlinkTracker.DLT_PageKey(m_ws.Cells(src, DLC_PAGE).Value2)
+    cmd = CellText(src, DLC_CMD)
+    ' A passed "Go to Page N" moves the tool to page N; its command set changes.
+    If m_src >= MDL_DownlinkTracker.DLT_FIRST Then
+        If UCase$(CellText(src, DLC_PASS)) <> "FAIL" Then
+            lastSet = MDL_DownlinkTracker.DLT_LookupSetting(m_ws, pageKey, cmd)
+            nextPage = GoToPage(lastSet)
+            If Len(nextPage) > 0 And nextPage <> pageKey Then
+                pageKey = nextPage
+                cmd = ""
+            End If
+        End If
+    End If
+    cboPage.Text = pageKey
+    FillCmdList
+    cboCmd.Text = cmd
+
+    cboPeriod.Text = CellText(src, DLC_PERIOD)
+    cboType.Text = CellText(src, DLC_TYPE)
+    cboBottom.Text = CellText(src, DLC_BOTTOM)
+    txtI.Text = NumText(m_ws.Cells(src, DLC_I).Value2)
+    txtJ.Text = NumText(m_ws.Cells(src, DLC_J).Value2)
+
+    If MDL_DownlinkTracker.DLT_LastSurveyBitDepth(d) Then
+        txtDepth.Text = NumText(d)
+    Else
+        txtDepth.Text = NumText(m_ws.Cells(src, DLC_DEPTH).Value2)
+    End If
+    m_dt = CDate(Int(CDbl(Now) * 1440# + 0.5) / 1440#)
+    ShowDateTime
+
+    ' Keep the code family the last entry used; default the higher code.
+    m_high = True
+    v = m_ws.Cells(src, DLC_CODE).Value2
+    If m_src >= MDL_DownlinkTracker.DLT_FIRST And IsNumeric(v) And Not IsEmpty(v) Then
+        If MDL_DownlinkTracker.DLT_SuccessCodes(CellText(src, DLC_CMD), lo, hi) Then
+            If CLng(v) = lo Then m_high = False
+        End If
+    End If
+
+    txtMon.Text = PctText(m_ws.Cells(src, DLC_MON).Value2)
+    cboPass.Text = "PASS"
+    txtRef.Text = NumText(m_ws.Cells(src, DLC_REF).Value2)
+    txtDrop.Text = PctText(m_ws.Cells(src, DLC_DROP).Value2)
+    txtLow.Text = NumText(m_ws.Cells(src, DLC_LOW).Value2)
+    txtRpm.Text = NumText(m_ws.Cells(src, DLC_RPM).Value2)
+    txtNote.Text = CellText(src, DLC_NOTE)
+
+    If m_src < MDL_DownlinkTracker.DLT_FIRST Then
+        ShowStatus "First entry - fill in the command and settings.", False
+    Else
+        ShowStatus "Copied from row " & m_src & ". Change what differs, then Save.", False
+    End If
+End Sub
+
+' ================================================================================
+'  EVENTS
+' ================================================================================
+
+Private Sub cboPage_Change()
+    Dim keep As String
+    If m_busy Then Exit Sub
+    m_busy = True
+    keep = cboCmd.Text
+    FillCmdList
+    cboCmd.Text = keep
+    m_busy = False
+    RefreshCommand
+End Sub
+
+Private Sub cboCmd_Change()
+    If m_busy Then Exit Sub
+    RefreshCommand
+End Sub
+
+Private Sub cboPass_Change()
+    If m_busy Then Exit Sub
+    RefreshIJ
+    RefreshCode
+End Sub
+
+Private Sub spnDepth_SpinUp()
+    BumpDepth 1#
+End Sub
+
+Private Sub spnDepth_SpinDown()
+    BumpDepth -1#
+End Sub
+
+Private Sub spnDate_SpinUp()
+    m_dt = m_dt + 1
+    ShowDateTime
+End Sub
+
+Private Sub spnDate_SpinDown()
+    m_dt = m_dt - 1
+    ShowDateTime
+End Sub
+
+Private Sub spnTime_SpinUp()
+    m_dt = DateAdd("n", 1, m_dt)
+    ShowDateTime
+End Sub
+
+Private Sub spnTime_SpinDown()
+    m_dt = DateAdd("n", -1, m_dt)
+    ShowDateTime
+End Sub
+
+Private Sub txtDate_Change()
+    If m_busy Then Exit Sub
+    ParseDateTime
+End Sub
+
+Private Sub txtTime_Change()
+    If m_busy Then Exit Sub
+    ParseDateTime
+End Sub
+
+Private Sub btnCancel_Click()
+    Unload Me
+End Sub
+
+Private Sub btnSave_Click()
+    Dim vals(1 To 21) As Variant
+    Dim failed As Boolean
+    Dim lo As Long, hi As Long
+    Dim ws As Worksheet
+    Dim r As Long
+
+    If Len(Trim$(cboCmd.Text)) = 0 Then ShowStatus "Pick a Dnlk command.", True: Exit Sub
+    If Not ParseDateTime() Then ShowStatus "Date or time is not valid (yyyy-mm-dd, hh:mm).", True: Exit Sub
+    If Not NumOk(txtI) Or Not NumOk(txtJ) Or Not NumOk(txtDepth) Or Not NumOk(txtMon) _
+       Or Not NumOk(txtRef) Or Not NumOk(txtDrop) Or Not NumOk(txtLow) Or Not NumOk(txtRpm) _
+       Or Not NumOk(cboCode) Then
+        ShowStatus "Numbers only in TF/INC, SR/AZI, depth, DLNK_PD, %, flow and RPM.", True
+        Exit Sub
+    End If
+    failed = (UCase$(cboPass.Text) = "FAIL")
+
+    If Not failed And Len(Trim$(cboCode.Text)) > 0 Then
+        If MDL_DownlinkTracker.DLT_SuccessCodes(cboCmd.Text, lo, hi) Then
+            If CLng(Val(cboCode.Text)) <> lo And CLng(Val(cboCode.Text)) <> hi Then
+                If MsgBox("DLNK_PD " & cboCode.Text & " is neither " & hi & " nor " & lo & _
+                          " for command " & cboCmd.Text & "." & vbCrLf & "Save anyway?", _
+                          vbQuestion + vbYesNo, "DL Tracker") <> vbYes Then Exit Sub
+            End If
+        End If
+    End If
+
+    vals(DLC_RUN) = NumOrText(txtRun.Text)
+    vals(DLC_PAGE) = NumOrText(cboPage.Text)
+    vals(DLC_CMD) = Trim$(cboCmd.Text)
+    vals(DLC_PERIOD) = NumOrText(cboPeriod.Text)
+    vals(DLC_TYPE) = TextOrEmpty(cboType.Text)
+    vals(DLC_BOTTOM) = TextOrEmpty(cboBottom.Text)
+    vals(DLC_I) = NumOrEmpty(txtI.Text)
+    vals(DLC_J) = NumOrEmpty(txtJ.Text)
+    vals(DLC_DEPTH) = NumOrEmpty(txtDepth.Text)
+    vals(DLC_DATE) = CDbl(Int(CDbl(m_dt)))
+    vals(DLC_TIME) = CDbl(m_dt) - Int(CDbl(m_dt))
+    If failed Then vals(DLC_CODE) = Empty Else vals(DLC_CODE) = NumOrEmpty(cboCode.Text)
+    vals(DLC_MON) = PctOrEmpty(txtMon.Text)
+    vals(DLC_PASS) = UCase$(cboPass.Text)
+    vals(DLC_REF) = NumOrEmpty(txtRef.Text)
+    vals(DLC_DROP) = PctOrEmpty(txtDrop.Text)
+    vals(DLC_LOW) = NumOrEmpty(txtLow.Text)
+    vals(DLC_RPM) = NumOrEmpty(txtRpm.Text)
+    vals(DLC_NOTE) = TextOrEmpty(txtNote.Text)
+
+    On Error GoTo Fail
+    Set ws = m_ws
+    r = m_row
+    MDL_DownlinkTracker.DLT_WriteEntry ws, r, vals
+    Unload Me
+    On Error Resume Next
+    ws.Activate
+    ws.Cells(r, DLC_CMD).Select
+    Exit Sub
+Fail:
+    ShowStatus "Save failed: " & Err.Description, True
+End Sub
+
+' ================================================================================
+'  REFRESH
+' ================================================================================
+
+Private Sub RefreshCommand()
+    Dim setting As String
+    setting = MDL_DownlinkTracker.DLT_LookupSetting(m_ws, PageKey(), Trim$(cboCmd.Text))
+    If Len(setting) = 0 Then
+        lblSetting.Caption = " (pick a command for page " & PageKey() & ")"
+        lblSetting.ForeColor = RGB(128, 128, 128)
+    Else
+        lblSetting.Caption = " " & setting
+        If InStr(1, setting, "ERROR", vbTextCompare) > 0 Then
+            lblSetting.ForeColor = RGB(192, 0, 0)
+        Else
+            lblSetting.ForeColor = RGB(0, 0, 0)
+        End If
+    End If
+    RefreshIJ
+    RefreshCode
+End Sub
+
+Private Sub RefreshIJ()
+    Dim pI As Double, pJ As Double, oI As Double, oJ As Double
+    Dim hasPrev As Boolean
+    Dim setting As String
+
+    hasPrev = MDL_DownlinkTracker.DLT_PrevIJ(m_ws, m_row, PageKey(), pI, pJ)
+    If UCase$(cboPass.Text) = "FAIL" Then
+        If hasPrev Then txtI.Text = NumText(pI): txtJ.Text = NumText(pJ)
+        Exit Sub
+    End If
+    setting = MDL_DownlinkTracker.DLT_LookupSetting(m_ws, PageKey(), Trim$(cboCmd.Text))
+    Select Case MDL_DownlinkTracker.DLT_ComputeIJ(setting, hasPrev, pI, pJ, oI, oJ)
+        Case DLT_IJ_SET
+            txtI.Text = NumText(oI)
+            txtJ.Text = NumText(oJ)
+        Case DLT_IJ_BLANK
+            txtI.Text = ""
+            txtJ.Text = ""
+    End Select
+End Sub
+
+Private Sub RefreshCode()
+    Dim lo As Long, hi As Long
+    cboCode.Clear
+    If UCase$(cboPass.Text) = "FAIL" Then
+        cboCode.Text = ""
+        Exit Sub
+    End If
+    If MDL_DownlinkTracker.DLT_SuccessCodes(cboCmd.Text, lo, hi) Then
+        cboCode.AddItem CStr(hi)
+        cboCode.AddItem CStr(lo)
+        If m_high Then cboCode.Text = CStr(hi) Else cboCode.Text = CStr(lo)
+    Else
+        cboCode.Text = ""
+    End If
+End Sub
+
+Private Sub FillCmdList()
+    Dim lst As Variant
+    cboCmd.Clear
+    lst = MDL_DownlinkTracker.DLT_CommandList(m_ws, PageKey())
+    If IsArray(lst) Then cboCmd.List = lst
+End Sub
+
+' ================================================================================
+'  HELPERS
+' ================================================================================
+
+Private Function RowY(ByVal k As Long) As Single
+    RowY = TOP0 + ROW_H * k
+End Function
+
+Private Function AddLabel(ByVal caption As String, ByVal x As Single, ByVal y As Single, _
+                          ByVal w As Single) As MSForms.Label
+    Set AddLabel = Me.Controls.Add("Forms.Label.1")
+    With AddLabel
+        .Caption = caption
+        .Left = x
+        .Top = y + 3
+        .Width = w
+        .Height = 14
+        .Font.Size = 9
+    End With
+End Function
+
+Private Function AddText(ByVal nm As String, ByVal x As Single, ByVal y As Single, _
+                         ByVal w As Single) As MSForms.TextBox
+    Set AddText = Me.Controls.Add("Forms.TextBox.1", nm)
+    With AddText
+        .Left = x
+        .Top = y
+        .Width = w
+        .Height = 18
+        .Font.Size = 9
+    End With
+End Function
+
+Private Function AddCombo(ByVal nm As String, ByVal x As Single, ByVal y As Single, _
+                          ByVal w As Single) As MSForms.ComboBox
+    Set AddCombo = Me.Controls.Add("Forms.ComboBox.1", nm)
+    With AddCombo
+        .Left = x
+        .Top = y
+        .Width = w
+        .Height = 18
+        .Font.Size = 9
+        .Style = fmStyleDropDownCombo
+        .MatchRequired = False
+    End With
+End Function
+
+Private Function AddSpin(ByVal nm As String, ByVal x As Single, ByVal y As Single) As MSForms.SpinButton
+    Set AddSpin = Me.Controls.Add("Forms.SpinButton.1", nm)
+    With AddSpin
+        .Left = x
+        .Top = y
+        .Width = 14
+        .Height = 18
+        .Orientation = fmOrientationVertical
+        .Min = -32000
+        .Max = 32000
+        .Value = 0
+    End With
+End Function
+
+Private Sub FillList(ByVal cbo As MSForms.ComboBox, ByVal items As Variant)
+    Dim i As Long
+    cbo.Clear
+    If Not IsArray(items) Then Exit Sub
+    For i = LBound(items) To UBound(items)
+        cbo.AddItem CStr(items(i))
+    Next i
+End Sub
+
+Private Function PageKey() As String
+    PageKey = MDL_DownlinkTracker.DLT_PageKey(cboPage.Text)
+End Function
+
+' "Go to Page 3: HIA Mode" -> "3"; "Go to Page 0 with ..." -> "0".
+Private Function GoToPage(ByVal setting As String) As String
+    Dim ch As String
+    If Left$(setting, 11) <> "Go to Page " Then Exit Function
+    ch = Mid$(setting, 12, 1)
+    If ch Like "[0-9]" Then GoToPage = ch
+End Function
+
+Private Sub BumpDepth(ByVal stepM As Double)
+    If Not IsNumeric(txtDepth.Text) Then Exit Sub
+    txtDepth.Text = NumText(CDbl(txtDepth.Text) + stepM)
+End Sub
+
+Private Sub ShowDateTime()
+    m_busy = True
+    txtDate.Text = Format$(m_dt, "yyyy-mm-dd")
+    txtTime.Text = Format$(m_dt, "hh:nn")
+    m_busy = False
+End Sub
+
+Private Function ParseDateTime() As Boolean
+    Dim d As Date, t As Date
+    On Error GoTo Bad
+    If Not IsDate(txtDate.Text) Or Not IsDate(txtTime.Text) Then GoTo Bad
+    d = DateValue(txtDate.Text)
+    t = TimeValue(txtTime.Text)
+    m_dt = d + t
+    ParseDateTime = True
+    Exit Function
+Bad:
+    ParseDateTime = False
+End Function
+
+Private Function CellText(ByVal r As Long, ByVal c As Long) As String
+    CellText = Trim$(CStr(m_ws.Cells(r, c).Value2 & ""))
+End Function
+
+Private Function NumText(ByVal v As Variant) As String
+    If IsEmpty(v) Or IsError(v) Then Exit Function
+    If Not IsNumeric(v) Then Exit Function
+    NumText = CStr(Round(CDbl(v), 2))
+End Function
+
+Private Function PctText(ByVal v As Variant) As String
+    If IsEmpty(v) Or IsError(v) Then Exit Function
+    If Not IsNumeric(v) Then Exit Function
+    PctText = CStr(Round(CDbl(v) * 100#, 1))
+End Function
+
+Private Function NumOk(ByVal ctl As Object) As Boolean
+    Dim s As String
+    s = Trim$(ctl.Text)
+    NumOk = (Len(s) = 0) Or IsNumeric(s)
+End Function
+
+Private Function NumOrEmpty(ByVal s As String) As Variant
+    s = Trim$(s)
+    If Len(s) = 0 Or Not IsNumeric(s) Then NumOrEmpty = Empty Else NumOrEmpty = CDbl(s)
+End Function
+
+Private Function PctOrEmpty(ByVal s As String) As Variant
+    s = Trim$(s)
+    If Len(s) = 0 Or Not IsNumeric(s) Then PctOrEmpty = Empty Else PctOrEmpty = CDbl(s) / 100#
+End Function
+
+Private Function NumOrText(ByVal s As String) As Variant
+    s = Trim$(s)
+    If Len(s) = 0 Then
+        NumOrText = Empty
+    ElseIf IsNumeric(s) Then
+        NumOrText = CDbl(s)
+    Else
+        NumOrText = s
+    End If
+End Function
+
+Private Function TextOrEmpty(ByVal s As String) As Variant
+    s = Trim$(s)
+    If Len(s) = 0 Then TextOrEmpty = Empty Else TextOrEmpty = s
+End Function
+
+Private Sub ShowStatus(ByVal msg As String, ByVal isError As Boolean)
+    lblStatus.Caption = msg
+    If isError Then lblStatus.ForeColor = RGB(192, 0, 0) Else lblStatus.ForeColor = RGB(64, 64, 64)
+End Sub
