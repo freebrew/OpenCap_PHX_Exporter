@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — OpenCap Data Exporter</title>
+  <link rel="canonical" href="https://freebrew.github.io/OpenCap_PHX_Exporter/privacy.html">
+  <meta name="description" content="Privacy policy for the OpenCap Data Exporter browser extension.">
+  <style>
+    :root { color-scheme: light dark; --text: #1a1a1a; --muted: #444; --border: #ccc; --bg: #fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --text: #e8e8e8; --muted: #b0b0b0; --border: #444; --bg: #121212; }
+    }
+    body {
+      font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+      max-width: 42rem;
+      margin: 2rem auto;
+      padding: 0 1.25rem 3rem;
+      color: var(--text);
+      background: var(--bg);
+    }
+    h1 { font-size: 1.5rem; font-weight: 650; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.05rem; font-weight: 650; margin-top: 1.75rem; margin-bottom: 0.5rem; }
+    .meta { font-size: 0.875rem; color: var(--muted); margin-bottom: 1.5rem; }
+    p, ul { margin: 0.65rem 0; font-size: 0.95rem; }
+    ul { padding-left: 1.25rem; }
+    li { margin: 0.35rem 0; }
+    a { color: inherit; }
+    footer { font-size: 0.8rem; color: var(--muted); margin-top: 2.5rem; }
+  </style>
+</head>
+<body>
+
+  <h1>Privacy Policy</h1>
+  <p class="meta">
+    OpenCap Data Exporter (Chrome Web Store item <code>egafclljokidcoiipaiojlaamgkooffb</code>,
+    including the same package when installed in Microsoft Edge).<br>
+    Effective date: October 25, 2026.
+  </p>
+
+  <p>
+    This page is the privacy policy for that extension. It describes what the extension
+    does with information from your FieldCap session, and what it does not do.
+  </p>
+
+  <h2>Who operates it</h2>
+  <p>
+    OpenCap Data Exporter is an independent, unofficial tool published by Bruno Brottes.
+    It is not affiliated with PHX Technology, FieldCap, or Pason Systems.
+    Questions about this policy: open an issue at
+    <a href="https://github.com/freebrew/OpenCap_PHX_Exporter/issues">github.com/freebrew/OpenCap_PHX_Exporter/issues</a>.
+  </p>
+
+  <h2>Information the extension processes</h2>
+  <p>
+    The extension does not ask you to create an account, and it does not collect your
+    FieldCap password. While you are already logged into FieldCap in the same browser,
+    and only after you choose Fetch, it reads job information you can already see and
+    turns it into CSV files on your computer:
+  </p>
+  <ul>
+    <li>Job identity and job fields returned by FieldCap for the job id you enter.</li>
+    <li>Crew and personnel records, which can include names, roles, phone numbers, and email addresses.</li>
+    <li>BHA equipment, inventory, serials, hours, and drilled metres.</li>
+    <li>Daily slide and rotate metres.</li>
+    <li>Daily ticket cost totals and ticket counts.</li>
+  </ul>
+  <p>
+    It also keeps, on your device only, the CSV text from the last fetch, the folder
+    you picked, and a few extension settings (such as whether a FieldCap dialog is
+    suppressed). Optional network sniffing, if you turn it on, records FieldCap request
+    addresses in extension storage on that same device so an unknown endpoint can be
+    identified. It does not record your password.
+  </p>
+
+  <h2>How that information is used</h2>
+  <p>
+    The information is used only to build the CSV files you asked for and to show fetch
+    status in the extension popup. The extension does not use it for advertising,
+    credit, or profiling, and it does not sell it.
+  </p>
+
+  <h2>Where it goes</h2>
+  <ul>
+    <li>
+      <strong>FieldCap.</strong> Requests go to FieldCap hosts you are logged into
+      (<code>*.phxtech.com</code>, including <code>fieldcap-cdn.phxtech.com</code>),
+      using the browser session you already have. On Edge, those requests run inside
+      the open FieldCap tab. On Chrome, the extension service worker makes them.
+    </li>
+    <li>
+      <strong>Your computer.</strong> CSV files are written to a folder you choose, or
+      to your Downloads folder if that write is blocked. A copy of the latest CSV text
+      stays in the extension’s local storage until you clear it or fetch again.
+    </li>
+    <li>
+      <strong>Not to the publisher.</strong> The extension does not send job, crew,
+      cost, or other FieldCap data to the author, to GitHub, or to any analytics service.
+      There are no ads and no third-party trackers.
+    </li>
+  </ul>
+
+  <h2>Permissions</h2>
+  <ul>
+    <li><strong>Host access</strong> to <code>*.phxtech.com</code> — call FieldCap while you are logged in.</li>
+    <li><strong>storage</strong> — keep the last CSVs and settings on the device.</li>
+    <li><strong>downloads</strong> — save a CSV when the folder write is blocked.</li>
+    <li><strong>activeTab</strong> and <strong>scripting</strong> — read the FieldCap page you have open and, on Edge, run the FieldCap request there.</li>
+    <li><strong>webRequest</strong> — see FieldCap request addresses on <code>*.phxtech.com</code> when sniffing is on. It is not used on other sites.</li>
+    <li><strong>alarms</strong> — remind the toolbar icon when a store update is waiting.</li>
+  </ul>
+
+  <h2>Retention and your choices</h2>
+  <p>
+    Data stays until you delete the CSV files, clear the extension’s site data, or
+    remove the extension. Removing the extension deletes its local storage.
+    You can skip any export (including ticket costs and crew) by clearing that
+    checkbox before Fetch.
+  </p>
+
+  <h2>Sharing you do yourself</h2>
+  <p>
+    If you email a CSV, put it in a workbook, or copy it to a shared drive, that
+    copy is under your control and your employer’s rules. This policy does not
+    cover what you do with the files after they leave the extension.
+  </p>
+
+  <h2>Children</h2>
+  <p>The extension is a field operations tool. It is not directed at children under 13.</p>
+
+  <h2>Changes</h2>
+  <p>
+    If this policy changes, the effective date at the top of this page will change.
+    The current policy is always this page:
+    <a href="https://freebrew.github.io/OpenCap_PHX_Exporter/privacy.html">https://freebrew.github.io/OpenCap_PHX_Exporter/privacy.html</a>.
+  </p>
+
+  <footer>
+    <p>
+      <a href="https://freebrew.github.io/OpenCap_PHX_Exporter/">OpenCap</a>
+      · <a href="https://github.com/freebrew/OpenCap_PHX_Exporter">Source</a>
+    </p>
+  </footer>
+
+</body>
+</html>
