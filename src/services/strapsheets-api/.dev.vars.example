@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local `wrangler dev`. Never commit .dev.vars.
+GOOGLE_CLIENT_SECRET=
+MICROSOFT_CLIENT_SECRET=
+# The Sheets service account key, PEM with newlines written as \n.
+SHEETS_PRIVATE_KEY=
+# Random, at least 32 bytes. Signs the session tokens.
+TOKEN_SIGNING_KEY=

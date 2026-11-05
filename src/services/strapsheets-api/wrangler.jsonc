@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "strapsheets-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+  // Non-secret config. Secrets (GOOGLE_CLIENT_SECRET, MICROSOFT_CLIENT_SECRET,
+  // SHEETS_PRIVATE_KEY, TOKEN_SIGNING_KEY) are set with `wrangler secret put`.
+  "vars": {
+    "APP_BASE_URL": "http://localhost:8787",
+    "MAIL_FROM": "strapsheets@example.com",
+    "GOOGLE_CLIENT_ID": "",
+    "MICROSOFT_CLIENT_ID": "",
+    "MICROSOFT_TENANT": "common",
+    "SHEETS_CLIENT_EMAIL": "",
+    "SHEETS_SPREADSHEET_ID": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "strapsheets",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    { "binding": "KV", "id": "00000000000000000000000000000000" }
+  ],
+  "send_email": [{ "name": "EMAIL" }],
+  "durable_objects": {
+    "bindings": [{ "name": "PAIRING", "class_name": "PairingLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PairingLimiter"] }]
+}
