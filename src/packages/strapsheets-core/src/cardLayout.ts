@@ -147,7 +147,12 @@ function drawDrawing(canvas: PageCanvas, writer: PdfWriter, art: CardArt, tableW
   const aspect = art.w / art.h;
   const width = Math.min(tableWidth * DRAWING_SHARE, DRAWING_MAX_HEIGHT * aspect);
   const height = width / aspect;
-  canvas.image(writer.imageName(art), centered ? (tableWidth - width) / 2 : 6, 0, width, height);
+  const left = centered ? (tableWidth - width) / 2 : 6;
+  if (art.kind === "vector") {
+    canvas.paintItems(art.items, left, 0, width / art.w, height / art.h);
+    return height;
+  }
+  canvas.image(writer.imageName(art), left, 0, width, height);
   return height;
 }
 

@@ -45,10 +45,14 @@ describe("the strap card layout", () => {
     expect(drawn).not.toContain("A - BitBox");
   });
 
-  it("puts the tool drawing on the page", () => {
+  it("puts the tool drawing on the page as vectors", () => {
     const pdf = renderCards([MOTOR]);
-    expect(images(pdf)).toBe(1);
-    expect(text(pdf)).toContain("/Predictor 15");
+    const source = text(pdf);
+    expect(images(pdf)).toBe(0);
+    expect(source).not.toContain("/Predictor 15");
+    expect(source).toContain(" m ");
+    expect(source).toContain(" l ");
+    expect(source).toContain("0.14 0.19 0.22 RG");
   });
 
   it("puts every entry of one family on one page, one card each", () => {
@@ -106,7 +110,8 @@ describe("the strap card layout", () => {
       for (const step of family.steps) if (step.kind === "choice" && step.optionsKey === "subTypeOptions") entry.cells[step.col] = "Float";
       const pdf = renderCards([entry]);
       expect(strings(pdf), family.which).toContain("SER-1");
-      expect(images(pdf), family.which).toBe(1);
+      expect(images(pdf), family.which).toBe(0);
+      expect(text(pdf), family.which).toContain(" l ");
       expect(pageCount(pdf), family.which).toBe(1);
     }
   });

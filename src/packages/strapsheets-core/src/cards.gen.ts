@@ -2071,17 +2071,17 @@ export const PRINT_CARDS: PrintCard[] = [
       [
         2,
         2,
-        "F OD"
+        "E OD"
       ],
       [
         2,
         3,
-        "G OD"
+        "F OD"
       ],
       [
         2,
         4,
-        "H ID"
+        "G ID"
       ]
     ],
     "fields": [

@@ -28,14 +28,48 @@ export interface PrintCard {
   fields: ([number, number, number] | [number, number, number, number])[];
 }
 
-/** A tool drawing as the pieces a PDF image needs; the PNG is never decoded. */
-export interface CardArt {
+export type VectorOp =
+  | { op: "M" | "L"; x: number; y: number }
+  | { op: "C"; x1: number; y1: number; x2: number; y2: number; x: number; y: number }
+  | { op: "Z" };
+
+export type VectorItem =
+  | {
+      kind: "path";
+      ops: VectorOp[];
+      fill?: string;
+      stroke?: string;
+      width?: number;
+      dash?: number[];
+      evenodd?: boolean;
+    }
+  | {
+      kind: "line";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      stroke: string;
+      width: number;
+      dash?: number[];
+    };
+
+/** A tool drawing as path operators. Diagram letters are outlines, not a PDF font. */
+export interface VectorArt {
+  kind: "vector";
   w: number;
   h: number;
-  /** Palette PNG (8-bit indexed) when true, else 8-bit RGB. */
+  items: VectorItem[];
+}
+
+/** Kept so an older bitmap drawing can still be named. The shipped cards use vectors. */
+export interface ImageArt {
+  kind: "image";
+  w: number;
+  h: number;
   indexed: boolean;
-  /** Base64 of the RGB palette, "" for RGB. */
   palette: string;
-  /** Base64 of the PNG's joined IDAT stream. */
   data: string;
 }
+
+export type CardArt = VectorArt | ImageArt;

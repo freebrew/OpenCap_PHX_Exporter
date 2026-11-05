@@ -12,8 +12,8 @@ export interface DiagramMark {
 }
 
 export interface ToolDiagram {
-  /** Path under public/. */
-  file: string;
+  /** Inner SVG markup from the shared vector kit. The generator rejects scripts. */
+  svg: string;
   size: { w: number; h: number };
   marks: DiagramMark[];
   /** Step labels whose letter on the drawing differs from the label's own letter. */

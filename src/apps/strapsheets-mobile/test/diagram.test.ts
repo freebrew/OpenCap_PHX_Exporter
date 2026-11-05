@@ -22,7 +22,7 @@ describe("tool diagrams", () => {
 
   it("uses the drawing's own letter where it differs from the label", () => {
     const exciter = TOOL_DIAGRAMS["Exciter / Agitator / Sidewinder"]!;
-    expect(letterForStep({ kind: "decimal", col: 9, id: "m", header: "", label: "E - Mandrill OD" }, exciter)).toBe("F");
+    expect(letterForStep({ kind: "decimal", col: 9, id: "m", header: "", label: "E - Mandrill OD" }, exciter)).toBe("E");
     expect(letterForStep({ kind: "decimal", col: 9, id: "m", header: "", label: "A - BitBox" }, TOOL_DIAGRAMS.Motor)).toBe("A");
   });
 });

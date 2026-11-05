@@ -16,8 +16,15 @@ export function Diagram({ diagram, letter }: { diagram: ToolDiagram; letter: str
   return (
     <div className="diagram" style={{ "--ratio": h / w } as CSSProperties}>
       <div className="diagram-frame">
-        <img src={diagram.file} alt="Tool measurement diagram" />
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet">
+        <svg
+          className="drawing"
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label="Tool measurement diagram"
+          dangerouslySetInnerHTML={{ __html: diagram.svg }}
+        />
+        <svg className="overlay" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet">
           {mark && (
             <>
               <defs>

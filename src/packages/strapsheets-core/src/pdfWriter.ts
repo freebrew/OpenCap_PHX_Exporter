@@ -1,7 +1,7 @@
 // A small PDF writer for the strap card: pages of drawing operators, the two standard Helvetica
 // fonts, and PNG-predictor images. Bytes are assembled as bytes, so an image stream survives.
 
-import type { CardArt } from "./cardSpec";
+import type { CardArt, ImageArt, VectorItem, VectorOp } from "./cardSpec";
 import { plainText } from "./helvetica";
 
 export type Rgb = readonly [number, number, number];
@@ -84,6 +84,43 @@ export class PageCanvas {
     this.ops.push(`q ${num(w * this.frame.scale)} 0 0 ${num(h * this.frame.scale)} ${num(this.px(x))} ${num(this.py(y + h))} cm /${name} Do Q`);
   }
 
+  /** Paint one drawing. `sx` and `sy` are layout units per art unit. */
+  paintItems(items: VectorItem[], ox: number, oy: number, sx: number, sy: number): void {
+    for (const item of items) {
+      if (item.kind === "line") {
+        const dash = dashOf(item.dash, sx * this.frame.scale);
+        this.ops.push(
+          `q ${rgbOf(item.stroke)} RG ${num(item.width * sx * this.frame.scale)} w ${dash}` +
+            `${this.point(ox + item.x1 * sx, oy + item.y1 * sy)} m ` +
+            `${this.point(ox + item.x2 * sx, oy + item.y2 * sy)} l S Q`,
+        );
+        continue;
+      }
+      const fill = item.fill && item.fill !== "none" ? rgbOf(item.fill) : "";
+      const stroke = item.stroke && item.stroke !== "none" ? rgbOf(item.stroke) : "";
+      const width = item.width ? `${num(item.width * sx * this.frame.scale)} w ` : "";
+      const dash = dashOf(item.dash, sx * this.frame.scale);
+      const paint = fill && stroke ? (item.evenodd ? "B*" : "B") : fill ? (item.evenodd ? "f*" : "f") : "S";
+      this.ops.push(`q ${fill ? `${fill} rg ` : ""}${stroke ? `${stroke} RG ` : ""}${width}${dash}${this.pathOps(item.ops, ox, oy, sx, sy)} ${paint} Q`);
+    }
+  }
+
+  private point(x: number, y: number): string {
+    return `${num(this.px(x))} ${num(this.py(y))}`;
+  }
+
+  private pathOps(ops: VectorOp[], ox: number, oy: number, sx: number, sy: number): string {
+    return ops
+      .map((op) => {
+        if (op.op === "Z") return "h";
+        if (op.op === "C") {
+          return `${this.point(ox + op.x1 * sx, oy + op.y1 * sy)} ${this.point(ox + op.x2 * sx, oy + op.y2 * sy)} ${this.point(ox + op.x * sx, oy + op.y * sy)} c`;
+        }
+        return `${this.point(ox + op.x * sx, oy + op.y * sy)} ${op.op === "M" ? "m" : "l"}`;
+      })
+      .join(" ");
+  }
+
   content(): string {
     return this.ops.join("\n");
   }
@@ -101,6 +138,7 @@ export class PdfWriter {
 
   /** The resource name of a drawing, registering it the first time it is used. */
   imageName(art: CardArt): string {
+    if (art.kind !== "image") throw new Error("vector drawings are painted, not embedded");
     let known = this.placed.get(art);
     if (!known) {
       known = { name: `Im${this.placed.size}`, art };
@@ -125,7 +163,10 @@ export class PdfWriter {
       [encoder.encode("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")],
       [encoder.encode("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")],
     ];
-    for (const item of placed) objects.push(imageObject(item.art));
+    for (const item of placed) {
+      if (item.art.kind !== "image") throw new Error("vector art has no image object");
+      objects.push(imageObject(item.art));
+    }
     this.pages.forEach((page, index) => {
       const contentId = firstPage + index * 2;
       const stream = encoder.encode(page.content());
@@ -167,7 +208,20 @@ export class PdfWriter {
 }
 
 /** The PNG's own deflate stream, told to undo PNG filtering with a predictor. */
-function imageObject(art: CardArt): Uint8Array[] {
+function rgbOf(hex: string): string {
+  const value = Number.parseInt(hex.slice(1), 16);
+  const red = ((value >> 16) & 255) / 255;
+  const green = ((value >> 8) & 255) / 255;
+  const blue = (value & 255) / 255;
+  return color([red, green, blue]);
+}
+
+function dashOf(dash: number[] | undefined, sx: number): string {
+  if (!dash || dash.length === 0) return "";
+  return `[${dash.map((part) => num(part * sx)).join(" ")}] 0 d `;
+}
+
+function imageObject(art: ImageArt): Uint8Array[] {
   const data = fromBase64(art.data);
   const space = art.indexed ? `[/Indexed /DeviceRGB ${fromBase64(art.palette).length / 3 - 1} <${hex(fromBase64(art.palette))}>]` : "/DeviceRGB";
   const colors = art.indexed ? 1 : 3;

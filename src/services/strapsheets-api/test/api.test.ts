@@ -112,7 +112,8 @@ describe("entries, PDF and email", () => {
     const text = new TextDecoder("latin1").decode(await response.arrayBuffer());
     expect(text.startsWith("%PDF-1.4")).toBe(true);
     expect(text).toContain("/Count 2");
-    expect(text.split("/Subtype /Image")).toHaveLength(3);
+    expect(text.split("/Subtype /Image")).toHaveLength(1);
+    expect(text).toContain(" l ");
     for (const drawn of ["(MTR-001) Tj", "(MTR-002) Tj", "(JAR-001) Tj", "(MOTORS) Tj", "(JARS) Tj", "(H LEN) Tj"]) expect(text).toContain(drawn);
     expect(text).not.toContain("Strap Sheet -");
   });

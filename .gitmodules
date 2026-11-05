@@ -1,0 +1,3 @@
+[submodule "src/strapsheets"]
+	path = src/strapsheets
+	url = https://github.com/freebrew/StrapSheets.git
