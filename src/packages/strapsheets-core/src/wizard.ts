@@ -1,0 +1,134 @@
+// The entry wizard's rules, with no UI. One family's steps run in schema order; text is forced to
+// capitals as it is typed, decimals keep digits and one dot, a blank measure skips, and a range
+// only warns. The phone renders these; the tests pin them.
+
+import { decimalText, upperText, type EntryPayload } from "./entry";
+import type { InventoryItem } from "./inventory";
+import { rangeFor, rangeWarning, type MeasureRange, type RangeWarning } from "./ranges";
+import { stepColumns, type EntryFamily, type EntryStep } from "./schema";
+
+export type Cells = Record<number, string>;
+
+/** The family a tool button names, or null when the schema has none. */
+export function findFamily(families: EntryFamily[], which: string): EntryFamily | null {
+  return families.find((family) => family.which === which) ?? null;
+}
+
+/** The Serial step. Every generated family starts with it. */
+export function serialStep(family: EntryFamily): EntryStep | null {
+  return family.steps.find((step) => step.id === "serial") ?? null;
+}
+
+/** The serial an entry was taken for, upper-cased; "" when its family or serial is missing. */
+export function entrySerial(families: EntryFamily[], entry: EntryPayload): string {
+  const family = findFamily(families, entry.which);
+  const step = family ? serialStep(family) : null;
+  return step && step.kind === "text" ? (entry.cells[step.col] ?? "").trim().toUpperCase() : "";
+}
+
+/** Normalised serials (letters and digits only) that already have a strap sheet, for matching inventory. */
+export function measuredSerials(families: EntryFamily[], entries: EntryPayload[]): Set<string> {
+  const out = new Set<string>();
+  for (const entry of entries) {
+    const key = entrySerial(families, entry).replace(/[^A-Z0-9]/g, "");
+    if (key !== "") out.add(key);
+  }
+  return out;
+}
+
+/**
+ * What a keystroke leaves in the field. Text goes to capitals at once (the deployed form does the
+ * same on input); a decimal drops anything but digits and keeps the first dot.
+ */
+export function liveValue(step: EntryStep, raw: string): string {
+  switch (step.kind) {
+    case "text":
+      return raw.toUpperCase();
+    case "decimal": {
+      const digits = raw.replace(/[^0-9.]/g, "");
+      const dot = digits.indexOf(".");
+      return dot < 0 ? digits : digits.slice(0, dot + 1) + digits.slice(dot + 1).replaceAll(".", "");
+    }
+    case "choice":
+    case "boxPin":
+    case "threads":
+      return raw;
+    default: {
+      const never: never = step;
+      return never;
+    }
+  }
+}
+
+/** The cells with one column set; a blank value clears the column. */
+export function setCell(cells: Cells, col: number, value: string): Cells {
+  const next = { ...cells };
+  if (value === "") delete next[col];
+  else next[col] = value;
+  return next;
+}
+
+/** Why the user cannot leave this step, or null. Only a required blank or a bad number stops them. */
+export function stepProblem(step: EntryStep, cells: Cells): string | null {
+  const values = stepColumns(step).map((col) => cells[col] ?? "");
+  if (step.required && values.every((value) => value.trim() === "")) return `${step.label} is required.`;
+  if (step.kind === "decimal" && decimalText(values[0] ?? "") == null) return `${step.label} needs a number.`;
+  return null;
+}
+
+/** Whether a measure sits outside the user's range. Never a reason to stop. */
+export function stepWarning(family: EntryFamily, step: EntryStep, cells: Cells, ranges: MeasureRange[]): RangeWarning {
+  if (step.kind !== "decimal") return null;
+  const text = decimalText(cells[step.col] ?? "");
+  if (text == null || text === "") return null;
+  return rangeWarning(rangeFor(ranges, family.which, step.id), Number(text));
+}
+
+/** The steps a user can set a range on: the family's measures. */
+export function measureSteps(family: EntryFamily): EntryStep[] {
+  return family.steps.filter((step) => step.kind === "decimal");
+}
+
+/**
+ * Prefill from a picked inventory item. The serial is set in capitals; measures the same serial
+ * had on its newest earlier entry of this family fill only columns the user left blank.
+ */
+export function prefillFromItem(family: EntryFamily, cells: Cells, item: InventoryItem, history: EntryPayload[]): Cells {
+  const serial = serialStep(family);
+  if (!serial || serial.kind !== "text") return cells;
+  let next = setCell(cells, serial.col, upperText(item.serialNumber));
+  const earlier = [...history].reverse().find((entry) => entry.which === family.which && upperText(entry.cells[serial.col] ?? "") === upperText(item.serialNumber));
+  if (!earlier) return next;
+  for (const step of family.steps) {
+    if (step.id === "serial") continue;
+    for (const col of stepColumns(step)) {
+      const known = earlier.cells[col];
+      if (known && !next[col]) next = setCell(next, col, known);
+    }
+  }
+  return next;
+}
+
+/** The confirm screen: each filled step as label and value, in step order. */
+export function entryLines(family: EntryFamily, cells: Cells): { label: string; value: string }[] {
+  const lines: { label: string; value: string }[] = [];
+  for (const step of family.steps) {
+    switch (step.kind) {
+      case "text":
+      case "decimal":
+      case "choice":
+        if (cells[step.col]) lines.push({ label: step.label, value: cells[step.col] ?? "" });
+        break;
+      case "boxPin":
+      case "threads":
+        if (cells[step.cols.upper]) lines.push({ label: `${step.label} Upper`, value: cells[step.cols.upper] ?? "" });
+        if (cells[step.cols.lower]) lines.push({ label: `${step.label} Lower`, value: cells[step.cols.lower] ?? "" });
+        break;
+      default: {
+        const never: never = step;
+        return never;
+      }
+    }
+  }
+  return lines;
+}
