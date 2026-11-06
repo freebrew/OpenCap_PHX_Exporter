@@ -9,7 +9,10 @@ import type { CardArt, PrintCard } from "./cardSpec";
 import { PRINT_CARDS } from "./cards.gen";
 import type { EntryPayload } from "./entry";
 import { textWidth, wrapText } from "./helvetica";
+import { ENTRY_FAMILIES } from "./families.gen";
+import { MWD_WHICH, mwdCardEntry } from "./mwd";
 import { PageCanvas, type PdfWriter, type Rgb } from "./pdfWriter";
+import { findFamily } from "./wizard";
 
 const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;
@@ -78,6 +81,18 @@ export function printCardFor(entry: EntryPayload): { card: PrintCard; order: num
   return SUBS_FALLBACK ? { card: SUBS_FALLBACK, order: PRINT_CARDS.indexOf(first) + 0.5 } : { card: first, order: PRINT_CARDS.indexOf(first) };
 }
 
+/** The cells the card reads: the MWD Carrier's named cells become its sheet row, every other family's are already columns. */
+function cardEntry(entry: EntryPayload): EntryPayload {
+  const family = entry.which === MWD_WHICH ? findFamily(ENTRY_FAMILIES, entry.which) : null;
+  return family ? mwdCardEntry(family, entry) : entry;
+}
+
+/** The columns a header cell covers: one, or more where the card merges it (the MWD card's Date, TOP and BTM). */
+function spanOf(card: PrintCard, row: number, column: number): number {
+  if (row > 1) return 1;
+  return card.headerSpans?.find(([first]) => first === column)?.[1] ?? 1;
+}
+
 /** Pixel width of every column of a card, as the live tab is sized. */
 export function columnWidths(card: PrintCard): number[] {
   const dual = card.positions === 2;
@@ -96,8 +111,9 @@ export function layoutCards(entries: EntryPayload[], writer: PdfWriter): void {
   const groups: Group[] = [];
   const unknown: EntryPayload[] = [];
   const custom = entries.filter((entry) => entry.which === "Custom");
-  for (const entry of entries) {
-    if (entry.which === "Custom") continue;
+  for (const source of entries) {
+    if (source.which === "Custom") continue;
+    const entry = cardEntry(source);
     const target = printCardFor(entry);
     if (!target) {
       unknown.push(entry);
@@ -172,7 +188,8 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
   const rowTop = (row: number) => top + card.rowHeights.slice(0, row).reduce((sum, height) => sum + height, 0);
   const cell = (row: number, column: number): Cell => {
     const left = xs[column + shift] ?? 0;
-    return { x: left, y: rowTop(row), w: (xs[column + shift + 1] ?? left) - left, h: card.rowHeights[row] ?? 0 };
+    const span = spanOf(card, row, column);
+    return { x: left, y: rowTop(row), w: (xs[column + shift + span] ?? left) - left, h: card.rowHeights[row] ?? 0 };
   };
   const serialRow = card.serialCell[0];
   const serialColumn = card.serialCell[1];
@@ -181,9 +198,10 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
     const labels = card.statics.filter(([row]) => row === labelRow);
     if (labels.length === 0) continue;
     const firstColumn = Math.min(...labels.map(([, column]) => column));
-    const lastColumn = Math.max(...labels.map(([, column]) => column));
+    const lastColumn = Math.max(...labels.map(([, column]) => column + spanOf(card, labelRow, column) - 1));
+    const merged = new Set(labels.flatMap(([, column]) => Array.from({ length: spanOf(card, labelRow, column) - 1 }, (_, inner) => column + 1 + inner)));
     const metric = labels.filter(([, , text]) => METRIC_LABEL.test(text)).map(([, column]) => column);
-    const metricStart = metric.length > 0 ? Math.min(...metric) : null;
+    const metricStart = metric.length > 0 ? (card.metricFrom ?? Math.min(...metric)) : null;
     const inBlock = (column: number) => metricStart != null && column >= metricStart;
 
     for (const [, column] of labels) {
@@ -202,6 +220,7 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
     canvas.strokeRect(left, head.y, width, height, THIN);
     canvas.line(left, head.y + head.h, left + width, head.y + head.h, THIN);
     for (let column = firstColumn + 1; column <= lastColumn; column++) {
+      if (merged.has(column)) continue;
       const x = cell(labelRow, column).x;
       canvas.line(x, head.y, x, head.y + height, THIN);
     }

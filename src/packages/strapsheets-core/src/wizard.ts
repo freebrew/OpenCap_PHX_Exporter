@@ -2,7 +2,7 @@
 // capitals as it is typed, decimals keep digits and one dot, a blank measure skips, and a range
 // only warns. The phone renders these; the tests pin them.
 
-import { decimalText, upperText, type EntryPayload } from "./entry";
+import { decimalText, roundProblem, upperText, type EntryPayload } from "./entry";
 import type { InventoryItem } from "./inventory";
 import { rangeFor, rangeWarning, type MeasureRange, type RangeWarning } from "./ranges";
 import { stepColumns, type CellKey, type EntryFamily, type EntryStep } from "./schema";
@@ -45,11 +45,10 @@ export function liveValue(step: EntryStep, raw: string): string {
   switch (step.kind) {
     case "text":
       return raw.toUpperCase();
-    case "decimal": {
-      const digits = raw.replace(/[^0-9.]/g, "");
-      const dot = digits.indexOf(".");
-      return dot < 0 ? digits : digits.slice(0, dot + 1) + digits.slice(dot + 1).replaceAll(".", "");
-    }
+    case "decimal":
+      return decimalDigits(raw);
+    case "round":
+      return step.decimal ? decimalDigits(raw) : raw.toUpperCase();
     case "choice":
     case "boxPin":
     case "threads":
@@ -60,6 +59,12 @@ export function liveValue(step: EntryStep, raw: string): string {
       return never;
     }
   }
+}
+
+function decimalDigits(raw: string): string {
+  const digits = raw.replace(/[^0-9.]/g, "");
+  const dot = digits.indexOf(".");
+  return dot < 0 ? digits : digits.slice(0, dot + 1) + digits.slice(dot + 1).replaceAll(".", "");
 }
 
 /** The cells with one column set; a blank value clears the column. */
@@ -76,6 +81,7 @@ export function stepProblem(step: EntryStep, cells: Cells): string | null {
   const values = stepColumns(step).map((col) => cells[col] ?? "");
   if (step.required && values.every((value) => value.trim() === "")) return `${step.label} is required.`;
   if (step.kind === "decimal" && decimalText(values[0] ?? "") == null) return `${step.label} needs a number.`;
+  if (step.kind === "round") return roundProblem(step, cells);
   return null;
 }
 
@@ -129,6 +135,11 @@ export function entryLines(family: EntryFamily, cells: Cells): { label: string; 
         break;
       case "customBuilder":
         lines.push(...customLines(cells));
+        break;
+      case "round":
+        for (const sub of step.cols) {
+          if (cells[sub.col]) lines.push({ label: `${sub.letter} ${sub.short} ${step.field}`, value: cells[sub.col] ?? "" });
+        }
         break;
       default: {
         const never: never = step;

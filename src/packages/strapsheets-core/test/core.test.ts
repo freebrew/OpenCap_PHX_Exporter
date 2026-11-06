@@ -48,7 +48,7 @@ describe("the generated schema", () => {
     }
     expect(ENTRY_FAMILIES.map((family) => family.which)).toEqual([
       "Motor", "NM Slick Monel", "NM Flex Monel", "NM Pony", "NM Stabilizer Carrier", "Stabilized Sub",
-      "Subs", "Lifting Subs", "Jars", "Shock Sub", "Exciter / Agitator / Sidewinder", "Orbit", "Custom",
+      "Subs", "Lifting Subs", "Jars", "Shock Sub", "Exciter / Agitator / Sidewinder", "Orbit", "MWD Carrier", "Custom",
     ]);
   });
 

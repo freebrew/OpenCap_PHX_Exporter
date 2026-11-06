@@ -38,6 +38,44 @@ export function markKindLabel(kind: string): string {
   return kind;
 }
 
+/** The names in the Add menu, in Proper Case. The chips and the confirm lines use the short `markKindLabel`. */
+export function markMenuLabel(kind: MarkKind): string {
+  switch (kind) {
+    case "pin":
+      return "Pin";
+    case "upset":
+      return "Upset / Inset";
+    case "spline":
+      return "Spline";
+    case "spiral":
+      return "Spiral (Stab / Turbolizer)";
+    case "panels":
+      return "Panels";
+    case "length":
+      return "Length Station";
+    case "od":
+      return "OD Station";
+    default: {
+      const never: never = kind;
+      return never;
+    }
+  }
+}
+
+/** The add-ons that sit on the tube. The letter they come with is their OD variable. */
+export const ADDON_KINDS: readonly MarkKind[] = ["upset", "spline", "spiral", "panels"];
+
+export function isAddon(kind: MarkKind): boolean {
+  return ADDON_KINDS.includes(kind);
+}
+
+/** What a mark's measurement is: a Length station's length, the OD of an OD station or an add-on. */
+export function valueLabel(kind: MarkKind): string {
+  if (kind === "length") return "Length";
+  if (kind === "od" || isAddon(kind)) return "OD";
+  return "Measurement";
+}
+
 /** A signed decimal, blank, or null when the text is not a number. */
 export function signedDecimal(value: string): string | null {
   const trimmed = value.trim();
@@ -205,9 +243,26 @@ export function customLines(cells: Cells): { label: string; value: string }[] {
   if (cells.totalLength) lines.push({ label: "Total Length", value: cells.totalLength });
   if (cells.internalId) lines.push({ label: "ID", value: cells.internalId });
   for (const mark of parseMarks(cells.marksJson)) {
-    lines.push({ label: `${mark.letter} ${markKindLabel(mark.kind)}`, value: mark.value });
+    const name = isAddon(mark.kind) ? `${markKindLabel(mark.kind)} OD` : markKindLabel(mark.kind);
+    lines.push({ label: `${mark.letter} ${name}`, value: mark.value });
   }
   return lines;
+}
+
+/**
+ * What the Custom card prints under the header, like the sheet's second row: one cell per lettered
+ * flag, in its A–L column. A Length station reads "G LEN"; an OD station and each add-on (whose letter
+ * is its OD variable) read "I OD". Pins carry no measurement.
+ */
+export function customFlagCells(marks: Mark[]): { slot: number; label: string; value: string }[] {
+  const cells: { slot: number; label: string; value: string }[] = [];
+  for (const mark of marks) {
+    if (mark.kind === "pin") continue;
+    const slot = CUSTOM_LETTERS.indexOf(mark.letter);
+    if (slot < 0) continue;
+    cells.push({ slot, label: `${mark.letter} ${mark.kind === "length" ? "LEN" : "OD"}`, value: mark.value });
+  }
+  return cells.sort((a, b) => a.slot - b.slot);
 }
 
 /** SVG path of the tube, in builder pixels. */

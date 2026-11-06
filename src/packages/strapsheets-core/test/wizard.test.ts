@@ -26,7 +26,7 @@ describe("thread names", () => {
 
 describe("wizard", () => {
   it("offers every front-page tool and each has a family", () => {
-    expect(ENTRY_WHICH_OPTIONS).toHaveLength(13);
+    expect(ENTRY_WHICH_OPTIONS).toHaveLength(14);
     for (const which of ENTRY_WHICH_OPTIONS) expect(findFamily(ENTRY_FAMILIES, which)).not.toBeNull();
   });
 
@@ -83,6 +83,7 @@ describe("wizard", () => {
           if (current.id !== "d7") cells = setCell(cells, current.col, "1.5");
           break;
         case "customBuilder":
+        case "round":
           break;
         default: {
           const never: never = current;

@@ -4,24 +4,28 @@
 import type { VectorItem, VectorOp } from "./cardSpec";
 import type { Mark } from "./custom";
 import {
-  BUILDER_H,
   BUILDER_W,
   FLAG_R,
-  LENGTH_FLAG_Y,
-  OD_FLAG_Y,
+  LENGTH_KNEE_Y,
+  OD_KNEE_Y,
   PANEL_THICK,
   PANEL_W,
   PIN_SHOULDER,
   PIN_TIP,
   PIN_W,
+  SHAPE_FLAG_Y,
   SPIRAL_HALF,
-  SPIRAL_W,
   TUBE_CY,
   bodyHalfAt,
   borePolygon,
   featureHalfAt,
   flagPoint,
+  flagRadius,
   flagRow,
+  lengthFlagY,
+  odFlagY,
+  spiralPolygon,
+  stemPx,
   stationBottom,
   stationTop,
   tubeLayout,
@@ -49,19 +53,54 @@ function rect(x: number, y: number, w: number, h: number): Point[] {
   return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
 }
 
-/** 45-degree hatch lines across a box, cut off at its left and right sides. */
-export function hatchLines(left: number, right: number, top: number, bottom: number, step: number): { x1: number; y1: number; x2: number; y2: number }[] {
+/** The part of a segment that lies inside a convex polygon, or null when none of it does. */
+function clipToConvex(poly: Point[], x1: number, y1: number, x2: number, y2: number): { x1: number; y1: number; x2: number; y2: number } | null {
+  let area = 0;
+  for (let index = 0; index < poly.length; index += 1) {
+    const [ax, ay] = poly[index] as Point;
+    const [bx, by] = poly[(index + 1) % poly.length] as Point;
+    area += ax * by - bx * ay;
+  }
+  const side = area >= 0 ? 1 : -1;
+  let from = 0;
+  let to = 1;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  for (let index = 0; index < poly.length; index += 1) {
+    const [ax, ay] = poly[index] as Point;
+    const [bx, by] = poly[(index + 1) % poly.length] as Point;
+    const ex = bx - ax;
+    const ey = by - ay;
+    const start = side * (ex * (y1 - ay) - ey * (x1 - ax));
+    const slope = side * (ex * dy - ey * dx);
+    if (Math.abs(slope) < 1e-9) {
+      if (start < 0) return null;
+      continue;
+    }
+    const t = -start / slope;
+    if (slope > 0) from = Math.max(from, t);
+    else to = Math.min(to, t);
+    if (from > to) return null;
+  }
+  return { x1: x1 + dx * from, y1: y1 + dy * from, x2: x1 + dx * to, y2: y1 + dy * to };
+}
+
+/** 45-degree hatch lines across a convex outline, cut off where they leave it. */
+export function hatchLines(poly: Point[], step: number): { x1: number; y1: number; x2: number; y2: number }[] {
+  const xs = poly.map((point) => point[0]);
+  const ys = poly.map((point) => point[1]);
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
   const height = bottom - top;
   const lines: { x1: number; y1: number; x2: number; y2: number }[] = [];
   for (let x0 = left - height; x0 < right; x0 += step) {
-    const from = Math.max(0, (left - x0) / height);
-    const to = Math.min(1, (right - x0) / height);
-    if (to <= from) continue;
-    lines.push({ x1: x0 + height * from, y1: bottom - height * from, x2: x0 + height * to, y2: bottom - height * to });
+    const piece = clipToConvex(poly, x0, bottom, x0 + height, top);
+    if (piece && Math.hypot(piece.x2 - piece.x1, piece.y2 - piece.y1) > 1) lines.push(piece);
   }
   return lines;
 }
-
 function pinThreads(mark: Mark, marks: Mark[]): Prim[] {
   const layout = tubeLayout(marks);
   const leftEnd = mark.x < 0.5;
@@ -76,17 +115,14 @@ function pinThreads(mark: Mark, marks: Mark[]): Prim[] {
   return prims;
 }
 
+/** A spiral: wider than the tube and tapering to the tube's own diameter at both ends. Plain neutral hatch, no colour. */
 function spiral(x: number): Prim[] {
-  const left = x - SPIRAL_W / 2;
-  const right = x + SPIRAL_W / 2;
-  const top = TUBE_CY - SPIRAL_HALF;
-  const bottom = TUBE_CY + SPIRAL_HALF;
-  const prims: Prim[] = [{ t: "poly", pts: rect(left, top, SPIRAL_W, bottom - top), fill: "#ffffff", stroke: "none", w: 0 }];
-  for (const line of hatchLines(left, right, top, bottom, 9)) prims.push({ t: "line", ...line, stroke: HATCH, w: 1.4 });
-  prims.push({ t: "poly", pts: rect(left, top, SPIRAL_W, bottom - top), fill: "none", stroke: INK, w: 1.8 });
+  const outline = spiralPolygon(x);
+  const prims: Prim[] = [{ t: "poly", pts: outline, fill: "#ffffff", stroke: "none", w: 0 }];
+  for (const line of hatchLines(outline, 9)) prims.push({ t: "line", ...line, stroke: HATCH, w: 1.4 });
+  prims.push({ t: "poly", pts: outline, fill: "none", stroke: INK, w: 1.8 });
   return prims;
 }
-
 function panels(x: number, half: number, color: string): Prim[] {
   const left = x - PANEL_W / 2;
   return [
@@ -95,66 +131,77 @@ function panels(x: number, half: number, color: string): Prim[] {
   ];
 }
 
-/** Length: a line across the outer diameter, a gap, then a line up to the letter flag. */
-function lengthStation(x: number, mark: Mark, marks: Mark[], color: string): Prim[] {
+/**
+ * Length: a line across the outer diameter, a gap, then a line up to its knee and a leader on to
+ * the letter flag, which may sit to one side so close stations keep their flags apart.
+ */
+function lengthStation(x: number, mark: Mark, marks: Mark[], color: string, touch: boolean): Prim[] {
   const half = featureHalfAt(mark.x, marks);
   const top = stationTop(mark, marks);
+  const flagX = flagPoint(mark, marks, touch).x;
   return [
     { t: "line", x1: x, y1: TUBE_CY - half, x2: x, y2: TUBE_CY + half, stroke: color, w: 2.4 },
     { t: "line", x1: x - 7, y1: TUBE_CY - half, x2: x + 7, y2: TUBE_CY - half, stroke: color, w: 2.4 },
     { t: "line", x1: x - 7, y1: TUBE_CY + half, x2: x + 7, y2: TUBE_CY + half, stroke: color, w: 2.4 },
-    { t: "line", x1: x, y1: top, x2: x, y2: LENGTH_FLAG_Y + FLAG_R, stroke: color, w: 2.4 },
+    { t: "line", x1: x, y1: top, x2: x, y2: LENGTH_KNEE_Y, stroke: color, w: 2.4 },
+    { t: "line", x1: x, y1: LENGTH_KNEE_Y, x2: flagX, y2: lengthFlagY(touch) + flagRadius(mark.kind, touch), stroke: color, w: 2.4 },
   ];
 }
 
 /** OD: a line from the flag up to an arrow that stops short of the tube or feature it points at. */
-function odStation(x: number, mark: Mark, marks: Mark[], color: string): Prim[] {
+function odStation(x: number, mark: Mark, marks: Mark[], color: string, touch: boolean): Prim[] {
   const tip = stationBottom(mark, marks);
+  const flagX = flagPoint(mark, marks, touch).x;
   return [
-    { t: "line", x1: x, y1: tip + 9, x2: x, y2: OD_FLAG_Y - FLAG_R, stroke: color, w: 2.4 },
+    { t: "line", x1: x, y1: tip + 9, x2: x, y2: OD_KNEE_Y, stroke: color, w: 2.4 },
+    { t: "line", x1: x, y1: OD_KNEE_Y, x2: flagX, y2: odFlagY(touch) - flagRadius(mark.kind, touch), stroke: color, w: 2.4 },
     { t: "poly", pts: [[x, tip], [x - 5.5, tip + 10], [x + 5.5, tip + 10]], fill: color, stroke: color, w: 1 },
   ];
 }
 
-function flag(mark: Mark, marks: Mark[], selected: boolean): Prim[] {
-  const point = flagPoint(mark, marks);
+function flag(mark: Mark, marks: Mark[], selected: boolean, touch: boolean): Prim[] {
+  const point = flagPoint(mark, marks, touch);
   const color = selected ? BLUE : NAVY;
+  const radius = flagRadius(mark.kind, touch);
+  const size = radius > FLAG_R ? 52 : 18;
   return [
-    { t: "circle", cx: point.x, cy: point.y, r: FLAG_R, fill: selected ? BLUE : "#ffffff", stroke: color, w: 2.4 },
-    { t: "text", x: point.x, y: point.y + 6, s: mark.letter, size: 18, fill: selected ? "#ffffff" : color },
+    { t: "circle", cx: point.x, cy: point.y, r: radius, fill: selected ? BLUE : "#ffffff", stroke: color, w: radius > FLAG_R ? 4 : 2.4 },
+    { t: "text", x: point.x, y: point.y + size / 3, s: mark.letter, size, fill: selected ? "#ffffff" : color },
   ];
 }
 
-/** Every primitive of the tube, bottom layer first: tube, pins, add-ons, stations, then the flags. */
-export function customScene(marks: Mark[], selected = ""): Prim[] {
+/**
+ * Every primitive of the tube, bottom layer first: tube, pins, add-ons, stations, then the flags.
+ * `touch` draws the builder's finger-size Length and OD flags; the card and the confirm picture leave it off.
+ */
+export function customScene(marks: Mark[], selected = "", touch = false): Prim[] {
   const prims: Prim[] = [{ t: "poly", pts: tubePolygon(marks), fill: STEEL, stroke: INK, w: 2.5 }];
   const bore = borePolygon(marks);
   if (bore.length > 0) prims.push({ t: "poly", pts: bore, fill: "#ffffff", stroke: "none", w: 0 });
   for (const mark of marks) if (mark.kind === "pin") prims.push(...pinThreads(mark, marks));
   for (const mark of marks) {
-    const x = flagPoint(mark, marks).x;
+    const x = stemPx(mark, marks);
     const color = mark.letter === selected ? BLUE : NAVY;
     if (mark.kind === "spiral") prims.push(...spiral(x));
     else if (mark.kind === "panels") prims.push(...panels(x, bodyHalfAt(mark.x, marks), color));
   }
   for (const mark of marks) {
-    const x = flagPoint(mark, marks).x;
+    const x = stemPx(mark, marks);
     const color = mark.letter === selected ? BLUE : NAVY;
-    if (mark.kind === "length") prims.push(...lengthStation(x, mark, marks, color));
-    else if (mark.kind === "od") prims.push(...odStation(x, mark, marks, color));
+    if (mark.kind === "length") prims.push(...lengthStation(x, mark, marks, color, touch));
+    else if (mark.kind === "od") prims.push(...odStation(x, mark, marks, color, touch));
   }
-  for (const mark of marks) prims.push(...flag(mark, marks, mark.letter === selected));
+  for (const mark of marks) prims.push(...flag(mark, marks, mark.letter === selected, touch));
   return prims;
 }
 
 /** The rows of the picture that hold something, so a card can leave out an empty top or bottom. */
 export function sceneBounds(marks: Mark[]): { x: number; y: number; w: number; h: number } {
   const rows = new Set(marks.map((mark) => flagRow(mark.kind)));
-  const top = rows.has("top") ? 4 : rows.has("mid") ? 54 : 96;
-  const bottom = rows.has("bottom") ? BUILDER_H - 2 : TUBE_CY + SPIRAL_HALF + 12;
+  const top = rows.has("top") ? lengthFlagY() - FLAG_R - 4 : rows.has("mid") ? SHAPE_FLAG_Y - FLAG_R - 4 : TUBE_CY - SPIRAL_HALF - 8;
+  const bottom = rows.has("bottom") ? odFlagY() + FLAG_R + 2 : TUBE_CY + SPIRAL_HALF + 12;
   return { x: 0, y: top, w: BUILDER_W, h: bottom - top };
 }
-
 function circleOps(cx: number, cy: number, r: number): VectorOp[] {
   const k = 0.5523 * r;
   return [

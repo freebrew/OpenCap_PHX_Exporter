@@ -1,7 +1,7 @@
 // The Custom.P card: one built tube, the header fields, and A–L. Three cards fit a page.
 // Standard families keep the generated card tables; Custom is drawn from its own payload.
 
-import { customLines, parseMarks } from "./custom";
+import { customFlagCells, parseMarks } from "./custom";
 import { customScene, sceneBounds, sceneItems } from "./customScene";
 import { BUILDER_W } from "./customShape";
 import type { EntryPayload } from "./entry";
@@ -16,6 +16,10 @@ const SLOT = 300;
 const PICTURE_W = 500;
 const PICTURE_TOP = 26;
 const PICTURE_MAX_H = 190;
+/** Width of one A–L flag column under the header. */
+const FLAG_PITCH = 41;
+/** Width of each header column: Serial, Material, TOP, BTM, LEN, ID. The thread columns hold "PIN 4 1/2 IF [NC 50]". */
+const HEADER_WIDTHS = [70, 70, 140, 140, 56, 52];
 
 /** Custom pages after the standard families. An empty list adds nothing. */
 export function layoutCustomCards(entries: EntryPayload[], writer: PdfWriter): void {
@@ -58,15 +62,15 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, top: number): void {
     ["LEN", entry.cells.totalLength ?? ""],
     ["ID", entry.cells.internalId ?? ""],
   ];
+  let x = 0;
   header.forEach(([label, value], index) => {
-    const x = index * 88;
     canvas.text(label ?? "", x, base, 8, false, [0.3, 0.3, 0.3]);
     canvas.text(value ?? "", x, base + 14, 10, true, [0, 0, 0]);
+    x += HEADER_WIDTHS[index] ?? 0;
   });
-  customLines(entry.cells)
-    .filter((line) => line.label !== "Total Length" && line.label !== "ID")
-    .forEach((line, index) => {
-      canvas.text(line.label, index * 40, base + 44, 8, true, [0, 0, 0]);
-      canvas.text(line.value, index * 40, base + 56, 8, false, [0, 0, 0]);
-    });
+  for (const flag of customFlagCells(marks)) {
+    const x = flag.slot * FLAG_PITCH;
+    canvas.text(flag.label, x, base + 44, 8, true, [0, 0, 0]);
+    canvas.text(flag.value, x, base + 56, 8, false, [0, 0, 0]);
+  }
 }

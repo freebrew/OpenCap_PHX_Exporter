@@ -145,6 +145,8 @@ describe("the generated card tables", () => {
     for (const card of PRINT_CARDS) {
       const family = ENTRY_FAMILIES.find((candidate) => candidate.which === card.which);
       expect(family, card.name).toBeDefined();
+      // The MWD card reads the sheet's row, which mwdCardEntry builds from the named cells (mwd.test.ts).
+      if (card.which === "MWD Carrier") continue;
       const written = new Set(family?.steps.flatMap(stepColumns));
       for (const field of card.fields) {
         for (const column of field.slice(2)) expect(written.has(column), `${card.name} column ${column}`).toBe(true);

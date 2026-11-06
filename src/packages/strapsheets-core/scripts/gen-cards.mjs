@@ -13,7 +13,13 @@ function load(file, ...names) {
   return scope.out;
 }
 
-const { PRINT_CONFIG } = load("print_config.js", "PRINT_CONFIG");
+// The MWD Carrier's card is added to PRINT_CONFIG by mwd_carrier.js, as the print sidebar does.
+const printScope = {};
+runInNewContext(
+  `${readFileSync(new URL("print_config.js", appsScript), "utf8")}\n${readFileSync(new URL("mwd_carrier.js", appsScript), "utf8")}\nensureMwdPrint_();\nthis.out = { PRINT_CONFIG };`,
+  printScope,
+);
+const { PRINT_CONFIG } = printScope.out;
 const { ENTRY_DIAGRAMS } = load("entry_diagrams.js", "ENTRY_DIAGRAMS");
 const drawlistPath = new URL("../../../strapsheets/illustrations/vectors/drawlists.json", import.meta.url);
 const drawlistText = readFileSync(drawlistPath, "utf8");
@@ -37,9 +43,11 @@ const TABS = {
   StabSub: { which: "Stabilized Sub", title: "Stub Subs" },
   ShockSubs: { which: "Shock Sub", title: "SHOCKSUBS" },
   Exciters: { which: "Exciter / Agitator / Sidewinder", title: "EXCITERS" },
+  "MWD Carrier": { which: "MWD Carrier", title: "MWD" },
 };
 
-const cards = PRINT_CONFIG.filter((family) => !family.source).map((family) => {
+// Custom (source "custom") is drawn from its own payload; the other tabs, MWD included, are tables.
+const cards = PRINT_CONFIG.filter((family) => !family.source || family.source === "mwd").map((family) => {
   const tab = TABS[family.name];
   if (!tab) throw new Error(`print_config.js has a tab with no entry family: ${family.name}`);
   if (!ENTRY_DIAGRAMS[tab.which]) throw new Error(`${tab.which}: no drawing in entry_diagrams.js`);
@@ -56,6 +64,8 @@ const cards = PRINT_CONFIG.filter((family) => !family.source).map((family) => {
     typeValues: family.typeValues,
     statics: family.statics,
     fields: family.fields,
+    ...(family.headerSpans ? { headerSpans: family.headerSpans } : {}),
+    ...(family.metricFrom != null ? { metricFrom: family.metricFrom } : {}),
   };
 });
 for (const name of Object.keys(TABS)) {

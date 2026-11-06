@@ -2,7 +2,7 @@
 // phone, the API and the extension render one wizard. A step's `kind` decides the control:
 // text is ALL CAPS, decimal opens the number pad, choice / boxPin / threads are big buttons.
 
-export type StepKind = "text" | "decimal" | "choice" | "boxPin" | "threads" | "customBuilder";
+export type StepKind = "text" | "decimal" | "choice" | "boxPin" | "threads" | "customBuilder" | "round";
 
 /** A form column index, or a named Custom field such as `serial` or `marksJson`. */
 export type CellKey = number | string;
@@ -48,12 +48,36 @@ export interface CustomBuilderStep extends StepBase {
   kind: "customBuilder";
 }
 
-export type EntryStep = TextStep | ChoiceStep | BoxPinStep | ThreadsStep | CustomBuilderStep;
+/** One sub of a round: its letter on the drawing, its short name, and the cell it fills. */
+export interface RoundCol {
+  letter: string;
+  short: string;
+  col: CellKey;
+}
+
+/**
+ * One screen holding a value for every sub of an assembly (the MWD Carrier's SN, Length and OD
+ * rounds). `cumulative` lengths are running totals from the pin; the sheet stores each sub's own.
+ */
+export interface RoundStep extends StepBase {
+  kind: "round";
+  /** What the round measures: "SN", "Length", "OD". */
+  field: string;
+  cumulative: boolean;
+  unit: string;
+  /** A number each (Length, OD); otherwise text in capitals (SN). */
+  decimal: boolean;
+  cols: RoundCol[];
+}
+
+export type EntryStep = TextStep | ChoiceStep | BoxPinStep | ThreadsStep | CustomBuilderStep | RoundStep;
 
 export interface EntryFamily {
   which: string;
   /** The Custom family draws its own tube instead of a stock diagram. */
   builder?: boolean;
+  /** The MWD Carrier: four subs entered in rounds, printed on one card with computed totals. */
+  mwd?: boolean;
   materials: string[];
   boxPinOptions: string[];
   /** Extra choice lists, keyed by the name a choice step's `optionsKey` points at. */
@@ -73,6 +97,8 @@ export function stepColumns(step: EntryStep): CellKey[] {
       return [step.cols.upper, step.cols.lower];
     case "customBuilder":
       return [];
+    case "round":
+      return step.cols.map((sub) => sub.col);
     default: {
       const never: never = step;
       return never;
@@ -81,7 +107,7 @@ export function stepColumns(step: EntryStep): CellKey[] {
 }
 
 /** The keyboard a step asks for. Text forces capitals; a decimal opens the number pad. */
-export function stepInput(step: EntryStep): "text" | "decimal" | "buttons" | "builder" {
+export function stepInput(step: EntryStep): "text" | "decimal" | "buttons" | "builder" | "round" {
   switch (step.kind) {
     case "text":
       return "text";
@@ -93,6 +119,8 @@ export function stepInput(step: EntryStep): "text" | "decimal" | "buttons" | "bu
       return "buttons";
     case "customBuilder":
       return "builder";
+    case "round":
+      return "round";
     default: {
       const never: never = step;
       return never;
