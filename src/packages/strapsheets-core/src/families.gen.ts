@@ -1352,27 +1352,6 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "col": 171
       },
       {
-        "id": "d12",
-        "kind": "decimal",
-        "label": "H - Lower Lobe Upset Joint",
-        "header": "H - Lower Lobe Upset Joint",
-        "col": 172
-      },
-      {
-        "id": "d13",
-        "kind": "decimal",
-        "label": "I - Upper Lobe Upset Joint",
-        "header": "I - Upper Lobe Upset Joint",
-        "col": 173
-      },
-      {
-        "id": "d14",
-        "kind": "decimal",
-        "label": "J - Total Length",
-        "header": "J - Total Length",
-        "col": 174
-      },
-      {
         "id": "d15",
         "kind": "decimal",
         "label": "K - Bit Box OD",
@@ -1420,27 +1399,6 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "label": "Q - Below Upset Joint OD",
         "header": "Q - Below Upset Joint OD",
         "col": 181
-      },
-      {
-        "id": "d22",
-        "kind": "decimal",
-        "label": "R - Lower Upset Joint OD",
-        "header": "R - Lower Upset Joint OD",
-        "col": 182
-      },
-      {
-        "id": "d23",
-        "kind": "decimal",
-        "label": "S - Mid Upset Joint OD",
-        "header": "S - Mid Upset Joint OD",
-        "col": 183
-      },
-      {
-        "id": "d24",
-        "kind": "decimal",
-        "label": "T - Upper Upset Joint OD",
-        "header": "T - Upper Upset Joint OD",
-        "col": 184
       },
       {
         "id": "d25",
