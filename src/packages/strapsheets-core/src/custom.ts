@@ -1,7 +1,19 @@
 // Custom tubular marks. The rules match the Entry web app: twelve letters, one pin at each
 // end, pins snapped to that end, and every other mark kept on the tube.
 
+import {
+  BUILDER_H,
+  BUILDER_W,
+  flagPoint,
+  freeLengthSpots,
+  pinEnds,
+  spotFree,
+  tubeLayout,
+  tubePolygon,
+} from "./customShape";
 import type { Cells } from "./wizard";
+
+export { pinEnds };
 
 export const CUSTOM_LETTERS = "ABCDEFGHIJKL";
 export const MARK_KINDS = ["pin", "upset", "spline", "spiral", "panels", "length", "od"] as const;
@@ -14,16 +26,6 @@ export interface Mark {
   x: number;
   value: string;
 }
-
-const BUILDER_W = 640;
-const TUBE_X = 28;
-const TUBE_W = 584;
-const TUBE_CY = 128;
-const BODY_HALF = 16;
-const UPSET_HALF = 10;
-const PIN_W = 28;
-const PIN_TIP = 8;
-const PIN_SHOULDER = 12;
 
 export function markKindLabel(kind: string): string {
   if (kind === "od") return "OD";
@@ -81,17 +83,6 @@ export function nextLetter(marks: Mark[]): string {
   return "";
 }
 
-export function pinEnds(marks: Mark[]): { left: boolean; right: boolean } {
-  let left = false;
-  let right = false;
-  for (const mark of marks) {
-    if (mark.kind !== "pin") continue;
-    if (mark.x < 0.5) left = true;
-    else right = true;
-  }
-  return { left, right };
-}
-
 export function defaultMarkX(kind: MarkKind, marks: Mark[]): number | null {
   if (kind === "pin") {
     const ends = pinEnds(marks);
@@ -107,7 +98,11 @@ export function defaultMarkX(kind: MarkKind, marks: Mark[]): number | null {
   return base > 0.78 ? 0.5 : base;
 }
 
-/** Where a drag lands. A pin takes the free end it was dropped toward. */
+/**
+ * Where a drag lands. A pin takes the free end it was dropped toward. A Length station snaps to the
+ * nearest free feature of the tube: the edge before the pin threads (or the box end) and the left
+ * and right edge of each add-on. Anything else moves freely along the body.
+ */
 export function snapMarkX(kind: MarkKind, x: number, marks: Mark[], letter: string): number {
   if (kind === "pin") {
     const ends = pinEnds(marks.filter((mark) => mark.letter !== letter));
@@ -117,16 +112,40 @@ export function snapMarkX(kind: MarkKind, x: number, marks: Mark[], letter: stri
     if (!ends.right) return 0.96;
     return x < 0.5 ? 0.04 : 0.96;
   }
+  if (kind === "length") {
+    const free = freeLengthSpots(marks, x, letter)[0];
+    if (free != null) return free;
+    return marks.find((mark) => mark.letter === letter)?.x ?? Math.min(1, Math.max(0, x));
+  }
   if (x < 0.04) return 0.04;
   if (x > 0.96) return 0.96;
   return x;
 }
 
+/** The first spot for a new mark that keeps its flag off every other flag, or null when none is left. */
+export function spawnX(kind: MarkKind, marks: Mark[]): number | null {
+  const want = defaultMarkX(kind, marks);
+  if (want == null || kind === "pin") return want;
+  if (kind === "length") return freeLengthSpots(marks, want, "")[0] ?? null;
+  for (let step = 0; step <= 48; step += 1) {
+    for (const sign of step === 0 ? [1] : [1, -1]) {
+      const x = Math.round((want + sign * step * 0.02) * 1000) / 1000;
+      if (x >= 0.04 && x <= 0.96 && spotFree(kind, x, marks, "")) return x;
+    }
+  }
+  return null;
+}
+
 export function addMark(marks: Mark[], kind: MarkKind): Mark[] | string {
   if (marks.length >= CUSTOM_LETTERS.length) return "A tube holds 12 marks.";
   const letter = nextLetter(marks);
-  const x = defaultMarkX(kind, marks);
-  if (letter === "" || x == null) return "Only one pin fits at each end.";
+  const x = spawnX(kind, marks);
+  if (letter === "") return "A tube holds 12 marks.";
+  if (x == null) {
+    if (kind === "pin") return "Only one pin fits at each end.";
+    if (kind === "length") return "No free edge on the tube for another Length station.";
+    return `No free spot on the tube for another ${markKindLabel(kind)}.`;
+  }
   return [...marks, { letter, kind, x, value: "" }];
 }
 
@@ -191,71 +210,16 @@ export function customLines(cells: Cells): { label: string; value: string }[] {
   return lines;
 }
 
-interface TubeLayout {
-  pins: { left: boolean; right: boolean };
-  bodyX: number;
-  bodyW: number;
-}
-
-function tubeLayout(marks: Mark[]): TubeLayout {
-  const pins = pinEnds(marks);
-  const bodyX = TUBE_X + (pins.left ? PIN_W : 0);
-  let bodyW = TUBE_W - (pins.left ? PIN_W : 0) - (pins.right ? PIN_W : 0);
-  if (bodyW < 80) bodyW = 80;
-  return { pins, bodyX, bodyW };
-}
-
-function upsetHalf(xn: number, mx: number): number {
-  const half = 0.055;
-  const taper = 0.03;
-  const left = mx - half;
-  const right = mx + half;
-  if (xn < left || xn > right) return BODY_HALF;
-  if (xn >= left + taper && xn <= right - taper) return UPSET_HALF;
-  if (xn < left + taper) return BODY_HALF + (UPSET_HALF - BODY_HALF) * ((xn - left) / taper);
-  return UPSET_HALF + (BODY_HALF - UPSET_HALF) * ((xn - (right - taper)) / taper);
-}
-
-function bodyHalf(xn: number, marks: Mark[]): number {
-  let height = BODY_HALF;
-  for (const mark of marks) {
-    if (mark.kind === "upset" || mark.kind === "spline") height = Math.min(height, upsetHalf(xn, mark.x));
-  }
-  return height;
-}
-
 /** SVG path of the tube, in builder pixels. */
 export function tubePath(marks: Mark[]): string {
-  const layout = tubeLayout(marks);
-  const top: string[] = [];
-  const bottom: string[] = [];
-  const steps = 48;
-  for (let index = 0; index <= steps; index += 1) {
-    const xn = index / steps;
-    const px = layout.bodyX + xn * layout.bodyW;
-    const half = bodyHalf(xn, marks);
-    top.push(`${px.toFixed(1)} ${(TUBE_CY - half).toFixed(1)}`);
-    bottom.push(`${px.toFixed(1)} ${(TUBE_CY + half).toFixed(1)}`);
-  }
-  if (layout.pins.left) {
-    top.unshift(`${(layout.bodyX - PIN_W).toFixed(1)} ${(TUBE_CY - PIN_TIP).toFixed(1)}`);
-    bottom.unshift(`${(layout.bodyX - PIN_W).toFixed(1)} ${(TUBE_CY + PIN_TIP).toFixed(1)}`);
-  }
-  if (layout.pins.right) {
-    const end = layout.bodyX + layout.bodyW + PIN_W;
-    top.push(`${end.toFixed(1)} ${(TUBE_CY - PIN_TIP).toFixed(1)}`);
-    bottom.push(`${end.toFixed(1)} ${(TUBE_CY + PIN_TIP).toFixed(1)}`);
-  }
-  return `M ${top.join(" L ")} L ${bottom.reverse().join(" L ")} Z`;
+  const points = tubePolygon(marks);
+  if (points.length === 0) return "";
+  return `M ${points.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(" L ")} Z`;
 }
 
-/** A mark's badge position in builder pixels. */
+/** The centre of a mark's letter flag in builder pixels. */
 export function markPoint(mark: Mark, marks: Mark[]): { x: number; y: number } {
-  const layout = tubeLayout(marks);
-  const x = mark.kind === "pin"
-    ? mark.x < 0.5 ? layout.bodyX - PIN_W * 0.55 : layout.bodyX + layout.bodyW + PIN_W * 0.55
-    : layout.bodyX + mark.x * layout.bodyW;
-  return { x, y: TUBE_CY - BODY_HALF - 28 };
+  return flagPoint(mark, marks);
 }
 
-export const BUILDER_SIZE = { w: BUILDER_W, h: 220 };
+export const BUILDER_SIZE = { w: BUILDER_W, h: BUILDER_H };

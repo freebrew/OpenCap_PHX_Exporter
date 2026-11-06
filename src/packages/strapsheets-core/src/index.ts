@@ -26,9 +26,12 @@ export {
   setMarkValue,
   signedDecimal,
   snapMarkX,
+  spawnX,
   tubePath,
   xFromClient,
   type Mark,
   type MarkKind,
 } from "./custom";
+export { customScene, sceneBounds, sceneItems, type Prim } from "./customScene";
+export { BUILDER_H, BUILDER_W, FLAG_R, HIT_R, flagPoint, lengthSpots, pickMark, spotFree } from "./customShape";
 export { entryLines, entrySerial, findFamily, measuredSerials, liveValue, measureSteps, prefillFromItem, serialStep, setCell, stepProblem, stepWarning, type Cells } from "./wizard";
