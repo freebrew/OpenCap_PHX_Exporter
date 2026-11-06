@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">StrapSheets</string>
-    <string name="title_activity_main">StrapSheets</string>
-    <string name="package_name">com.phx.strapsheets</string>
-    <string name="custom_url_scheme">com.phx.strapsheets</string>
-</resources>
