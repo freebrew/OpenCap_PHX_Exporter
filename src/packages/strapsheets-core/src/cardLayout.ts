@@ -4,6 +4,7 @@
 // (print_cards.py); the page scale is "fit to width", as the print engine exports.
 
 import { CARD_ART } from "./art.gen";
+import { layoutCustomCards } from "./customCard";
 import type { CardArt, PrintCard } from "./cardSpec";
 import { PRINT_CARDS } from "./cards.gen";
 import type { EntryPayload } from "./entry";
@@ -94,7 +95,9 @@ export function columnWidths(card: PrintCard): number[] {
 export function layoutCards(entries: EntryPayload[], writer: PdfWriter): void {
   const groups: Group[] = [];
   const unknown: EntryPayload[] = [];
+  const custom = entries.filter((entry) => entry.which === "Custom");
   for (const entry of entries) {
+    if (entry.which === "Custom") continue;
     const target = printCardFor(entry);
     if (!target) {
       unknown.push(entry);
@@ -106,6 +109,7 @@ export function layoutCards(entries: EntryPayload[], writer: PdfWriter): void {
   }
   groups.sort((a, b) => a.order - b.order);
   for (const group of groups) layoutGroup(group, writer);
+  layoutCustomCards(custom, writer);
   for (const entry of unknown) layoutPlain(entry, writer);
   if (entries.length === 0) layoutNotice("No strap sheets chosen.", writer);
 }

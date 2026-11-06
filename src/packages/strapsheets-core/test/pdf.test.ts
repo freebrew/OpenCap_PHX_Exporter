@@ -135,6 +135,7 @@ describe("the strap card layout", () => {
 describe("the generated card tables", () => {
   it("print every wizard family and have a drawing for each", () => {
     for (const family of ENTRY_FAMILIES) {
+      if (family.which === "Custom") continue;
       expect(PRINT_CARDS.some((card) => card.which === family.which), family.which).toBe(true);
       expect(CARD_ART[family.which], family.which).toBeDefined();
     }

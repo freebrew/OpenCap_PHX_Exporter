@@ -2,18 +2,19 @@
 // Form Responses 1. A serial is always stored in capitals; a decimal may be blank (skip).
 
 import { z } from "zod";
+import { customProblems, normalizeCustomCells } from "./custom";
 import { choiceOptions, stepColumns, type EntryFamily, type EntryStep } from "./schema";
 
 /** The wire shape of one entry, before it is checked against a family. */
 export const entryPayloadSchema = z.object({
   which: z.string().min(1),
-  cells: z.record(z.string().regex(/^\d+$/), z.string()),
+  cells: z.record(z.string(), z.string()),
 });
 
 export interface EntryPayload {
   which: string;
-  /** Column index to the text the user entered. */
-  cells: Record<number, string>;
+  /** Column index, or a Custom field name, to the text the user entered. */
+  cells: Record<string, string>;
 }
 
 export interface EntryProblem {
@@ -42,6 +43,7 @@ function cellValue(step: EntryStep, raw: string): string | null {
     case "choice":
     case "boxPin":
     case "threads":
+    case "customBuilder":
       return raw.trim();
     default: {
       const never: never = step;
@@ -73,18 +75,20 @@ export function validateEntry(family: EntryFamily, payload: EntryPayload): Entry
         problems.push({ stepId: step.id, message: `${step.label} must be one of ${allowed.join(", ")}.` });
       }
     }
+    if (step.kind === "customBuilder") problems.push(...customProblems(payload.cells));
   }
   return problems;
 }
 
 /** The entry with its text columns in capitals and its blanks dropped, ready to store. */
 export function normalizeEntry(family: EntryFamily, payload: EntryPayload): EntryPayload {
-  const cells: Record<number, string> = {};
+  const cells: Record<string, string> = {};
   for (const step of family.steps) {
     for (const col of stepColumns(step)) {
       const value = cellValue(step, payload.cells[col] ?? "");
-      if (value) cells[col] = value;
+      if (value) cells[String(col)] = value;
     }
+    if (step.kind === "customBuilder") Object.assign(cells, normalizeCustomCells(payload.cells));
   }
   return { which: family.which, cells };
 }

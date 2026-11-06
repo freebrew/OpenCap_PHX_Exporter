@@ -5,9 +5,10 @@
 import { decimalText, upperText, type EntryPayload } from "./entry";
 import type { InventoryItem } from "./inventory";
 import { rangeFor, rangeWarning, type MeasureRange, type RangeWarning } from "./ranges";
-import { stepColumns, type EntryFamily, type EntryStep } from "./schema";
+import { stepColumns, type CellKey, type EntryFamily, type EntryStep } from "./schema";
+import { customLines } from "./custom";
 
-export type Cells = Record<number, string>;
+export type Cells = Record<string, string>;
 
 /** The family a tool button names, or null when the schema has none. */
 export function findFamily(families: EntryFamily[], which: string): EntryFamily | null {
@@ -52,6 +53,7 @@ export function liveValue(step: EntryStep, raw: string): string {
     case "choice":
     case "boxPin":
     case "threads":
+    case "customBuilder":
       return raw;
     default: {
       const never: never = step;
@@ -61,10 +63,11 @@ export function liveValue(step: EntryStep, raw: string): string {
 }
 
 /** The cells with one column set; a blank value clears the column. */
-export function setCell(cells: Cells, col: number, value: string): Cells {
+export function setCell(cells: Cells, col: CellKey, value: string): Cells {
   const next = { ...cells };
-  if (value === "") delete next[col];
-  else next[col] = value;
+  const key = String(col);
+  if (value === "") delete next[key];
+  else next[key] = value;
   return next;
 }
 
@@ -123,6 +126,9 @@ export function entryLines(family: EntryFamily, cells: Cells): { label: string; 
       case "threads":
         if (cells[step.cols.upper]) lines.push({ label: `${step.label} Upper`, value: cells[step.cols.upper] ?? "" });
         if (cells[step.cols.lower]) lines.push({ label: `${step.label} Lower`, value: cells[step.cols.lower] ?? "" });
+        break;
+      case "customBuilder":
+        lines.push(...customLines(cells));
         break;
       default: {
         const never: never = step;

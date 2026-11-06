@@ -6,4 +6,29 @@ export { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS } from "./families.gen";
 export { DEFAULT_THREADS, threadParts } from "./threads";
 export { looksLikeSerial, motorLike, normSerial, otherToolsFamily, skippedToolKind, strapCandidate, thirdPartySeed } from "./toolKinds";
 export { cardFileName, renderCards } from "./pdf";
+export {
+  BUILDER_SIZE,
+  CUSTOM_LETTERS,
+  MARK_KINDS,
+  addMark,
+  customLines,
+  customProblems,
+  defaultMarkX,
+  markKindLabel,
+  markPoint,
+  marksJson,
+  moveMark,
+  nextLetter,
+  normalizeCustomCells,
+  parseMarks,
+  pinEnds,
+  removeMark,
+  setMarkValue,
+  signedDecimal,
+  snapMarkX,
+  tubePath,
+  xFromClient,
+  type Mark,
+  type MarkKind,
+} from "./custom";
 export { entryLines, entrySerial, findFamily, measuredSerials, liveValue, measureSteps, prefillFromItem, serialStep, setCell, stepProblem, stepWarning, type Cells } from "./wizard";
