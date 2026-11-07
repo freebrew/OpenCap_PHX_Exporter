@@ -122,6 +122,11 @@ export const PRINT_CARDS: PrintCard[] = [
         2,
         7,
         "O OD"
+      ],
+      [
+        2,
+        8,
+        "P OD"
       ]
     ],
     "fields": [
@@ -200,31 +205,36 @@ export const PRINT_CARDS: PrintCard[] = [
       [
         3,
         2,
+        186
+      ],
+      [
+        3,
+        3,
         17
       ],
       [
         3,
-        3,
+        4,
         18
       ],
       [
         3,
-        4,
+        5,
         19
       ],
       [
         3,
-        5,
+        6,
         20
       ],
       [
         3,
-        6,
+        7,
         21
       ],
       [
         3,
-        7,
+        8,
         22
       ]
     ]

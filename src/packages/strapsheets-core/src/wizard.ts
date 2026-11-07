@@ -15,7 +15,7 @@ export function findFamily(families: EntryFamily[], which: string): EntryFamily 
   return families.find((family) => family.which === which) ?? null;
 }
 
-/** The Serial step. Every generated family starts with it. */
+/** The Serial step, found by id. Subs opens on Sub Type; the other families open on Serial. */
 export function serialStep(family: EntryFamily): EntryStep | null {
   return family.steps.find((step) => step.id === "serial") ?? null;
 }
@@ -79,7 +79,15 @@ export function setCell(cells: Cells, col: CellKey, value: string): Cells {
 /** Why the user cannot leave this step, or null. Only a required blank or a bad number stops them. */
 export function stepProblem(step: EntryStep, cells: Cells): string | null {
   const values = stepColumns(step).map((col) => cells[col] ?? "");
-  if (step.required && values.every((value) => value.trim() === "")) return `${step.label} is required.`;
+  const requiredValues = step.kind === "text" ? values.slice(0, 1) : values;
+  if (step.required && requiredValues.every((value) => value.trim() === "")) return `${step.label} is required.`;
+  if (
+    step.kind === "text" &&
+    step.companionChoice?.required &&
+    (cells[step.companionChoice.col] ?? "").trim() === ""
+  ) {
+    return `${step.companionChoice.label} is required.`;
+  }
   if (step.kind === "decimal" && decimalText(values[0] ?? "") == null) return `${step.label} needs a number.`;
   if (step.kind === "round") return roundProblem(step, cells);
   return null;
@@ -118,27 +126,39 @@ export function prefillFromItem(family: EntryFamily, cells: Cells, item: Invento
   return next;
 }
 
-/** The confirm screen: each filled step as label and value, in step order. */
+/**
+ * The confirm screen: each filled step as label and value. A family whose every step writes a
+ * numbered sheet column lists those lines in column order, the same way the web confirm does, so
+ * Subs still shows Serial above Sub Type. Custom and MWD keep the order their steps are written in.
+ */
 export function entryLines(family: EntryFamily, cells: Cells): { label: string; value: string }[] {
-  const lines: { label: string; value: string }[] = [];
+  const lines: { label: string; value: string; col?: number }[] = [];
   for (const step of family.steps) {
     switch (step.kind) {
       case "text":
+        if (cells[step.col]) lines.push({ label: step.label, value: cells[step.col] ?? "", col: typeof step.col === "number" ? step.col : undefined });
+        if (step.companionChoice && cells[step.companionChoice.col]) {
+          lines.push({
+            label: step.companionChoice.label,
+            value: cells[step.companionChoice.col] ?? "",
+          });
+        }
+        break;
       case "decimal":
       case "choice":
-        if (cells[step.col]) lines.push({ label: step.label, value: cells[step.col] ?? "" });
+        if (cells[step.col]) lines.push({ label: step.label, value: cells[step.col] ?? "", col: typeof step.col === "number" ? step.col : undefined });
         break;
       case "boxPin":
       case "threads":
-        if (cells[step.cols.upper]) lines.push({ label: `${step.label} Upper`, value: cells[step.cols.upper] ?? "" });
-        if (cells[step.cols.lower]) lines.push({ label: `${step.label} Lower`, value: cells[step.cols.lower] ?? "" });
+        if (cells[step.cols.upper]) lines.push({ label: `${step.label} Upper`, value: cells[step.cols.upper] ?? "", col: typeof step.cols.upper === "number" ? step.cols.upper : undefined });
+        if (cells[step.cols.lower]) lines.push({ label: `${step.label} Lower`, value: cells[step.cols.lower] ?? "", col: typeof step.cols.lower === "number" ? step.cols.lower : undefined });
         break;
       case "customBuilder":
         lines.push(...customLines(cells));
         break;
       case "round":
         for (const sub of step.cols) {
-          if (cells[sub.col]) lines.push({ label: `${sub.letter} ${sub.short} ${step.field}`, value: cells[sub.col] ?? "" });
+          if (cells[sub.col]) lines.push({ label: `${sub.letter} ${sub.short} ${step.field}`, value: cells[sub.col] ?? "", col: typeof sub.col === "number" ? sub.col : undefined });
         }
         break;
       default: {
@@ -147,5 +167,10 @@ export function entryLines(family: EntryFamily, cells: Cells): { label: string; 
       }
     }
   }
-  return lines;
+  const byColumn = family.steps.every((step) => {
+    const cols = stepColumns(step);
+    return cols.length > 0 && cols.every((col) => typeof col === "number");
+  });
+  if (byColumn) lines.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
+  return lines.map(({ label, value }) => ({ label, value }));
 }

@@ -1,4 +1,4 @@
-export { choiceOptions, stepColumns, stepInput, type BoxPinStep, type ChoiceStep, type EntryFamily, type EntryStep, type RoundCol, type RoundStep, type StepKind, type TextStep, type ThreadsStep } from "./schema";
+export { choiceOptions, stepColumns, stepInput, type BoxPinStep, type ChoiceStep, type CompanionChoice, type EntryFamily, type EntryStep, type RoundCol, type RoundStep, type StepKind, type TextStep, type ThreadsStep } from "./schema";
 export { decimalText, entryPayloadSchema, normalizeEntry, roundProblem, upperText, validateEntry, type EntryPayload, type EntryProblem } from "./entry";
 export { MWD_WHICH, mwdCardEntry, mwdDate, mwdRounds, mwdSubLengths, mwdSummary, type MwdRounds, type MwdSummary } from "./mwd";
 export { filterItems, itemFromRow, itemsFromCsv, type InventoryItem, type InventorySnapshot } from "./inventory";

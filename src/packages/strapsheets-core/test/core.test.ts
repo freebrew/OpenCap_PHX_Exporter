@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choiceOptions, decimalText, entryPayloadSchema, filterItems, itemsFromCsv, normalizeEntry, rangeFor, rangeWarning, setRange, stepColumns, stepInput, upperText, validateEntry, type EntryFamily, type EntryStep, type InventoryItem, ENTRY_FAMILIES } from "../src/index";
+import { choiceOptions, decimalText, entryPayloadSchema, filterItems, itemsFromCsv, normalizeEntry, rangeFor, rangeWarning, serialStep, setRange, stepColumns, stepInput, upperText, validateEntry, type EntryFamily, type InventoryItem, ENTRY_FAMILIES } from "../src/index";
 
 // The Motor family, trimmed to the steps the wizard opens with. The order and the input mode
 // are what the snapshot below pins, so a regenerated entry_schema.js that drifts fails here.
@@ -7,9 +7,23 @@ const MOTOR: EntryFamily = {
   which: "Motor",
   materials: ["Steel", "Non Magnetic"],
   boxPinOptions: ["PIN", "BOX"],
-  extraOptions: {},
+  extraOptions: { bendHousingOptions: ["FXD", "ADJ"] },
   steps: [
-    { id: "serial", kind: "text", label: "Serial", header: "Serial", col: 2, required: true },
+    {
+      id: "serial",
+      kind: "text",
+      label: "Serial",
+      header: "Serial",
+      col: 2,
+      required: true,
+      companionChoice: {
+        label: "Bend Housing",
+        header: "Bend Housing",
+        col: "bendHousing",
+        optionsKey: "bendHousingOptions",
+        required: true,
+      },
+    },
     { id: "material", kind: "choice", label: "Material", header: "Material", col: 3, optionsKey: "materials", required: true },
     { id: "boxPin", kind: "boxPin", label: "BOX PIN Config", cols: { upper: 4, lower: 5 }, headers: { upper: "BOX PIN Config [Upper]", lower: "BOX PIN Config [Lower]" } },
     { id: "threads", kind: "threads", label: "BOX PIN Thread Type", cols: { upper: 6, lower: 7 }, headers: { upper: "BOX PIN Thread Type [Upper Thread Type]", lower: "BOX PIN Thread Type [Lower Thread Type]" } },
@@ -25,7 +39,7 @@ describe("the wizard renders from the schema", () => {
   });
 
   it("maps a step onto the columns it fills", () => {
-    expect(MOTOR.steps.flatMap(stepColumns)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(MOTOR.steps.flatMap(stepColumns)).toEqual([2, "bendHousing", 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("offers a choice step its list", () => {
@@ -36,11 +50,16 @@ describe("the wizard renders from the schema", () => {
 });
 
 describe("the generated schema", () => {
-  it("opens every family with a serial typed in capitals, then buttons, then the number pad", () => {
+  it("gives every family a serial typed in capitals, then buttons, then the number pad", () => {
     for (const family of ENTRY_FAMILIES) {
-      const first = family.steps[0] as EntryStep;
-      expect(first.kind, family.which).toBe("text");
-      expect(first.id, family.which).toBe("serial");
+      const serial = serialStep(family);
+      expect(serial?.kind, family.which).toBe("text");
+      if (family.which === "Subs") {
+        expect(family.steps[0]?.id, family.which).toBe("c6");
+        expect(family.steps[1]?.id, family.which).toBe("serial");
+      } else {
+        expect(family.steps[0]?.id, family.which).toBe("serial");
+      }
       for (const step of family.steps) {
         if (step.kind === "decimal") expect(stepInput(step), `${family.which} ${step.id}`).toBe("decimal");
         if (step.kind === "text") expect(stepInput(step)).toBe("text");
@@ -68,12 +87,30 @@ describe("entry text", () => {
 
   it("rejects a missing serial and a material that is not offered", () => {
     const problems = validateEntry(MOTOR, { which: "Motor", cells: { 3: "Titanium" } });
-    expect(problems.map((problem) => problem.stepId)).toEqual(["serial", "material"]);
+    expect(problems.map((problem) => problem.message)).toEqual([
+      "Serial is required.",
+      "Material must be one of Steel, Non Magnetic.",
+    ]);
+  });
+
+  it("requires and validates the Motor bend housing choice", () => {
+    expect(validateEntry(MOTOR, { which: "Motor", cells: { 2: "M-1", 3: "Steel" } }))
+      .toContainEqual({ stepId: "serial", message: "Bend Housing is required." });
+    expect(validateEntry(MOTOR, {
+      which: "Motor",
+      cells: { 2: "M-1", bendHousing: "OTHER", 3: "Steel" },
+    })).toContainEqual({
+      stepId: "serial",
+      message: "Bend Housing must be one of FXD, ADJ.",
+    });
   });
 
   it("stores the serial in capitals and drops blanks", () => {
-    const stored = normalizeEntry(MOTOR, { which: "Motor", cells: { 2: "phx-1", 3: "Steel", 8: "" } });
-    expect(stored.cells).toEqual({ 2: "PHX-1", 3: "Steel" });
+    const stored = normalizeEntry(MOTOR, {
+      which: "Motor",
+      cells: { 2: "phx-1", bendHousing: "adj", 3: "Steel", 8: "" },
+    });
+    expect(stored.cells).toEqual({ 2: "PHX-1", bendHousing: "ADJ", 3: "Steel" });
   });
 });
 

@@ -13,12 +13,23 @@ interface StepBase {
   required?: boolean;
 }
 
+/** A required button choice rendered on the same screen as a text field. */
+export interface CompanionChoice {
+  label: string;
+  header?: string;
+  col: CellKey;
+  optionsKey: string;
+  required?: boolean;
+}
+
 /** A single typed value. `col` is the 0-based column in Form Responses 1. */
 export interface TextStep extends StepBase {
   kind: "text" | "decimal";
   /** Form header. Custom's named fields do not have one. */
   header?: string;
   col: CellKey;
+  /** Motor Serial also asks whether the bend housing is fixed or adjustable. */
+  companionChoice?: CompanionChoice;
 }
 
 /** One option from the family's list (`optionsKey` names which list). */
@@ -89,6 +100,9 @@ export interface EntryFamily {
 export function stepColumns(step: EntryStep): CellKey[] {
   switch (step.kind) {
     case "text":
+      return step.companionChoice
+        ? [step.col, step.companionChoice.col]
+        : [step.col];
     case "decimal":
     case "choice":
       return [step.col];
@@ -132,7 +146,10 @@ export function stepInput(step: EntryStep): "text" | "decimal" | "buttons" | "bu
  * The options a choice step offers. `materials` and `boxPinOptions` are the two named lists;
  * anything else comes from `extraOptions`. Unknown keys offer nothing.
  */
-export function choiceOptions(family: EntryFamily, step: ChoiceStep): string[] {
+export function choiceOptions(
+  family: EntryFamily,
+  step: Pick<ChoiceStep, "optionsKey">,
+): string[] {
   switch (step.optionsKey) {
     case "materials":
       return family.materials;

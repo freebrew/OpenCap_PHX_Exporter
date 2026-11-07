@@ -87,9 +87,28 @@ export function validateEntry(family: EntryFamily, payload: EntryPayload): Entry
   for (const step of family.steps) {
     const columns = stepColumns(step);
     const values = columns.map((col) => cellValue(step, payload.cells[col] ?? ""));
-    if (step.required && values.every((value) => value === "")) {
+    const requiredValues = step.kind === "text" ? values.slice(0, 1) : values;
+    if (step.required && requiredValues.every((value) => value === "")) {
       problems.push({ stepId: step.id, message: `${step.label} is required.` });
       continue;
+    }
+    if (step.kind === "text" && step.companionChoice) {
+      const companion = step.companionChoice;
+      const value = upperText(payload.cells[companion.col] ?? "");
+      if (companion.required && value === "") {
+        problems.push({
+          stepId: step.id,
+          message: `${companion.label} is required.`,
+        });
+      } else if (
+        value !== "" &&
+        !choiceOptions(family, companion).includes(value)
+      ) {
+        problems.push({
+          stepId: step.id,
+          message: `${companion.label} must be one of ${choiceOptions(family, companion).join(", ")}.`,
+        });
+      }
     }
     if (step.kind === "decimal" && values.some((value) => value == null)) {
       problems.push({ stepId: step.id, message: `${step.label} needs a number.` });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARD_ART } from "../src/art.gen";
 import { PRINT_CARDS } from "../src/cards.gen";
-import { ENTRY_FAMILIES, renderCards, stepColumns, type EntryPayload } from "../src/index";
+import { ENTRY_FAMILIES, renderCards, serialStep, stepColumns, type EntryPayload } from "../src/index";
 import { textWidth, wrapText } from "../src/helvetica";
 
 const MOTOR: EntryPayload = {
@@ -10,6 +10,7 @@ const MOTOR: EntryPayload = {
     2: "PHX-725047", 3: "Steel", 4: "BOX", 5: "PIN", 6: "4 1/2 IF [NC 50]", 7: "4 1/2 REG",
     8: "0.23", 9: "0.56", 10: "0.71", 11: "1.37", 12: "2.03", 13: "2.02", 14: "9.4",
     15: "10.17", 16: "172", 17: "184", 18: "205", 19: "184", 20: "178", 21: "169", 22: "168", 23: "1.83",
+    186: "177", bendHousing: "ADJ",
   },
 };
 
@@ -26,10 +27,10 @@ const images = (pdf: Uint8Array) => text(pdf).split("/Subtype /Image").length - 
 describe("the strap card layout", () => {
   it("draws the Sheets card: serial, connections and the lettered measures with the family title", () => {
     const drawn = strings(renderCards([MOTOR]));
-    for (const label of ["Serial", "Material", "TOP", "BTM", "A", "B", "C", "D", "E", "F", "G", "BEND", "H LEN", "I OD", "J OD", "K OD", "L OD", "M OD", "N OD", "O OD"]) {
+    for (const label of ["Serial", "Material", "TOP", "BTM", "A", "B", "C", "D", "E", "F", "G", "BEND", "H LEN", "I OD", "J OD", "K OD", "L OD", "M OD", "N OD", "O OD", "P OD"]) {
       expect(drawn, label).toContain(label);
     }
-    for (const value of ["PHX-725047", "Steel", "0.23", "9.4", "1.83", "10.17", "172", "168"]) expect(drawn, value).toContain(value);
+    for (const value of ["PHX-725047", "Steel", "0.23", "9.4", "1.83", "10.17", "172", "177", "168"]) expect(drawn, value).toContain(value);
     expect(drawn).toContain("MOTORS");
   });
 
@@ -104,8 +105,8 @@ describe("the strap card layout", () => {
 
   it("renders every family of the wizard and ends it with that family's title", () => {
     for (const family of ENTRY_FAMILIES) {
-      const serial = family.steps[0];
-      if (serial?.kind !== "text") throw new Error("a family opens with its serial");
+      const serial = serialStep(family);
+      if (serial?.kind !== "text") throw new Error("a family has its serial");
       const entry: EntryPayload = { which: family.which, cells: { [serial.col]: "SER-1" } };
       for (const step of family.steps) if (step.kind === "choice" && step.optionsKey === "subTypeOptions") entry.cells[step.col] = "Float";
       const pdf = renderCards([entry]);

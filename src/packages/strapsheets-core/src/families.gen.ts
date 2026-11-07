@@ -12,7 +12,12 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
       "PIN",
       "BOX"
     ],
-    "extraOptions": {},
+    "extraOptions": {
+      "bendHousingOptions": [
+        "FXD",
+        "ADJ"
+      ]
+    },
     "steps": [
       {
         "id": "serial",
@@ -20,7 +25,14 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "label": "Serial",
         "header": "Serial",
         "col": 2,
-        "required": true
+        "required": true,
+        "companionChoice": {
+          "label": "Bend Housing",
+          "header": "Bend Housing",
+          "col": "bendHousing",
+          "optionsKey": "bendHousingOptions",
+          "required": true
+        }
       },
       {
         "id": "material",
@@ -121,45 +133,52 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "col": 16
       },
       {
+        "id": "d186",
+        "kind": "decimal",
+        "label": "J - Drive Shaft OD",
+        "header": "J - Drive Shaft OD",
+        "col": 186
+      },
+      {
         "id": "d15",
         "kind": "decimal",
-        "label": "J - Lower PAD OD",
-        "header": "J - Lower PAD OD",
+        "label": "K - Lower PAD OD",
+        "header": "K - Lower PAD OD",
         "col": 17
       },
       {
         "id": "d16",
         "kind": "decimal",
-        "label": "K - PAD OD",
-        "header": "K - PAD OD",
+        "label": "L - PAD OD",
+        "header": "L - PAD OD",
         "col": 18
       },
       {
         "id": "d17",
         "kind": "decimal",
-        "label": "L - Upper PAD OD",
-        "header": "L - Upper PAD OD",
+        "label": "M - Upper PAD OD",
+        "header": "M - Upper PAD OD",
         "col": 19
       },
       {
         "id": "d18",
         "kind": "decimal",
-        "label": "M - Upper Bend OD",
-        "header": "M - Upper Bend OD",
+        "label": "N - Upper Bend OD",
+        "header": "N - Upper Bend OD",
         "col": 20
       },
       {
         "id": "d19",
         "kind": "decimal",
-        "label": "N - Power Section OD",
-        "header": "N - Power Section OD",
+        "label": "O - Power Section OD",
+        "header": "O - Power Section OD",
         "col": 21
       },
       {
         "id": "d20",
         "kind": "decimal",
-        "label": "O - Motor Catch OD",
-        "header": "O - Motor Catch OD",
+        "label": "P - Motor Catch OD",
+        "header": "P - Motor Catch OD",
         "col": 22
       },
       {
@@ -716,6 +735,15 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
     },
     "steps": [
       {
+        "id": "c6",
+        "kind": "choice",
+        "label": "Sub Type",
+        "header": "Sub Type",
+        "col": 96,
+        "optionsKey": "subTypeOptions",
+        "required": true
+      },
+      {
         "id": "serial",
         "kind": "text",
         "label": "Serial",
@@ -757,15 +785,6 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
           "upper": "BOX PIN Thread Type [Upper Thread Type]",
           "lower": "BOX PIN Thread Type [Lower Thread Type]"
         }
-      },
-      {
-        "id": "c6",
-        "kind": "choice",
-        "label": "Sub Type",
-        "header": "Sub Type",
-        "col": 96,
-        "optionsKey": "subTypeOptions",
-        "required": true
       },
       {
         "id": "d7",

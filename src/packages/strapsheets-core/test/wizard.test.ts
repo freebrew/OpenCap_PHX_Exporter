@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS, entryLines, findFamily, liveValue, measureSteps, normalizeEntry, prefillFromItem, setCell, setRange, stepColumns, stepProblem, stepWarning, threadParts, validateEntry, type Cells, type EntryFamily, type EntryStep, type InventoryItem } from "../src/index";
+import { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS, entryLines, findFamily, liveValue, measureSteps, normalizeEntry, prefillFromItem, serialStep, setCell, setRange, stepColumns, stepProblem, stepWarning, threadParts, validateEntry, type Cells, type EntryFamily, type EntryStep, type InventoryItem } from "../src/index";
 
 function motor(): EntryFamily {
   const family = findFamily(ENTRY_FAMILIES, "Motor");
@@ -40,6 +40,9 @@ describe("wizard", () => {
     const family = motor();
     const serial = step(family, "serial");
     expect(stepProblem(serial, {})).toBe("Serial is required.");
+    if (serial.kind !== "text" || !serial.companionChoice) throw new Error("Motor Bend Housing missing");
+    expect(stepProblem(serial, { [serial.col]: "M-1" })).toBe("Bend Housing is required.");
+    expect(stepProblem(serial, { [serial.col]: "M-1", [serial.companionChoice.col]: "FXD" })).toBeNull();
     expect(stepProblem(step(family, "d6"), {})).toBeNull();
     expect(stepProblem(step(family, "d6"), { 8: "." })).toBe("A - BitBox needs a number.");
   });
@@ -69,6 +72,9 @@ describe("wizard", () => {
       switch (current.kind) {
         case "text":
           cells = setCell(cells, current.col, liveValue(current, "mtr-001"));
+          if (current.companionChoice) {
+            cells = setCell(cells, current.companionChoice.col, "ADJ");
+          }
           break;
         case "choice":
           cells = setCell(cells, current.col, family.materials[0] ?? "");
@@ -95,10 +101,24 @@ describe("wizard", () => {
     const payload = normalizeEntry(family, { which: "Motor", cells });
     expect(validateEntry(family, payload)).toEqual([]);
     expect(payload.cells[2]).toBe("MTR-001");
+    expect(payload.cells.bendHousing).toBe("ADJ");
     const skipped = stepColumns(step(family, "d7"))[0];
     expect(skipped).toBeDefined();
     expect(payload.cells[skipped ?? -1]).toBeUndefined();
-    expect(entryLines(family, payload.cells)[0]).toEqual({ label: "Serial", value: "MTR-001" });
-    expect(measureSteps(family).length).toBe(16);
+    expect(entryLines(family, payload.cells).slice(0, 2)).toEqual([
+      { label: "Serial", value: "MTR-001" },
+      { label: "Bend Housing", value: "ADJ" },
+    ]);
+    expect(measureSteps(family).length).toBe(17);
+  });
+
+  it("lists a Subs confirm in column order, so Serial stays above Sub Type", () => {
+    const family = findFamily(ENTRY_FAMILIES, "Subs");
+    if (!family) throw new Error("Subs family missing");
+    const subType = step(family, "c6");
+    const serial = serialStep(family);
+    if (subType.kind !== "choice" || serial?.kind !== "text") throw new Error("Subs steps");
+    const cells = { [subType.col]: "Float", [serial.col]: "FLT-1" };
+    expect(entryLines(family, cells).map((line) => line.label)).toEqual(["Serial", "Sub Type"]);
   });
 });
