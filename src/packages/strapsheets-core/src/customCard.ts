@@ -1,7 +1,7 @@
 // The Custom.P card: one built tube, the header fields, and A–L. Three cards fit a page.
 // Standard families keep the generated card tables; Custom is drawn from its own payload.
 
-import { customFlagCells, parseMarks } from "./custom";
+import { activeMarks, customFlagCells, parseMarks, type EndConfig } from "./custom";
 import { customScene, sceneBounds, sceneItems } from "./customScene";
 import { BUILDER_W } from "./customShape";
 import type { EntryPayload } from "./entry";
@@ -36,12 +36,12 @@ function rgbOfHex(hex: string): Rgb {
   return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
 }
 
-function drawPicture(canvas: PageCanvas, marks: ReturnType<typeof parseMarks>, top: number): void {
-  const bounds = sceneBounds(marks);
+function drawPicture(canvas: PageCanvas, marks: ReturnType<typeof parseMarks>, ends: EndConfig, top: number): void {
+  const bounds = sceneBounds(marks, ends);
   const scale = Math.min(PICTURE_W / BUILDER_W, PICTURE_MAX_H / bounds.h);
   const ox = 20 + (PICTURE_W - BUILDER_W * scale) / 2;
   const oy = top + PICTURE_TOP - bounds.y * scale;
-  const { items, texts } = sceneItems(customScene(marks));
+  const { items, texts } = sceneItems(customScene(activeMarks(marks), "", false, ends));
   canvas.paintItems(items, ox, oy, scale, scale);
   for (const text of texts) {
     const size = text.size * scale;
@@ -52,7 +52,13 @@ function drawPicture(canvas: PageCanvas, marks: ReturnType<typeof parseMarks>, t
 function drawCard(canvas: PageCanvas, entry: EntryPayload, top: number): void {
   canvas.text("CUSTOM", 0, top + 18, 16, true, [0, 0, 0]);
   const marks = parseMarks(entry.cells.marksJson);
-  drawPicture(canvas, marks, top);
+  const ends: EndConfig = {
+    lower: entry.cells.boxLower === "PIN" ? "PIN" : "BOX",
+    upper: entry.cells.boxUpper === "PIN" ? "PIN" : "BOX",
+    threadLower: entry.cells.threadLower ?? "",
+    threadUpper: entry.cells.threadUpper ?? "",
+  };
+  drawPicture(canvas, marks, ends, top);
   const base = top + PICTURE_TOP + PICTURE_MAX_H + 14;
   const header = [
     ["Serial", entry.cells.serial ?? ""],

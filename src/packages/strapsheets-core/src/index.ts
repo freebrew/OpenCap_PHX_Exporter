@@ -11,6 +11,8 @@ export {
   BUILDER_SIZE,
   CUSTOM_LETTERS,
   MARK_KINDS,
+  MENU_KINDS,
+  activeMarks,
   addMark,
   customFlagCells,
   customLines,
@@ -34,9 +36,10 @@ export {
   tubePath,
   valueLabel,
   xFromClient,
+  type EndConfig,
   type Mark,
   type MarkKind,
 } from "./custom";
-export { customScene, sceneBounds, sceneItems, type Prim } from "./customScene";
+export { LIGHT_PALETTE, customScene, sceneBounds, sceneItems, type Prim, type ScenePalette } from "./customScene";
 export { BUILDER_H, BUILDER_W, FLAG_R, HIT_R, TOUCH_R, dragX, flagPoint, flagRadius, lengthSpots, pickMark, spotFree, stemPx } from "./customShape";
 export { entryLines, entrySerial, findFamily, measuredSerials, liveValue, measureSteps, prefillFromItem, serialStep, setCell, stepProblem, stepWarning, type Cells } from "./wizard";

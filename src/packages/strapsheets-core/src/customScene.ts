@@ -2,7 +2,7 @@
 // vector items. The Entry web app draws the same picture from the same rules in Entry.html.
 
 import type { VectorItem, VectorOp } from "./cardSpec";
-import type { Mark } from "./custom";
+import type { EndConfig, Mark } from "./custom";
 import {
   BUILDER_W,
   FLAG_R,
@@ -101,7 +101,7 @@ export function hatchLines(poly: Point[], step: number): { x1: number; y1: numbe
   }
   return lines;
 }
-function pinThreads(mark: Mark, marks: Mark[]): Prim[] {
+function pinThreads(mark: Mark, marks: Mark[], ink = INK): Prim[] {
   const layout = tubeLayout(marks);
   const leftEnd = mark.x < 0.5;
   const x0 = leftEnd ? layout.bodyX - PIN_W : layout.bodyX + layout.bodyW;
@@ -110,7 +110,7 @@ function pinThreads(mark: Mark, marks: Mark[]): Prim[] {
     const t = index / 5;
     const px = x0 + PIN_W * t;
     const half = PIN_TIP + (PIN_SHOULDER - PIN_TIP) * (leftEnd ? t : 1 - t);
-    prims.push({ t: "line", x1: px, y1: TUBE_CY - half + 1, x2: px, y2: TUBE_CY + half - 1, stroke: INK, w: 1.15 });
+    prims.push({ t: "line", x1: px, y1: TUBE_CY - half + 1, x2: px, y2: TUBE_CY + half - 1, stroke: ink, w: 1.15 });
   }
   return prims;
 }
@@ -119,7 +119,7 @@ function pinThreads(mark: Mark, marks: Mark[]): Prim[] {
 function spiral(x: number): Prim[] {
   const outline = spiralPolygon(x);
   const prims: Prim[] = [{ t: "poly", pts: outline, fill: "#ffffff", stroke: "none", w: 0 }];
-  for (const line of hatchLines(outline, 9)) prims.push({ t: "line", ...line, stroke: HATCH, w: 1.4 });
+  for (const line of hatchLines(outline, 18)) prims.push({ t: "line", ...line, stroke: HATCH, w: 1.4 });
   prims.push({ t: "poly", pts: outline, fill: "none", stroke: INK, w: 1.8 });
   return prims;
 }
@@ -159,14 +159,14 @@ function odStation(x: number, mark: Mark, marks: Mark[], color: string, touch: b
   ];
 }
 
-function flag(mark: Mark, marks: Mark[], selected: boolean, touch: boolean): Prim[] {
+function flag(mark: Mark, marks: Mark[], selected: boolean, touch: boolean, palette: ScenePalette): Prim[] {
   const point = flagPoint(mark, marks, touch);
-  const color = selected ? BLUE : NAVY;
+  const color = selected ? palette.select : palette.navy;
   const radius = flagRadius(mark.kind, touch);
   const size = radius > FLAG_R ? 52 : 18;
   return [
-    { t: "circle", cx: point.x, cy: point.y, r: radius, fill: selected ? BLUE : "#ffffff", stroke: color, w: radius > FLAG_R ? 4 : 2.4 },
-    { t: "text", x: point.x, y: point.y + size / 3, s: mark.letter, size, fill: selected ? "#ffffff" : color },
+    { t: "circle", cx: point.x, cy: point.y, r: radius, fill: selected ? palette.select : palette.plate, stroke: color, w: radius > FLAG_R ? 4 : 2.4 },
+    { t: "text", x: point.x, y: point.y + size / 3, s: mark.letter, size, fill: selected ? palette.plate : color },
   ];
 }
 
@@ -174,31 +174,84 @@ function flag(mark: Mark, marks: Mark[], selected: boolean, touch: boolean): Pri
  * Every primitive of the tube, bottom layer first: tube, pins, add-ons, stations, then the flags.
  * `touch` draws the builder's finger-size Length and OD flags; the card and the confirm picture leave it off.
  */
-export function customScene(marks: Mark[], selected = "", touch = false): Prim[] {
-  const prims: Prim[] = [{ t: "poly", pts: tubePolygon(marks), fill: STEEL, stroke: INK, w: 2.5 }];
-  const bore = borePolygon(marks);
-  if (bore.length > 0) prims.push({ t: "poly", pts: bore, fill: "#ffffff", stroke: "none", w: 0 });
-  for (const mark of marks) if (mark.kind === "pin") prims.push(...pinThreads(mark, marks));
-  for (const mark of marks) {
-    const x = stemPx(mark, marks);
-    const color = mark.letter === selected ? BLUE : NAVY;
+export interface ScenePalette {
+  ink: string;
+  bore: string;
+  select: string;
+  navy: string;
+  plate: string;
+}
+
+export const LIGHT_PALETTE: ScenePalette = { ink: INK, bore: "#ffffff", select: BLUE, navy: NAVY, plate: "#ffffff" };
+
+function shortenCopy(text: string): string {
+  const value = text.trim();
+  return value.length > 18 ? `${value.slice(0, 17)}…` : value;
+}
+
+function withEndPins(marks: Mark[], ends: EndConfig): Mark[] {
+  const shaped = marks.filter((mark) => mark.kind !== "pin");
+  if (ends.lower.toUpperCase() === "PIN") shaped.push({ letter: "", kind: "pin", x: 0.04, value: "" });
+  if (ends.upper.toUpperCase() === "PIN") shaped.push({ letter: "", kind: "pin", x: 0.96, value: "" });
+  return shaped;
+}
+
+function boxThreads(left: boolean, marks: Mark[], ink: string): Prim[] {
+  const layout = tubeLayout(marks);
+  const x0 = left ? layout.bodyX + 6 : layout.bodyX + layout.bodyW - 20;
+  const prims: Prim[] = [];
+  for (let row = 0; row < 3; row += 1) {
+    const y = TUBE_CY - 8 + row * 8;
+    prims.push({ t: "line", x1: x0, y1: y, x2: x0 + 6, y2: y, stroke: ink, w: 1.2 });
+    prims.push({ t: "line", x1: x0 + 9, y1: y, x2: x0 + 14, y2: y, stroke: ink, w: 1.2 });
+  }
+  return prims;
+}
+
+function endCaptions(ends: EndConfig, marks: Mark[], ink: string): Prim[] {
+  const layout = tubeLayout(marks);
+  const leftX = layout.pins.left ? layout.bodyX - PIN_W / 2 : layout.bodyX + 18;
+  const rightX = layout.pins.right ? layout.bodyX + layout.bodyW + PIN_W / 2 : layout.bodyX + layout.bodyW - 18;
+  const line = (x: number, y: number, text: string): Prim => ({ t: "text", x, y, s: text, size: 12, fill: ink });
+  return [
+    line(leftX, TUBE_CY - 56, ends.lower.toUpperCase() === "PIN" ? "PIN" : "BOX"),
+    line(leftX, TUBE_CY - 42, shortenCopy(ends.threadLower ?? "")),
+    line(rightX, TUBE_CY - 72, ends.upper.toUpperCase() === "PIN" ? "PIN" : "BOX"),
+    line(rightX, TUBE_CY - 58, shortenCopy(ends.threadUpper ?? "")),
+  ].filter((prim) => prim.t === "text" && prim.s !== "");
+}
+
+export function customScene(marks: Mark[], selected = "", touch = false, ends?: EndConfig, palette: ScenePalette = LIGHT_PALETTE): Prim[] {
+  const drawn = ends ? marks.filter((mark) => mark.kind !== "pin") : marks;
+  const shaped = ends ? withEndPins(drawn, ends) : marks;
+  const prims: Prim[] = [{ t: "poly", pts: tubePolygon(shaped, ends), fill: STEEL, stroke: palette.ink, w: 2.5 }];
+  const bore = borePolygon(shaped, ends);
+  if (bore.length > 0) prims.push({ t: "poly", pts: bore, fill: palette.bore, stroke: "none", w: 0 });
+  for (const mark of shaped) if (mark.kind === "pin") prims.push(...pinThreads(mark, shaped, palette.ink));
+  if (ends && ends.lower.toUpperCase() !== "PIN") prims.push(...boxThreads(true, shaped, palette.ink));
+  if (ends && ends.upper.toUpperCase() !== "PIN") prims.push(...boxThreads(false, shaped, palette.ink));
+  if (ends) prims.push(...endCaptions(ends, shaped, palette.ink));
+  for (const mark of drawn) {
+    const x = stemPx(mark, shaped);
+    const color = mark.letter === selected ? palette.select : palette.navy;
     if (mark.kind === "spiral") prims.push(...spiral(x));
-    else if (mark.kind === "panels") prims.push(...panels(x, bodyHalfAt(mark.x, marks), color));
+    else if (mark.kind === "panels") prims.push(...panels(x, bodyHalfAt(mark.x, drawn), color));
   }
-  for (const mark of marks) {
-    const x = stemPx(mark, marks);
-    const color = mark.letter === selected ? BLUE : NAVY;
-    if (mark.kind === "length") prims.push(...lengthStation(x, mark, marks, color, touch));
-    else if (mark.kind === "od") prims.push(...odStation(x, mark, marks, color, touch));
+  for (const mark of drawn) {
+    const x = stemPx(mark, shaped);
+    const color = mark.letter === selected ? palette.select : palette.navy;
+    if (mark.kind === "length") prims.push(...lengthStation(x, mark, shaped, color, touch));
+    else if (mark.kind === "od") prims.push(...odStation(x, mark, shaped, color, touch));
   }
-  for (const mark of marks) prims.push(...flag(mark, marks, mark.letter === selected, touch));
+  for (const mark of drawn) prims.push(...flag(mark, shaped, mark.letter === selected, touch, palette));
   return prims;
 }
 
 /** The rows of the picture that hold something, so a card can leave out an empty top or bottom. */
-export function sceneBounds(marks: Mark[]): { x: number; y: number; w: number; h: number } {
-  const rows = new Set(marks.map((mark) => flagRow(mark.kind)));
-  const top = rows.has("top") ? lengthFlagY() - FLAG_R - 4 : rows.has("mid") ? SHAPE_FLAG_Y - FLAG_R - 4 : TUBE_CY - SPIRAL_HALF - 8;
+export function sceneBounds(marks: Mark[], ends?: EndConfig): { x: number; y: number; w: number; h: number } {
+  const rows = new Set(marks.filter((mark) => mark.kind !== "pin").map((mark) => flagRow(mark.kind)));
+  const plain = rows.has("top") ? lengthFlagY() - FLAG_R - 4 : rows.has("mid") ? SHAPE_FLAG_Y - FLAG_R - 4 : TUBE_CY - SPIRAL_HALF - 8;
+  const top = ends ? Math.min(plain, TUBE_CY - 80) : plain;
   const bottom = rows.has("bottom") ? odFlagY() + FLAG_R + 2 : TUBE_CY + SPIRAL_HALF + 12;
   return { x: 0, y: top, w: BUILDER_W, h: bottom - top };
 }

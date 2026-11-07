@@ -4,6 +4,8 @@ import {
   addMark,
   moveMark,
   nextLetter,
+  MENU_KINDS,
+  activeMarks,
   normalizeCustomCells,
   markMenuLabel,
   parseMarks,
@@ -300,6 +302,7 @@ describe("custom marks", () => {
   it("names the Add menu in Proper Case and gives an add-on's letter its OD", () => {
     const labels = ["pin", "upset", "spline", "spiral", "panels", "length", "od"].map((kind) => markMenuLabel(kind as Mark["kind"]));
     expect(labels).toEqual(["Pin", "Upset / Inset", "Spline", "Spiral (Stab / Turbolizer)", "Panels", "Length Station", "OD Station"]);
+    expect(markMenuLabel("pin")).toBe("Pin");
     const cells = {
       marksJson: JSON.stringify({
         marks: [
@@ -314,7 +317,6 @@ describe("custom marks", () => {
       { label: "A Spiral OD", value: "5.25" },
       { label: "B Length", value: "0.6" },
       { label: "C OD", value: "4.75" },
-      { label: "D Pin", value: "" },
     ]);
     const marks = parseMarks(cells.marksJson);
     // The card's second row follows the sheet: Length reads LEN, OD and add-ons read OD, pins are blank.
@@ -325,6 +327,17 @@ describe("custom marks", () => {
     ]);
     expect(removeMark(marks, "A").some((mark) => mark.letter === "A")).toBe(false);
     expect(customLines({ marksJson: JSON.stringify({ marks: removeMark(marks, "A") }) }).some((line) => line.label.startsWith("A "))).toBe(false);
+    expect(MENU_KINDS).not.toContain("pin");
+    const kept = normalizeCustomCells(cells);
+    const stored = parseMarks(kept.marksJson);
+    expect(stored.map((mark) => mark.letter)).toEqual(["A", "B", "C"]);
+    expect(activeMarks(marks).map((mark) => mark.letter)).toEqual(["A", "B", "C"]);
+    const configured = customScene(marks, "", false, { lower: "PIN", upper: "BOX", threadLower: "NC 50", threadUpper: "4 1/2 IF" });
+    const threads = configured.filter((prim) => prim.t === "line" && prim.w === 1.15);
+    expect(threads.length).toBe(4);
+    expect(configured.some((prim) => prim.t === "text" && prim.s === "NC 50")).toBe(true);
+    expect(configured.some((prim) => prim.t === "text" && prim.s === "4 1/2 IF")).toBe(true);
+    expect(configured.some((prim) => prim.t === "text" && prim.s === "D")).toBe(false);
   });
   it("reads legacy mandrel JSON and ignores a broken blob", () => {
     const marks = parseMarks(JSON.stringify({ marks: [{ letter: "B", kind: "mandrel", x: 0.3, value: "1" }] }));

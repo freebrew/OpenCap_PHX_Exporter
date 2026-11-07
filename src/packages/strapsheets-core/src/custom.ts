@@ -18,6 +18,15 @@ export { pinEnds };
 export const CUSTOM_LETTERS = "ABCDEFGHIJKL";
 export const MARK_KINDS = ["pin", "upset", "spline", "spiral", "panels", "length", "od"] as const;
 export type MarkKind = (typeof MARK_KINDS)[number];
+/** Kinds the Add menu offers. A pin is legacy data only; BOX PIN Config draws the ends. */
+export const MENU_KINDS = ["upset", "spline", "spiral", "panels", "length", "od"] as const;
+
+export interface EndConfig {
+  lower: string;
+  upper: string;
+  threadLower?: string;
+  threadUpper?: string;
+}
 
 export interface Mark {
   letter: string;
@@ -72,8 +81,12 @@ export function isAddon(kind: MarkKind): boolean {
 /** What a mark's measurement is: a Length station's length, the OD of an OD station or an add-on. */
 export function valueLabel(kind: MarkKind): string {
   if (kind === "length") return "Length";
-  if (kind === "od" || isAddon(kind)) return "OD";
-  return "Measurement";
+  return "OD";
+}
+
+/** Pins stay readable in old JSON and drop out of the working tube. */
+export function activeMarks(marks: Mark[]): Mark[] {
+  return marks.filter((mark) => mark.kind !== "pin");
 }
 
 /** A signed decimal, blank, or null when the text is not a number. */
@@ -215,7 +228,7 @@ export function customProblems(cells: Cells): { stepId: string; message: string 
   else if (length === "") problems.push({ stepId: "builder", message: "Total Length is required." });
   const id = signedDecimal(cells.internalId ?? "");
   if (id == null) problems.push({ stepId: "builder", message: "ID needs a number." });
-  for (const mark of parseMarks(cells.marksJson)) {
+  for (const mark of activeMarks(parseMarks(cells.marksJson))) {
     if (signedDecimal(mark.value) == null) problems.push({ stepId: "builder", message: `${mark.letter} needs a number.` });
   }
   return problems;
@@ -230,7 +243,7 @@ export function normalizeCustomCells(cells: Cells): Cells {
   const id = signedDecimal(cells.internalId ?? "");
   if (id) next.internalId = id;
   else if (id == null && cells.internalId) next.internalId = cells.internalId;
-  const marks = parseMarks(cells.marksJson).map((mark) => {
+  const marks = activeMarks(parseMarks(cells.marksJson)).map((mark) => {
     const value = signedDecimal(mark.value);
     return value == null ? mark : { ...mark, value };
   });
@@ -242,7 +255,7 @@ export function customLines(cells: Cells): { label: string; value: string }[] {
   const lines: { label: string; value: string }[] = [];
   if (cells.totalLength) lines.push({ label: "Total Length", value: cells.totalLength });
   if (cells.internalId) lines.push({ label: "ID", value: cells.internalId });
-  for (const mark of parseMarks(cells.marksJson)) {
+  for (const mark of activeMarks(parseMarks(cells.marksJson))) {
     const name = isAddon(mark.kind) ? `${markKindLabel(mark.kind)} OD` : markKindLabel(mark.kind);
     lines.push({ label: `${mark.letter} ${name}`, value: mark.value });
   }

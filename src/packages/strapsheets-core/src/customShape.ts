@@ -67,8 +67,10 @@ export function pinEnds(marks: Mark[]): { left: boolean; right: boolean } {
   return { left, right };
 }
 
-export function tubeLayout(marks: Mark[]): TubeLayout {
-  const pins = pinEnds(marks);
+export function tubeLayout(marks: Mark[], ends?: { lower?: string; upper?: string } | null): TubeLayout {
+  const pins = ends
+    ? { left: String(ends.lower ?? "").toUpperCase() === "PIN", right: String(ends.upper ?? "").toUpperCase() === "PIN" }
+    : pinEnds(marks);
   const bodyX = TUBE_X + (pins.left ? PIN_W : 0);
   let bodyW = TUBE_W - (pins.left ? PIN_W : 0) - (pins.right ? PIN_W : 0);
   if (bodyW < 80) bodyW = 80;
@@ -230,8 +232,8 @@ function upperEdge(marks: Mark[], layout: TubeLayout): [number, number][] {
 }
 
 /** The tube as one closed outline. */
-export function tubePolygon(marks: Mark[]): [number, number][] {
-  const top = upperEdge(marks, tubeLayout(marks));
+export function tubePolygon(marks: Mark[], ends?: { lower?: string; upper?: string } | null): [number, number][] {
+  const top = upperEdge(marks, tubeLayout(marks, ends));
   const bottom = [...top].reverse().map(([x, y]): [number, number] => [x, TUBE_CY + (TUBE_CY - y)]);
   return [...top, ...bottom];
 }
@@ -246,8 +248,8 @@ function halfAtPx(px: number, marks: Mark[], layout: TubeLayout): number {
 }
 
 /** The white bore drawn inside the tube. */
-export function borePolygon(marks: Mark[]): [number, number][] {
-  const layout = tubeLayout(marks);
+export function borePolygon(marks: Mark[], ends?: { lower?: string; upper?: string } | null): [number, number][] {
+  const layout = tubeLayout(marks, ends);
   const left = layout.bodyX + 8;
   const right = layout.bodyX + layout.bodyW - 8;
   if (right <= left) return [];
