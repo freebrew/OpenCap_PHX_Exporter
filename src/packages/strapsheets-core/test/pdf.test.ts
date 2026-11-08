@@ -95,11 +95,14 @@ describe("the strap card layout", () => {
     expect(drawn.filter((line) => line === "RING")).toHaveLength(2);
   });
 
-  it("starts a new page when the cards run past the bottom, keeping the title for the last", () => {
+  it("starts a new page when the cards run past the bottom and prints the family title at the bottom border of each sheet", () => {
     const many = Array.from({ length: 30 }, (_, index) => ({ ...MOTOR, cells: { ...MOTOR.cells, 2: `PHX-${index}` } }));
     const pdf = renderCards(many);
     expect(pageCount(pdf)).toBeGreaterThan(1);
-    expect(strings(pdf).filter((line) => line === "MOTORS")).toHaveLength(1);
+    expect(strings(pdf).filter((line) => line === "MOTORS")).toHaveLength(pageCount(pdf));
+    const ys = [...text(pdf).matchAll(/(\d+(?:\.\d+)?) (\d+(?:\.\d+)?) Td \(MOTORS\) Tj/g)].map((m) => Number(m[2]));
+    expect(ys.length).toBe(pageCount(pdf));
+    for (const y of ys) expect(y).toBeLessThan(40);
     for (let index = 0; index < 30; index++) expect(strings(pdf)).toContain(`PHX-${index}`);
   });
 

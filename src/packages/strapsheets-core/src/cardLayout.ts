@@ -18,6 +18,7 @@ const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;
 const MARGIN_X = 50.4;
 const MARGIN_Y = 54;
+const BOTTOM_BORDER = 18;
 /** Points in a sheet pixel at 100%. */
 const POINTS_PER_PIXEL = 0.75;
 
@@ -135,7 +136,9 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
   const xs = widths.reduce<number[]>((edges, width) => [...edges, (edges[edges.length - 1] ?? 0) + width], [0]);
   const tableWidth = xs[xs.length - 1] ?? SINGLE_WIDTH;
   const scale = Math.min(POINTS_PER_PIXEL, (PAGE_WIDTH - 2 * MARGIN_X) / tableWidth);
-  const pageHeight = (PAGE_HEIGHT - 2 * MARGIN_Y) / scale;
+  const sheetBottom = (PAGE_HEIGHT - MARGIN_Y - BOTTOM_BORDER) / scale;
+  const titleTop = sheetBottom - TITLE_ROW;
+  const cardsBottom = titleTop - FOOTER_GAP;
   const bandHeight = card.rowHeights.reduce((sum, height) => sum + height, 0);
   const art = CARD_ART[card.which];
 
@@ -143,6 +146,7 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
   let canvas = start();
   let y = 0;
   const turn = () => {
+    drawTitle(canvas, card.title, tableWidth, titleTop);
     writer.addPage(canvas);
     canvas = start();
     y = 0;
@@ -150,16 +154,14 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
 
   if (art) y = drawDrawing(canvas, writer, art, tableWidth, card.positions === 2) + DRAWING_GAP;
   for (let first = 0; first < entries.length; first += card.positions) {
-    if (y + bandHeight > pageHeight) turn();
+    if (y + bandHeight > cardsBottom) turn();
     for (let position = 0; position < card.positions; position++) {
       const entry = entries[first + position];
       if (entry) drawCard(canvas, card, xs, y, position, entry);
     }
     y += bandHeight;
   }
-  y += FOOTER_GAP;
-  if (y + TITLE_ROW > pageHeight) turn();
-  drawTitle(canvas, card.title, tableWidth, y);
+  drawTitle(canvas, card.title, tableWidth, titleTop);
   writer.addPage(canvas);
 }
 
