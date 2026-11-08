@@ -22,6 +22,7 @@ const YELLOW: Rgb = [1, 0.949, 0.8];
 
 const LABEL_SIZE = 12;
 const VALUE_SIZE = 44 / 3;
+const LEN_OD_VALUE_SIZE = 64 / 3;
 const TITLE_SIZE = 56;
 const MIN_SIZE = 8;
 const CELL_PADDING = 3;
@@ -162,7 +163,8 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
   HEADER_GROUPS.forEach((group, idx) => {
     drawCell(canvas, areaOf(0, group.col, group.span), group.label, LABEL_SIZE, "center");
     const val = (pair1Values[idx] ?? "").trim();
-    if (val) drawCell(canvas, areaOf(1, group.col, group.span), val, VALUE_SIZE, group.align);
+    const size = group.label === "LEN" ? LEN_OD_VALUE_SIZE : VALUE_SIZE;
+    if (val) drawCell(canvas, areaOf(1, group.col, group.span), val, size, group.align);
   });
 
   // Pair 2: populated A–L flag columns in a single yellow heavy-bordered metric block (matching standard cards)
@@ -180,7 +182,7 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
     canvas.strokeRect(0, p2Top, blockWidth, p2Height, THICK);
     flags.forEach((flag, idx) => {
       drawCell(canvas, areaOf(2, idx, 1), flag.label, LABEL_SIZE, "center");
-      if (flag.value.trim()) drawCell(canvas, areaOf(3, idx, 1), flag.value.trim(), VALUE_SIZE, "center");
+      if (flag.value.trim()) drawCell(canvas, areaOf(3, idx, 1), flag.value.trim(), LEN_OD_VALUE_SIZE, "center");
     });
   }
 

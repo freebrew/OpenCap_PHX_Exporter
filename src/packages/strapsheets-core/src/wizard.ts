@@ -126,6 +126,14 @@ export function prefillFromItem(family: EntryFamily, cells: Cells, item: Invento
   return next;
 }
 
+/** True when a confirm row is a Length or OD measurement (not ID, Serial, TOP/BTM thread, Material, or Sub Type). */
+export function isLenOdLabel(label: string): boolean {
+  if (/\b(id|serial|carrier|material|top\b|btm\b|box|pin|thread|type|bend\s+setting|bend\s+housing|xhop|ring|up\b|down\b|dn\b|delay|flow)/i.test(label)) {
+    return false;
+  }
+  return /\b(length|len|od)\b/i.test(label) || /^[A-G]\s*-/.test(label);
+}
+
 /**
  * The confirm screen: each filled step as label and value. A family whose every step writes a
  * numbered sheet column lists those lines in column order, the same way the web confirm does, so

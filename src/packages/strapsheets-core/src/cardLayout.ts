@@ -26,9 +26,10 @@ const BLACK: Rgb = [0, 0, 0];
 const GRAY: Rgb = [0.953, 0.953, 0.953];
 const YELLOW: Rgb = [1, 0.949, 0.8];
 
-/** Arial 9, 11 and 42 point, in sheet pixels. */
+/** Arial 9, 11, 16 and 42 point, in sheet pixels. */
 const LABEL_SIZE = 12;
 const VALUE_SIZE = 44 / 3;
+const LEN_OD_VALUE_SIZE = 64 / 3;
 const TITLE_SIZE = 56;
 const MIN_SIZE = 8;
 const CELL_PADDING = 3;
@@ -49,6 +50,8 @@ const DRAWING_GAP = 14;
 
 /** A length, outside or inside diameter label: the cells that sit in the yellow block. */
 const METRIC_LABEL = /^[A-Z] (LEN|OD|ID)$/;
+/** Length and OD columns get a larger value font size; ID, Serials, and TOP/BTM threads stay at VALUE_SIZE. */
+const LEN_OD_LABEL = /^([A-G]|.*\b(LEN|OD))$/;
 
 /** The layout a Subs entry with no known sub type falls back to, so the entry is never dropped. */
 const SUBS_FALLBACK: PrintCard | null = (() => {
@@ -261,7 +264,9 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
     const text = [from, also].map((source) => (source == null ? "" : (entry.cells[source] ?? "").trim())).filter(Boolean).join(" ");
     if (text === "") continue;
     const isSerial = row === serialRow && column === serialColumn;
-    drawCell(canvas, cell(row, column), text, VALUE_SIZE, isSerial ? "left" : "center");
+    const headerLabel = card.statics.find(([r, c]) => r === row - 1 && c === column)?.[2] ?? "";
+    const valueSize = !isSerial && LEN_OD_LABEL.test(headerLabel) ? LEN_OD_VALUE_SIZE : VALUE_SIZE;
+    drawCell(canvas, cell(row, column), text, valueSize, isSerial ? "left" : "center");
   }
 }
 
