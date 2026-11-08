@@ -135,18 +135,22 @@ describe("the strap card layout", () => {
     expect(strings(odd)).toContain("ODD-1");
   });
 
-  it("uses a larger font size for Length and OD values while keeping ID, Serial, and TOP/BTM threads at the standard size", () => {
+  it("uses a larger font size for all fields except Serial and TOP/BTM threads", () => {
     const floatSub: EntryPayload = {
       which: "Subs",
       cells: { 90: "SUB-1", 91: "Steel", 92: "BOX", 93: "PIN", 94: "4 1/2 IF [NC 50]", 95: "4 1/2 REG", 96: "Float", 97: "0.82", 98: "6.50", 99: "6.25", 100: "2.25", 101: "0.15" },
     };
     const source = text(renderCards([floatSub]));
     const sizeOf = (val: string) => Number(new RegExp(`/F2 (\\d+(?:\\.\\d+)?) Tf [^\\n]*\\(${val.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\) Tj`).exec(source)?.[1]);
-    expect(sizeOf("0.82")).toBeGreaterThan(sizeOf("2.25"));
+    expect(sizeOf("0.82")).toBeGreaterThan(sizeOf("SUB-1"));
+    expect(sizeOf("Steel")).toBe(sizeOf("0.82"));
+    expect(sizeOf("Float")).toBe(sizeOf("0.82"));
     expect(sizeOf("6.50")).toBe(sizeOf("0.82"));
     expect(sizeOf("6.25")).toBe(sizeOf("0.82"));
-    expect(sizeOf("2.25")).toBe(sizeOf("SUB-1"));
-    expect(sizeOf("0.15")).toBe(sizeOf("SUB-1"));
+    expect(sizeOf("2.25")).toBe(sizeOf("0.82"));
+    expect(sizeOf("0.15")).toBe(sizeOf("0.82"));
+    expect(sizeOf("BOX 4 1/2")).toBe(sizeOf("SUB-1"));
+    expect(sizeOf("PIN 4 1/2")).toBe(sizeOf("SUB-1"));
   });
 });
 

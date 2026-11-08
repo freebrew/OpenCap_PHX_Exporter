@@ -29,7 +29,7 @@ const YELLOW: Rgb = [1, 0.949, 0.8];
 /** Arial 9, 11, 16 and 42 point, in sheet pixels. */
 const LABEL_SIZE = 12;
 const VALUE_SIZE = 44 / 3;
-const LEN_OD_VALUE_SIZE = 64 / 3;
+const LARGE_VALUE_SIZE = 64 / 3;
 const TITLE_SIZE = 56;
 const MIN_SIZE = 8;
 const CELL_PADDING = 3;
@@ -50,8 +50,8 @@ const DRAWING_GAP = 14;
 
 /** A length, outside or inside diameter label: the cells that sit in the yellow block. */
 const METRIC_LABEL = /^[A-Z] (LEN|OD|ID)$/;
-/** Length and OD columns get a larger value font size; ID, Serials, and TOP/BTM threads stay at VALUE_SIZE. */
-const LEN_OD_LABEL = /^([A-G]|.*\b(LEN|OD))$/;
+/** Only Serial (and MWD sub serials) and TOP / BTM thread boxes stay at legacy VALUE_SIZE; all other value boxes use LARGE_VALUE_SIZE. */
+const LEGACY_VALUE_LABEL = /^(Serial|Carrier|.* SN|TOP|BTM)$/;
 
 /** The layout a Subs entry with no known sub type falls back to, so the entry is never dropped. */
 const SUBS_FALLBACK: PrintCard | null = (() => {
@@ -265,7 +265,7 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
     if (text === "") continue;
     const isSerial = row === serialRow && column === serialColumn;
     const headerLabel = card.statics.find(([r, c]) => r === row - 1 && c === column)?.[2] ?? "";
-    const valueSize = !isSerial && LEN_OD_LABEL.test(headerLabel) ? LEN_OD_VALUE_SIZE : VALUE_SIZE;
+    const valueSize = isSerial || LEGACY_VALUE_LABEL.test(headerLabel) ? VALUE_SIZE : LARGE_VALUE_SIZE;
     drawCell(canvas, cell(row, column), text, valueSize, isSerial ? "left" : "center");
   }
 }
@@ -276,13 +276,14 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
  */
 function drawCell(canvas: PageCanvas, area: Cell, text: string, size: number, align: "center" | "left"): void {
   const room = area.w - 2 * CELL_PADDING;
-  const maxLines = align === "left" ? 1 : Math.max(1, Math.floor(area.h / (size * 1.2)));
+  const maxLinesFor = (s: number) => (align === "left" ? 1 : Math.max(1, Math.floor(area.h / (s * 1.2))));
   let fitted = size;
   let lines = wrapText(text, true, fitted, room);
-  while (fitted > MIN_SIZE && lines.length > maxLines) {
+  while (fitted > MIN_SIZE && lines.length > maxLinesFor(fitted)) {
     fitted -= 0.5;
     lines = wrapText(text, true, fitted, room);
   }
+  const maxLines = maxLinesFor(fitted);
   if (maxLines === 1 && lines.length > 1) lines = [lines.join("")];
   lines = lines.slice(0, maxLines);
   const lineHeight = fitted * 1.2;

@@ -163,7 +163,8 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
   HEADER_GROUPS.forEach((group, idx) => {
     drawCell(canvas, areaOf(0, group.col, group.span), group.label, LABEL_SIZE, "center");
     const val = (pair1Values[idx] ?? "").trim();
-    const size = group.label === "LEN" ? LEN_OD_VALUE_SIZE : VALUE_SIZE;
+    const isLegacy = group.label === "Serial" || group.label === "TOP" || group.label === "BTM";
+    const size = isLegacy ? VALUE_SIZE : LEN_OD_VALUE_SIZE;
     if (val) drawCell(canvas, areaOf(1, group.col, group.span), val, size, group.align);
   });
 
@@ -191,13 +192,14 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
 
 function drawCell(canvas: PageCanvas, area: CellArea, text: string, size: number, align: "center" | "left"): void {
   const room = area.w - 2 * CELL_PADDING;
-  const maxLines = align === "left" ? 1 : Math.max(1, Math.floor(area.h / (size * 1.2)));
+  const maxLinesFor = (s: number) => (align === "left" ? 1 : Math.max(1, Math.floor(area.h / (s * 1.2))));
   let fitted = size;
   let lines = wrapText(text, true, fitted, room);
-  while (fitted > MIN_SIZE && lines.length > maxLines) {
+  while (fitted > MIN_SIZE && lines.length > maxLinesFor(fitted)) {
     fitted -= 0.5;
     lines = wrapText(text, true, fitted, room);
   }
+  const maxLines = maxLinesFor(fitted);
   if (maxLines === 1 && lines.length > 1) lines = [lines.join("")];
   lines = lines.slice(0, maxLines);
   const lineHeight = fitted * 1.2;
