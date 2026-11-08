@@ -243,7 +243,7 @@ export const PRINT_CARDS: PrintCard[] = [
     "name": "Orbits",
     "which": "Orbit",
     "title": "ORBITS",
-    "width": 11,
+    "width": 10,
     "positions": 1,
     "posShift": 0,
     "rowHeights": [
@@ -309,11 +309,6 @@ export const PRINT_CARDS: PrintCard[] = [
         0,
         9,
         "G"
-      ],
-      [
-        0,
-        10,
-        "XHOP"
       ],
       [
         2,
@@ -403,11 +398,6 @@ export const PRINT_CARDS: PrintCard[] = [
         1,
         9,
         171
-      ],
-      [
-        1,
-        10,
-        185
       ],
       [
         3,

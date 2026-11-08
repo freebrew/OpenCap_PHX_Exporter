@@ -1418,13 +1418,6 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "label": "Q - Below Upset Joint OD",
         "header": "Q - Below Upset Joint OD",
         "col": 181
-      },
-      {
-        "id": "d25",
-        "kind": "decimal",
-        "label": "XHop",
-        "header": "XHop",
-        "col": 185
       }
     ]
   },
