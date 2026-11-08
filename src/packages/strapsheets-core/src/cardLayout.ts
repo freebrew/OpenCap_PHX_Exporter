@@ -152,7 +152,7 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
     y = 0;
   };
 
-  if (art) y = drawDrawing(canvas, writer, art, tableWidth, card.positions === 2) + DRAWING_GAP;
+  if (art) y = drawDrawing(canvas, writer, art, tableWidth) + DRAWING_GAP;
   for (let first = 0; first < entries.length; first += card.positions) {
     if (y + bandHeight > cardsBottom) turn();
     for (let position = 0; position < card.positions; position++) {
@@ -165,15 +165,39 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
   writer.addPage(canvas);
 }
 
-function drawDrawing(canvas: PageCanvas, writer: PdfWriter, art: CardArt, tableWidth: number, centered: boolean): number {
+function vectorCenterShift(art: CardArt): number {
+  if (art.kind !== "vector") return 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const item of art.items.slice(1)) {
+    if (item.kind === "line") {
+      minX = Math.min(minX, item.x1, item.x2);
+      maxX = Math.max(maxX, item.x1, item.x2);
+      continue;
+    }
+    for (const op of item.ops) {
+      if ("x" in op) {
+        minX = Math.min(minX, op.x);
+        maxX = Math.max(maxX, op.x);
+      }
+    }
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return 0;
+  return (minX + maxX) / 2 - art.w / 2;
+}
+
+function drawDrawing(canvas: PageCanvas, writer: PdfWriter, art: CardArt, tableWidth: number): number {
   const aspect = art.w / art.h;
   const width = Math.min(tableWidth * DRAWING_SHARE, DRAWING_MAX_HEIGHT * aspect);
   const height = width / aspect;
-  const left = centered ? (tableWidth - width) / 2 : 6;
+  const sx = width / art.w;
+  const sy = height / art.h;
   if (art.kind === "vector") {
-    canvas.paintItems(art.items, left, 0, width / art.w, height / art.h);
+    const left = (tableWidth - width) / 2 - vectorCenterShift(art) * sx;
+    canvas.paintItems(art.items, left, 0, sx, sy);
     return height;
   }
+  const left = (tableWidth - width) / 2;
   canvas.image(writer.imageName(art), left, 0, width, height);
   return height;
 }

@@ -210,14 +210,16 @@ function boxThreads(left: boolean, marks: Mark[], ink: string): Prim[] {
 
 function endCaptions(ends: EndConfig, marks: Mark[], ink: string): Prim[] {
   const layout = tubeLayout(marks);
-  const leftX = layout.pins.left ? layout.bodyX - PIN_W / 2 : layout.bodyX + 18;
-  const rightX = layout.pins.right ? layout.bodyX + layout.bodyW + PIN_W / 2 : layout.bodyX + layout.bodyW - 18;
+  const leftEdge = layout.pins.left ? layout.bodyX - PIN_W : layout.bodyX;
+  const rightEdge = layout.pins.right ? layout.bodyX + layout.bodyW + PIN_W : layout.bodyX + layout.bodyW;
+  const leftX = leftEdge + 28;
+  const rightX = rightEdge - 28;
   const line = (x: number, y: number, text: string): Prim => ({ t: "text", x, y, s: text, size: 12, fill: ink });
   return [
-    line(leftX, TUBE_CY - 56, ends.lower.toUpperCase() === "PIN" ? "PIN" : "BOX"),
-    line(leftX, TUBE_CY - 42, shortenCopy(ends.threadLower ?? "")),
-    line(rightX, TUBE_CY - 72, ends.upper.toUpperCase() === "PIN" ? "PIN" : "BOX"),
-    line(rightX, TUBE_CY - 58, shortenCopy(ends.threadUpper ?? "")),
+    line(leftX, TUBE_CY - 66, ends.lower.toUpperCase() === "PIN" ? "PIN" : "BOX"),
+    line(leftX, TUBE_CY - 52, shortenCopy(ends.threadLower ?? "")),
+    line(rightX, TUBE_CY - 66, ends.upper.toUpperCase() === "PIN" ? "PIN" : "BOX"),
+    line(rightX, TUBE_CY - 52, shortenCopy(ends.threadUpper ?? "")),
   ].filter((prim) => prim.t === "text" && prim.s !== "");
 }
 
