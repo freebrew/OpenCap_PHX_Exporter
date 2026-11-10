@@ -14,9 +14,16 @@ import {
   tubePath,
   customFlagCells,
   customLines,
+  customProblems,
+  marksJson,
+  setMarkSetting,
+  BEND_SETTINGS,
+  BEND_TYPES,
+  setMarkHousing,
+  setMarkLength,
   type Mark,
 } from "../src/custom";
-import { BLUE, HATCH, INK, NAVY, customScene } from "../src/customScene";
+import { BIT_GOLD, BLUE, HATCH, INK, NAVY, customScene } from "../src/customScene";
 import {
   BODY_HALF,
   BUILDER_H,
@@ -253,8 +260,8 @@ describe("custom marks", () => {
     expect(span("C")).toBe(BODY_HALF * 2);
   });
 
-  it("makes the builder's Length and OD flags 3x the compact flag, and no other", () => {
-    expect(TOUCH_R).toBe(3 * FLAG_R);
+  it("makes the builder's Length and OD flags 2x the compact flag, and no other", () => {
+    expect(TOUCH_R).toBe(2 * FLAG_R);
     const marks: Mark[] = [
       { letter: "A", kind: "length", x: 0.3, value: "" },
       { letter: "B", kind: "od", x: 0.6, value: "" },
@@ -300,8 +307,8 @@ describe("custom marks", () => {
   });
 
   it("names the Add menu in Proper Case and gives an add-on's letter its OD", () => {
-    const labels = ["pin", "upset", "spline", "spiral", "panels", "length", "od"].map((kind) => markMenuLabel(kind as Mark["kind"]));
-    expect(labels).toEqual(["Pin", "Upset / Inset", "Spline", "Spiral (Stab / Turbolizer)", "Panels", "Length Station", "OD Station"]);
+    const labels = ["pin", "upset", "spline", "spiral", "panels", "seam", "bentHousing", "bitBox", "length", "od"].map((kind) => markMenuLabel(kind as Mark["kind"]));
+    expect(labels).toEqual(["Pin", "Upset / Inset", "Spline", "Spiral (Stab / Turbolizer)", "Panels", "Seam Section", "Bent Housing", "Bit Box", "Length Station", "OD Station"]);
     expect(markMenuLabel("pin")).toBe("Pin");
     const cells = {
       marksJson: JSON.stringify({
@@ -339,6 +346,51 @@ describe("custom marks", () => {
     expect(configured.some((prim) => prim.t === "text" && prim.s === "4 1/2 IF")).toBe(true);
     expect(configured.some((prim) => prim.t === "text" && prim.s === "D")).toBe(false);
   });
+  it("gives letters by position: left is A, right is highest, a lap swaps them", () => {
+    let marks: Mark[] = [];
+    for (const kind of ["upset", "spiral", "panels"] as const) {
+      const next = addMark(marks, kind);
+      if (!Array.isArray(next)) throw new Error(next);
+      marks = next;
+    }
+    const order = () => [...marks].sort((a, b) => a.x - b.x).map((mark) => mark.letter).join("");
+    expect(order()).toBe("ABC");
+    // Drag the leftmost mark past the rightmost: it takes the highest letter, the others step down.
+    const first = marks[0] as Mark;
+    const lastX = Math.max(...marks.map((mark) => mark.x));
+    marks = moveMark(marks, first.letter, lastX + 0.2);
+    expect(order()).toBe("ABC");
+    expect(marks[0]?.letter).toBe("C");
+    expect(removeMark(marks, "A").map((mark) => mark.letter).sort().join("")).toBe("AB");
+  });
+
+  it("adds a seam section, a bent housing and one bit box at the lower end", () => {
+    let marks: Mark[] = [];
+    for (const kind of ["seam", "bentHousing", "bitBox"] as const) {
+      const next = addMark(marks, kind);
+      if (!Array.isArray(next)) throw new Error(next);
+      marks = next;
+    }
+    expect(marks.find((mark) => mark.kind === "bitBox")?.letter).toBe("A");
+    expect(addMark(marks, "bitBox")).toBe("A tube holds one Bit Box.");
+    expect(addMark(marks, "bentHousing")).toBe("A tube holds one Bent Housing.");
+    const scene = customScene(marks);
+    expect(scene.filter((prim) => prim.t === "circle" && prim.r > 10)).toHaveLength(3);
+    expect(scene.filter((prim) => prim.t === "circle" && prim.r < 4)).toHaveLength(6);
+    expect(scene.some((prim) => prim.t === "poly" && prim.fill === BIT_GOLD)).toBe(true);
+    expect(scene.filter((prim) => prim.t === "line" && prim.x1 === prim.x2 && prim.w === 2)).toHaveLength(2);
+    expect(customLines({ marksJson: JSON.stringify({ marks }) }).map((line) => line.label)).toEqual(["A Bit Box OD", "B Seam OD", "C Pad OD"]);
+  });
+
+  it("draws an OD station with an arrow on each side of the tube", () => {
+    const marks: Mark[] = [{ letter: "A", kind: "od", x: 0.3, value: "" }];
+    const arrows = customScene(marks).filter((prim) => prim.t === "poly" && prim.pts.length === 3);
+    expect(arrows).toHaveLength(2);
+    const tips = arrows.map((prim) => (prim.t === "poly" ? prim.pts[0]?.[1] : 0));
+    expect(tips).toContain(TUBE_CY + BODY_HALF + STATION_GAP);
+    expect(tips).toContain(TUBE_CY - BODY_HALF - STATION_GAP);
+  });
+
   it("reads legacy mandrel JSON and ignores a broken blob", () => {
     const marks = parseMarks(JSON.stringify({ marks: [{ letter: "B", kind: "mandrel", x: 0.3, value: "1" }] }));
     expect(marks[0]?.kind).toBe("spline");
@@ -380,4 +432,23 @@ describe("custom marks", () => {
     expect(text).toContain("10.5");
     expect(tubePath(parseMarks(JSON.stringify({ marks: [{ letter: "A", kind: "pin", x: 0.04, value: "" }] }))).startsWith("M")).toBe(true);
   });
-});
+
+  it("names the Bent Housing OD the Pad OD and takes a length to centre, ADJ or FXD, and a bend setting", () => {
+    const base: Mark[] = [{ letter: "A", kind: "bentHousing", x: 0.5, value: "6.5" }];
+    const messages = customProblems({ totalLength: "3", marksJson: marksJson(base) }).map((p) => p.message);
+    expect(messages).toEqual(expect.arrayContaining(["A needs ADJ or FXD.", "A needs a Bent Setting."]));
+    let set = setMarkSetting(base, "A", "1.15");
+    set = setMarkHousing(set, "A", "ADJ");
+    set = setMarkLength(set, "A", "2.4");
+    const cells = { totalLength: "3", marksJson: marksJson(set) };
+    expect(customProblems(cells)).toEqual([]);
+    expect(customProblems({ totalLength: "3", marksJson: marksJson(setMarkLength(set, "A", "x")) }).map((p) => p.message)).toEqual(["A Length needs a number."]);
+    expect(customLines(cells).map((line) => `${line.label}=${line.value}`)).toEqual([
+      "Total Length=3", "A Pad OD=6.5", "A Length To Center=2.4", "A Bent Type=ADJ", "A Bent Setting=1.15",
+    ]);
+    const back = parseMarks(marksJson(set))[0];
+    expect([back?.setting, back?.housing, back?.length]).toEqual(["1.15", "ADJ", "2.4"]);
+    expect(customFlagCells(set).map((cell) => `${cell.label}=${cell.value}`)).toEqual(["A OD=6.5", "A LEN=2.4", "A ADJ=1.15"]);
+    expect(BEND_SETTINGS.slice(0, 5)).toEqual(["0.00", "0.39", "0.78", "1.15", "1.50"]);
+    expect(BEND_TYPES).toEqual(["ADJ", "FXD"]);
+  });});

@@ -30,6 +30,12 @@ export {
   pinEnds,
   removeMark,
   setMarkValue,
+  setMarkSetting,
+  markOdLabel,
+  BEND_SETTINGS,
+  BEND_TYPES,
+  setMarkHousing,
+  setMarkLength,
   signedDecimal,
   snapMarkX,
   spawnX,
@@ -43,3 +49,4 @@ export {
 export { LIGHT_PALETTE, customScene, sceneBounds, sceneItems, type Prim, type ScenePalette } from "./customScene";
 export { BUILDER_H, BUILDER_W, FLAG_R, HIT_R, TOUCH_R, dragX, flagPoint, flagRadius, lengthSpots, pickMark, spotFree, stemPx } from "./customShape";
 export { entryLines, entrySerial, findFamily, isLenOdLabel, measuredSerials, liveValue, measureSteps, prefillFromItem, serialStep, setCell, stepProblem, stepWarning, type Cells } from "./wizard";
+

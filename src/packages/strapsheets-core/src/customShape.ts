@@ -20,6 +20,21 @@ export const SPIRAL_W = 78;
 export const SPIRAL_TAPER = 18;
 export const PANEL_W = 58;
 export const PANEL_THICK = 6;
+/** Toe to toe width of a seam section: two seam lines this far apart, no change of outer diameter. */
+export const SEAM_W = 44;
+/** A wider section that ramps up from the tube and back: the spiral, the bit box and the bent housing. */
+export interface BulgeSpec {
+  w: number;
+  half: number;
+  taper: number;
+}
+export const BULGE: Partial<Record<MarkKind, BulgeSpec>> = {
+  spiral: { w: SPIRAL_W, half: SPIRAL_HALF, taper: SPIRAL_TAPER },
+  bitBox: { w: 86, half: BODY_HALF, taper: 16 },
+  bentHousing: { w: 104, half: 22, taper: 10 },
+};
+/** The bent housing kinks by this many degrees at its middle joint. */
+export const BEND_DEG = 0;
 export const PIN_W = 28;
 export const PIN_TIP = 8;
 export const PIN_SHOULDER = 12;
@@ -28,18 +43,18 @@ export const PIN_SHOULDER = 12;
 export const FLAG_R = 16;
 export const FLAG_GAP = 44;
 /**
- * A Length or OD flag is 3x that in the builder so a finger can take hold of it. The picture on the
+ * A Length or OD flag is 2x that in the builder so a finger can take hold of it. The picture on the
  * confirm screen, the PDF card and the print sheet keep the compact flag.
  */
-export const TOUCH_R = 48;
-export const TOUCH_GAP = 100;
+export const TOUCH_R = 32;
+export const TOUCH_GAP = 67;
 /** How far a Length or OD stem keeps from the centre of a shape flag it passes. */
 export const STEM_CLEAR = 20;
 /** Two Length stations (or two OD stations) never share a spot closer than this. */
 export const STEM_GAP = 10;
 /** A finger lands on a flag inside this radius. */
 export const HIT_R = 26;
-export const TOUCH_HIT_R = 56;
+export const TOUCH_HIT_R = 37;
 /** A Length or OD stem rises or falls to its knee, then a leader runs on to the flag, which may sit off to one side. */
 export const LENGTH_KNEE_Y = 128;
 export const OD_KNEE_Y = 262;
@@ -119,8 +134,10 @@ export function markExtent(mark: Mark, layout: TubeLayout): [number, number] | n
     const span = splineSpan(mark.x);
     return [span.left, span.right];
   }
-  if (mark.kind === "spiral") return [mark.x - SPIRAL_W / 2 / layout.bodyW, mark.x + SPIRAL_W / 2 / layout.bodyW];
+  const bulge = BULGE[mark.kind];
+  if (bulge) return [mark.x - bulge.w / 2 / layout.bodyW, mark.x + bulge.w / 2 / layout.bodyW];
   if (mark.kind === "panels") return [mark.x - PANEL_W / 2 / layout.bodyW, mark.x + PANEL_W / 2 / layout.bodyW];
+  if (mark.kind === "seam") return [mark.x - SEAM_W / 2 / layout.bodyW, mark.x + SEAM_W / 2 / layout.bodyW];
   return null;
 }
 
@@ -129,26 +146,42 @@ export function markExtent(mark: Mark, layout: TubeLayout): [number, number] | n
  * the spiral's at the shoulders, and the straight ramp between.
  */
 export function spiralHalfAt(offset: number): number {
-  const reach = SPIRAL_W / 2 - Math.abs(offset);
-  if (reach <= 0) return BODY_HALF;
-  const rise = Math.min(1, reach / SPIRAL_TAPER);
-  return Math.round((BODY_HALF + (SPIRAL_HALF - BODY_HALF) * rise) * 1e6) / 1e6;
+  return bulgeHalfAt(offset, BULGE.spiral as BulgeSpec);
 }
 
-/** The spiral's outline: toe, shoulder, shoulder, toe along the top, then back along the bottom. */
-export function spiralPolygon(x: number): [number, number][] {
-  const left = x - SPIRAL_W / 2;
-  const right = x + SPIRAL_W / 2;
+/** Half the height of any wider section at `offset` pixels from its centre. */
+export function bulgeHalfAt(offset: number, spec: BulgeSpec): number {
+  const reach = spec.w / 2 - Math.abs(offset);
+  if (reach <= 0) return BODY_HALF;
+  const rise = Math.min(1, reach / spec.taper);
+  return Math.round((BODY_HALF + (spec.half - BODY_HALF) * rise) * 1e6) / 1e6;
+}
+
+/** The outline of a wider section: toe, shoulder, shoulder, toe along the top, then back along the bottom. */
+export function bulgePolygon(x: number, spec: BulgeSpec): [number, number][] {
+  const left = x - spec.w / 2;
+  const right = x + spec.w / 2;
   return [
     [left, TUBE_CY - BODY_HALF],
-    [left + SPIRAL_TAPER, TUBE_CY - SPIRAL_HALF],
-    [right - SPIRAL_TAPER, TUBE_CY - SPIRAL_HALF],
+    [left + spec.taper, TUBE_CY - spec.half],
+    [right - spec.taper, TUBE_CY - spec.half],
     [right, TUBE_CY - BODY_HALF],
     [right, TUBE_CY + BODY_HALF],
-    [right - SPIRAL_TAPER, TUBE_CY + SPIRAL_HALF],
-    [left + SPIRAL_TAPER, TUBE_CY + SPIRAL_HALF],
+    [right - spec.taper, TUBE_CY + spec.half],
+    [left + spec.taper, TUBE_CY + spec.half],
     [left, TUBE_CY + BODY_HALF],
   ];
+}
+
+/** Where the bit box sits: against the lower (left) end of the body. */
+export function bitBoxX(marks: Mark[]): number {
+  const layout = tubeLayout(marks);
+  return (BULGE.bitBox as BulgeSpec).w / 2 / layout.bodyW;
+}
+
+/** The spiral's outline. */
+export function spiralPolygon(x: number): [number, number][] {
+  return bulgePolygon(x, BULGE.spiral as BulgeSpec);
 }
 
 /**
@@ -159,8 +192,9 @@ export function featureHalfAt(xn: number, marks: Mark[]): number {
   const layout = tubeLayout(marks);
   let half = bodyHalfAt(xn, marks);
   for (const mark of marks) {
-    if (mark.kind !== "spiral") continue;
-    half = Math.max(half, spiralHalfAt((xn - mark.x) * layout.bodyW));
+    const bulge = BULGE[mark.kind];
+    if (!bulge) continue;
+    half = Math.max(half, bulgeHalfAt((xn - mark.x) * layout.bodyW, bulge));
   }
   return half;
 }
@@ -175,11 +209,13 @@ export function markSpots(mark: Mark, layout: TubeLayout): number[] {
     const span = splineSpan(mark.x);
     return [span.left, span.flatRight, span.right];
   }
-  if (mark.kind === "spiral") {
-    const toe = SPIRAL_W / 2 / layout.bodyW;
-    const shoulder = (SPIRAL_W / 2 - SPIRAL_TAPER) / layout.bodyW;
+  const bulge = BULGE[mark.kind];
+  if (bulge) {
+    const toe = bulge.w / 2 / layout.bodyW;
+    const shoulder = (bulge.w / 2 - bulge.taper) / layout.bodyW;
     return [mark.x - toe, mark.x - shoulder, mark.x + shoulder, mark.x + toe];
   }
+  if (mark.kind === "seam") return [mark.x - SEAM_W / 2 / layout.bodyW, mark.x + SEAM_W / 2 / layout.bodyW];
   if (mark.kind === "panels") return [mark.x - PANEL_W / 2 / layout.bodyW, mark.x + PANEL_W / 2 / layout.bodyW];
   return [];
 }

@@ -5,6 +5,7 @@ import type { VectorItem, VectorOp } from "./cardSpec";
 import type { EndConfig, Mark } from "./custom";
 import {
   BUILDER_W,
+  BULGE,
   FLAG_R,
   LENGTH_KNEE_Y,
   OD_KNEE_Y,
@@ -14,10 +15,12 @@ import {
   PIN_TIP,
   PIN_W,
   SHAPE_FLAG_Y,
+  SEAM_W,
   SPIRAL_HALF,
   TUBE_CY,
   bodyHalfAt,
   borePolygon,
+  bulgePolygon,
   featureHalfAt,
   flagPoint,
   flagRadius,
@@ -123,6 +126,48 @@ function spiral(x: number): Prim[] {
   prims.push({ t: "poly", pts: outline, fill: "none", stroke: INK, w: 1.8 });
   return prims;
 }
+/** Seam section: two seam lines across the tube, the outer diameter unchanged. */
+function seam(x: number, half: number, color: string): Prim[] {
+  return [x - SEAM_W / 2, x + SEAM_W / 2].map((sx): Prim => ({ t: "line", x1: sx, y1: TUBE_CY - half, x2: sx, y2: TUBE_CY + half, stroke: color, w: 2 }));
+}
+
+/** Bit box: the wider box end of a motor with the bit screwed into its toe. See the bit-box photos: a make-up shoulder, a white band, then a gold bit head with blades and cutters. */
+export const BIT_GOLD = "#f0dfa6";
+function bitBox(x: number): Prim[] {
+  const spec = BULGE.bitBox as NonNullable<(typeof BULGE)["bitBox"]>;
+  const outline = bulgePolygon(x, spec);
+  const toe = x - spec.w / 2;
+  const at = (dx: number, dy: number): Point => [toe + dx, TUBE_CY + dy];
+  const prims: Prim[] = [];
+  prims.push({ t: "line", x1: toe + 12, y1: TUBE_CY - spec.half, x2: toe + 12, y2: TUBE_CY + spec.half, stroke: INK, w: 1.4 });
+  for (const band of [61, 67]) prims.push({ t: "line", x1: toe + band, y1: TUBE_CY - spec.half, x2: toe + band, y2: TUBE_CY + spec.half, stroke: INK, w: 1.2 });
+  prims.push({ t: "poly", pts: outline, fill: "none", stroke: INK, w: 1.8 });
+  const head: Point[] = [at(0, -16), at(-9, -22), at(-21, -21), at(-35, -12), at(-41, -4), at(-42, 4), at(-35, 12), at(-21, 21), at(-9, 22), at(0, 16)];
+  prims.push({ t: "poly", pts: head, fill: BIT_GOLD, stroke: INK, w: 1.6 });
+  for (const [dx, dy] of [[-8, -17], [-20, -15], [-32, -10], [-8, 17], [-20, 15], [-32, 10]] as const) {
+    prims.push({ t: "circle", cx: toe + dx, cy: TUBE_CY + dy, r: 2.6, fill: "#ffffff", stroke: INK, w: 1 });
+  }
+  for (const dy of [-17, 0, 17]) prims.push({ t: "line", x1: toe - 39, y1: TUBE_CY + dy * 0.2, x2: toe - 6, y2: TUBE_CY + dy, stroke: INK, w: 1.2 });
+  return prims;
+}
+/**
+ * Adjustable bent housing, drawn straight (the bend is the set angle, not a kink in the picture):
+ * upper and lower housing meeting at the joint, a scribe line running across it, and two staggered
+ * ladders of alignment ticks either side, as stamped on the housing and orientation sleeve.
+ */
+function bentHousing(x: number): Prim[] {
+  const spec = BULGE.bentHousing as NonNullable<(typeof BULGE)["bentHousing"]>;
+  const outline = bulgePolygon(x, spec);
+  const cy = TUBE_CY;
+  const prims: Prim[] = [
+    { t: "poly", pts: outline, fill: "#ffffff", stroke: INK, w: 1.8 },
+    { t: "line", x1: x, y1: cy - spec.half, x2: x, y2: cy + spec.half, stroke: INK, w: 1.6 },
+  ];
+  for (const dy of [-16, -8, 8, 16]) prims.push({ t: "line", x1: x - 3 - 16, y1: cy + dy, x2: x - 3, y2: cy + dy, stroke: INK, w: 1.2 });
+  for (const dy of [-12, -4, 4, 12]) prims.push({ t: "line", x1: x + 3, y1: cy + dy, x2: x + 3 + 16, y2: cy + dy, stroke: INK, w: 1.2 });
+  prims.push({ t: "line", x1: x - 38, y1: cy, x2: x + 38, y2: cy, stroke: INK, w: 1.8 });
+  return prims;
+}
 function panels(x: number, half: number, color: string): Prim[] {
   const left = x - PANEL_W / 2;
   return [
@@ -151,11 +196,15 @@ function lengthStation(x: number, mark: Mark, marks: Mark[], color: string, touc
 /** OD: a line from the flag up to an arrow that stops short of the tube or feature it points at. */
 function odStation(x: number, mark: Mark, marks: Mark[], color: string, touch: boolean): Prim[] {
   const tip = stationBottom(mark, marks);
+  const top = stationTop(mark, marks);
   const flagX = flagPoint(mark, marks, touch).x;
   return [
     { t: "line", x1: x, y1: tip + 9, x2: x, y2: OD_KNEE_Y, stroke: color, w: 2.4 },
     { t: "line", x1: x, y1: OD_KNEE_Y, x2: flagX, y2: odFlagY(touch) - flagRadius(mark.kind, touch), stroke: color, w: 2.4 },
     { t: "poly", pts: [[x, tip], [x - 5.5, tip + 10], [x + 5.5, tip + 10]], fill: color, stroke: color, w: 1 },
+    // The same arrow from above, so the measure is pinched from both sides.
+    { t: "line", x1: x, y1: top - 10, x2: x, y2: top - 24, stroke: color, w: 2.4 },
+    { t: "poly", pts: [[x, top], [x - 5.5, top - 10], [x + 5.5, top - 10]], fill: color, stroke: color, w: 1 },
   ];
 }
 
@@ -163,9 +212,9 @@ function flag(mark: Mark, marks: Mark[], selected: boolean, touch: boolean, pale
   const point = flagPoint(mark, marks, touch);
   const color = selected ? palette.select : palette.navy;
   const radius = flagRadius(mark.kind, touch);
-  const size = radius > FLAG_R ? 52 : 18;
+  const size = radius > FLAG_R ? 35 : 18;
   return [
-    { t: "circle", cx: point.x, cy: point.y, r: radius, fill: selected ? palette.select : palette.plate, stroke: color, w: radius > FLAG_R ? 4 : 2.4 },
+    { t: "circle", cx: point.x, cy: point.y, r: radius, fill: selected ? palette.select : palette.plate, stroke: color, w: radius > FLAG_R ? 3 : 2.4 },
     { t: "text", x: point.x, y: point.y + size / 3, s: mark.letter, size, fill: selected ? palette.plate : color },
   ];
 }
@@ -238,6 +287,9 @@ export function customScene(marks: Mark[], selected = "", touch = false, ends?: 
     const color = mark.letter === selected ? palette.select : palette.navy;
     if (mark.kind === "spiral") prims.push(...spiral(x));
     else if (mark.kind === "panels") prims.push(...panels(x, bodyHalfAt(mark.x, drawn), color));
+    else if (mark.kind === "seam") prims.push(...seam(x, bodyHalfAt(mark.x, drawn), color));
+    else if (mark.kind === "bitBox") prims.push(...bitBox(x));
+    else if (mark.kind === "bentHousing") prims.push(...bentHousing(x));
   }
   for (const mark of drawn) {
     const x = stemPx(mark, shaped);
@@ -293,3 +345,4 @@ export function sceneItems(prims: Prim[]): { items: VectorItem[]; texts: Extract
   }
   return { items, texts };
 }
+
