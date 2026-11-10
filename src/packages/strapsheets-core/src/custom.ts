@@ -214,8 +214,8 @@ export function snapMarkX(kind: MarkKind, x: number, marks: Mark[], letter: stri
 export function relabel(marks: Mark[]): Mark[] {
   if (marks.some((mark) => mark.kind === "pin")) return marks;
   const order = marks
-    .map((mark, index) => ({ index, x: mark.x, letter: mark.letter }))
-    .sort((a, b) => a.x - b.x || a.letter.localeCompare(b.letter) || a.index - b.index);
+    .map((mark, index) => ({ index, group: mark.kind === "length" || mark.kind === "bentHousing" ? 0 : 1, x: mark.x, letter: mark.letter }))
+    .sort((a, b) => a.group - b.group || a.x - b.x || a.letter.localeCompare(b.letter) || a.index - b.index);
   const letters = new Map<number, string>();
   order.forEach((item, rank) => letters.set(item.index, CUSTOM_LETTERS[rank] ?? item.letter));
   return marks.map((mark, index) => ({ ...mark, letter: letters.get(index) ?? mark.letter }));
@@ -325,7 +325,7 @@ export function customLines(cells: Cells): { label: string; value: string }[] {
   for (const mark of [...activeMarks(parseMarks(cells.marksJson))].sort((a, b) => a.letter.localeCompare(b.letter))) {
     const name = isAddon(mark.kind) ? markOdLabel(mark.kind) : markKindLabel(mark.kind);
     lines.push({ label: `${mark.letter} ${name}`, value: mark.value });
-    if (mark.kind === "bentHousing" && mark.length) lines.push({ label: `${mark.letter} Length To Center`, value: mark.length });
+    if (mark.kind === "bentHousing" && mark.length) lines.push({ label: `${mark.letter} B2B`, value: mark.length });
     if (mark.kind === "bentHousing" && mark.housing) lines.push({ label: `${mark.letter} Bent Type`, value: mark.housing });
     if (mark.kind === "bentHousing" && mark.setting) lines.push({ label: `${mark.letter} Bent Setting`, value: mark.setting });
   }
@@ -344,10 +344,12 @@ export function customFlagCells(marks: Mark[]): { slot: number; label: string; v
     const slot = CUSTOM_LETTERS.indexOf(mark.letter);
     if (slot < 0) continue;
     cells.push({ slot, label: `${mark.letter} ${mark.kind === "length" ? "LEN" : "OD"}`, value: mark.value });
-    if (mark.kind === "bentHousing" && mark.length) cells.push({ slot, label: `${mark.letter} LEN`, value: mark.length });
+    if (mark.kind === "bentHousing" && mark.length) cells.push({ slot, label: `${mark.letter} B2B`, value: mark.length });
     if (mark.kind === "bentHousing" && mark.setting) cells.push({ slot, label: `${mark.letter} ${mark.housing || "BEND"}`, value: mark.setting });
   }
-  return cells.sort((a, b) => a.slot - b.slot);
+  // Letters already run lengths-first along the tube; within a Bent Housing's letter the B2B leads, then the Pad OD and the setting.
+  const rank = (cell: { label: string }) => (cell.label.endsWith("B2B") ? 0 : 1);
+  return cells.sort((a, b) => a.slot - b.slot || rank(a) - rank(b));
 }
 
 /** SVG path of the tube, in builder pixels. */

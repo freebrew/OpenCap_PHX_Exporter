@@ -19,11 +19,12 @@ import {
   setMarkSetting,
   BEND_SETTINGS,
   BEND_TYPES,
+  relabel,
   setMarkHousing,
   setMarkLength,
   type Mark,
 } from "../src/custom";
-import { BIT_GOLD, BLUE, HATCH, INK, NAVY, customScene } from "../src/customScene";
+import { BIT_HEAD, BLUE, HATCH, INK, NAVY, customScene, sceneBounds } from "../src/customScene";
 import {
   BODY_HALF,
   BUILDER_H,
@@ -371,15 +372,15 @@ describe("custom marks", () => {
       if (!Array.isArray(next)) throw new Error(next);
       marks = next;
     }
-    expect(marks.find((mark) => mark.kind === "bitBox")?.letter).toBe("A");
+    expect(marks.find((mark) => mark.kind === "bitBox")?.letter).toBe("B");
     expect(addMark(marks, "bitBox")).toBe("A tube holds one Bit Box.");
     expect(addMark(marks, "bentHousing")).toBe("A tube holds one Bent Housing.");
     const scene = customScene(marks);
     expect(scene.filter((prim) => prim.t === "circle" && prim.r > 10)).toHaveLength(3);
-    expect(scene.filter((prim) => prim.t === "circle" && prim.r < 4)).toHaveLength(6);
-    expect(scene.some((prim) => prim.t === "poly" && prim.fill === BIT_GOLD)).toBe(true);
+    expect(scene.filter((prim) => prim.t === "circle" && prim.r < 4)).toHaveLength(8);
+    expect(scene.some((prim) => prim.t === "poly" && prim.fill === BIT_HEAD)).toBe(true);
     expect(scene.filter((prim) => prim.t === "line" && prim.x1 === prim.x2 && prim.w === 2)).toHaveLength(2);
-    expect(customLines({ marksJson: JSON.stringify({ marks }) }).map((line) => line.label)).toEqual(["A Bit Box OD", "B Seam OD", "C Pad OD"]);
+    expect(customLines({ marksJson: JSON.stringify({ marks }) }).map((line) => line.label)).toEqual(["A Pad OD", "B Bit Box OD", "C Seam OD"]);
   });
 
   it("draws an OD station with an arrow on each side of the tube", () => {
@@ -444,11 +445,39 @@ describe("custom marks", () => {
     expect(customProblems(cells)).toEqual([]);
     expect(customProblems({ totalLength: "3", marksJson: marksJson(setMarkLength(set, "A", "x")) }).map((p) => p.message)).toEqual(["A Length needs a number."]);
     expect(customLines(cells).map((line) => `${line.label}=${line.value}`)).toEqual([
-      "Total Length=3", "A Pad OD=6.5", "A Length To Center=2.4", "A Bent Type=ADJ", "A Bent Setting=1.15",
+      "Total Length=3", "A Pad OD=6.5", "A B2B=2.4", "A Bent Type=ADJ", "A Bent Setting=1.15",
     ]);
     const back = parseMarks(marksJson(set))[0];
     expect([back?.setting, back?.housing, back?.length]).toEqual(["1.15", "ADJ", "2.4"]);
-    expect(customFlagCells(set).map((cell) => `${cell.label}=${cell.value}`)).toEqual(["A OD=6.5", "A LEN=2.4", "A ADJ=1.15"]);
+    expect(customFlagCells(set).map((cell) => `${cell.label}=${cell.value}`)).toEqual(["A B2B=2.4", "A OD=6.5", "A ADJ=1.15"]);
     expect(BEND_SETTINGS.slice(0, 5)).toEqual(["0.00", "0.39", "0.78", "1.15", "1.50"]);
     expect(BEND_TYPES).toEqual(["ADJ", "FXD"]);
+  });
+
+  it("letters every Length station first, then the ODs and add-ons, each left to right", () => {
+    const made: Mark[] = [
+      { letter: "A", kind: "od", x: 0.2, value: "" },
+      { letter: "B", kind: "length", x: 0.7, value: "" },
+      { letter: "C", kind: "spiral", x: 0.5, value: "" },
+      { letter: "D", kind: "length", x: 0.3, value: "" },
+    ];
+    const ordered = relabel(made);
+    expect(ordered.map((mark) => `${mark.kind}${mark.letter}`)).toEqual(["odC", "lengthB", "spiralD", "lengthA"]);
+  });
+
+  it("letters a Bent Housing among the lengths by position, and keeps end captions above every flag with an arrow", () => {
+    const marks: Mark[] = [
+      { letter: "A", kind: "od", x: 0.2, value: "" },
+      { letter: "B", kind: "bentHousing", x: 0.5, value: "", length: "1.5" },
+      { letter: "C", kind: "length", x: 0.8, value: "" },
+      { letter: "D", kind: "length", x: 0.3, value: "" },
+    ];
+    expect(relabel(marks).map((mark) => `${mark.kind}:${mark.letter}`)).toEqual(["od:D", "bentHousing:B", "length:C", "length:A"]);
+    const ends = { lower: "BOX", upper: "BOX", threadLower: "3 1/2 IF [NC38]", threadUpper: "3 1/2 IF [NC38]" };
+    const scene = customScene([{ letter: "A", kind: "length", x: 0.1, value: "" }], "", false, ends);
+    const captions = scene.filter((prim) => prim.t === "text" && prim.s.length > 1);
+    expect(captions).toHaveLength(4);
+    expect(captions.every((prim) => prim.t === "text" && prim.y < 40)).toBe(true);
+    expect(scene.filter((prim) => prim.t === "poly" && prim.pts.length === 3).length).toBeGreaterThanOrEqual(2);
+    expect(sceneBounds([], ends).y).toBe(0);
   });});

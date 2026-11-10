@@ -4,6 +4,7 @@
 import type { VectorItem, VectorOp } from "./cardSpec";
 import type { EndConfig, Mark } from "./custom";
 import {
+  BODY_HALF,
   BUILDER_W,
   BULGE,
   FLAG_R,
@@ -131,8 +132,15 @@ function seam(x: number, half: number, color: string): Prim[] {
   return [x - SEAM_W / 2, x + SEAM_W / 2].map((sx): Prim => ({ t: "line", x1: sx, y1: TUBE_CY - half, x2: sx, y2: TUBE_CY + half, stroke: color, w: 2 }));
 }
 
-/** Bit box: the wider box end of a motor with the bit screwed into its toe. See the bit-box photos: a make-up shoulder, a white band, then a gold bit head with blades and cutters. */
-export const BIT_GOLD = "#f0dfa6";
+/**
+ * Bit box: the body's own box end with a PDC bit screwed into its toe, drawn after the bit photo: a
+ * black shank, a red head wider than the shank with three blades, junk slots between them and
+ * cutters along the blade edges. The box keeps the body's colour and OD.
+ */
+export const BIT_HEAD = "#c8352b";
+export const BIT_SHANK = "#1d1d1d";
+export const BIT_SLOT = "#7b1d16";
+export const BIT_CUTTER = "#52a7b8";
 function bitBox(x: number): Prim[] {
   const spec = BULGE.bitBox as NonNullable<(typeof BULGE)["bitBox"]>;
   const outline = bulgePolygon(x, spec);
@@ -142,14 +150,18 @@ function bitBox(x: number): Prim[] {
   prims.push({ t: "line", x1: toe + 12, y1: TUBE_CY - spec.half, x2: toe + 12, y2: TUBE_CY + spec.half, stroke: INK, w: 1.4 });
   for (const band of [61, 67]) prims.push({ t: "line", x1: toe + band, y1: TUBE_CY - spec.half, x2: toe + band, y2: TUBE_CY + spec.half, stroke: INK, w: 1.2 });
   prims.push({ t: "poly", pts: outline, fill: "none", stroke: INK, w: 1.8 });
-  const head: Point[] = [at(0, -16), at(-9, -22), at(-21, -21), at(-35, -12), at(-41, -4), at(-42, 4), at(-35, 12), at(-21, 21), at(-9, 22), at(0, 16)];
-  prims.push({ t: "poly", pts: head, fill: BIT_GOLD, stroke: INK, w: 1.6 });
-  for (const [dx, dy] of [[-8, -17], [-20, -15], [-32, -10], [-8, 17], [-20, 15], [-32, 10]] as const) {
-    prims.push({ t: "circle", cx: toe + dx, cy: TUBE_CY + dy, r: 2.6, fill: "#ffffff", stroke: INK, w: 1 });
+  prims.push({ t: "poly", pts: [at(0, -16), at(-13, -17), at(-13, 17), at(0, 16)], fill: BIT_SHANK, stroke: INK, w: 1.4 });
+  const head: Point[] = [at(-12, -20), at(-16, -23), at(-34, -23), at(-42, -17), at(-45, -8), at(-45, 8), at(-42, 17), at(-34, 23), at(-16, 23), at(-12, 20)];
+  prims.push({ t: "poly", pts: head, fill: BIT_HEAD, stroke: INK, w: 1.6 });
+  for (const sign of [-1, 1]) {
+    prims.push({ t: "line", x1: toe - 22, y1: TUBE_CY + sign * 23, x2: toe - 40, y2: TUBE_CY + sign * 11, stroke: BIT_SLOT, w: 2.6 });
   }
-  for (const dy of [-17, 0, 17]) prims.push({ t: "line", x1: toe - 39, y1: TUBE_CY + dy * 0.2, x2: toe - 6, y2: TUBE_CY + dy, stroke: INK, w: 1.2 });
+  for (const [dx, dy] of [[-28, -21], [-36, -18], [-42, -11], [-28, 21], [-36, 18], [-42, 11], [-32, 0], [-40, 0]] as const) {
+    prims.push({ t: "circle", cx: toe + dx, cy: TUBE_CY + dy, r: 2.6, fill: BIT_CUTTER, stroke: INK, w: 0.8 });
+  }
   return prims;
 }
+
 /**
  * Adjustable bent housing, drawn straight (the bend is the set angle, not a kink in the picture):
  * upper and lower housing meeting at the joint, a scribe line running across it, and two staggered
@@ -160,7 +172,7 @@ function bentHousing(x: number): Prim[] {
   const outline = bulgePolygon(x, spec);
   const cy = TUBE_CY;
   const prims: Prim[] = [
-    { t: "poly", pts: outline, fill: "#ffffff", stroke: INK, w: 1.8 },
+    { t: "poly", pts: outline, fill: STEEL, stroke: INK, w: 1.8 },
     { t: "line", x1: x, y1: cy - spec.half, x2: x, y2: cy + spec.half, stroke: INK, w: 1.6 },
   ];
   for (const dy of [-16, -8, 8, 16]) prims.push({ t: "line", x1: x - 3 - 16, y1: cy + dy, x2: x - 3, y2: cy + dy, stroke: INK, w: 1.2 });
@@ -257,21 +269,34 @@ function boxThreads(left: boolean, marks: Mark[], ink: string): Prim[] {
   return prims;
 }
 
-function endCaptions(ends: EndConfig, marks: Mark[], ink: string): Prim[] {
-  const layout = tubeLayout(marks);
-  const leftEdge = layout.pins.left ? layout.bodyX - PIN_W : layout.bodyX;
-  const rightEdge = layout.pins.right ? layout.bodyX + layout.bodyW + PIN_W : layout.bodyX + layout.bodyW;
-  const leftX = leftEdge + 28;
-  const rightX = rightEdge - 28;
-  const line = (x: number, y: number, text: string): Prim => ({ t: "text", x, y, s: text, size: 12, fill: ink });
-  return [
-    line(leftX, TUBE_CY - 66, ends.lower.toUpperCase() === "PIN" ? "PIN" : "BOX"),
-    line(leftX, TUBE_CY - 52, shortenCopy(ends.threadLower ?? "")),
-    line(rightX, TUBE_CY - 66, ends.upper.toUpperCase() === "PIN" ? "PIN" : "BOX"),
-    line(rightX, TUBE_CY - 52, shortenCopy(ends.threadUpper ?? "")),
-  ].filter((prim) => prim.t === "text" && prim.s !== "");
+/** Where an end's caption sits: a band above every flag, so no flag or stem can cover the thread name. */
+const CAPTION_KIND_Y = 12;
+const CAPTION_THREAD_Y = 27;
+const CAPTION_ARROW_FROM = 33;
+const CAPTION_MARGIN = 58;
+
+function endCaption(cx: number, kind: string, thread: string, ink: string): Prim[] {
+  const x = Math.min(BUILDER_W - CAPTION_MARGIN, Math.max(CAPTION_MARGIN, cx));
+  const tip = TUBE_CY - BODY_HALF - 3;
+  const prims: Prim[] = [];
+  if (thread !== "") prims.push({ t: "text", x, y: CAPTION_THREAD_Y, s: thread, size: 12, fill: ink });
+  prims.push({ t: "text", x, y: CAPTION_KIND_Y, s: kind, size: 12, fill: ink });
+  prims.push({ t: "line", x1: cx, y1: CAPTION_ARROW_FROM, x2: cx, y2: tip - 5, stroke: ink, w: 1.2 });
+  prims.push({ t: "poly", pts: [[cx, tip], [cx - 3.5, tip - 8], [cx + 3.5, tip - 8]], fill: ink, stroke: "none", w: 0 });
+  return prims;
 }
 
+function endCaptions(ends: EndConfig, marks: Mark[], ink: string): Prim[] {
+  const layout = tubeLayout(marks);
+  const leftPin = ends.lower.toUpperCase() === "PIN";
+  const rightPin = ends.upper.toUpperCase() === "PIN";
+  const leftX = leftPin ? layout.bodyX - PIN_W / 2 : layout.bodyX + 13;
+  const rightX = rightPin ? layout.bodyX + layout.bodyW + PIN_W / 2 : layout.bodyX + layout.bodyW - 13;
+  return [
+    ...endCaption(leftX, leftPin ? "PIN" : "BOX", shortenCopy(ends.threadLower ?? ""), ink),
+    ...endCaption(rightX, rightPin ? "PIN" : "BOX", shortenCopy(ends.threadUpper ?? ""), ink),
+  ];
+}
 export function customScene(marks: Mark[], selected = "", touch = false, ends?: EndConfig, palette: ScenePalette = LIGHT_PALETTE): Prim[] {
   const drawn = ends ? marks.filter((mark) => mark.kind !== "pin") : marks;
   const shaped = ends ? withEndPins(drawn, ends) : marks;
@@ -305,7 +330,7 @@ export function customScene(marks: Mark[], selected = "", touch = false, ends?: 
 export function sceneBounds(marks: Mark[], ends?: EndConfig): { x: number; y: number; w: number; h: number } {
   const rows = new Set(marks.filter((mark) => mark.kind !== "pin").map((mark) => flagRow(mark.kind)));
   const plain = rows.has("top") ? lengthFlagY() - FLAG_R - 4 : rows.has("mid") ? SHAPE_FLAG_Y - FLAG_R - 4 : TUBE_CY - SPIRAL_HALF - 8;
-  const top = ends ? Math.min(plain, TUBE_CY - 80) : plain;
+  const top = ends ? Math.min(plain, 0) : plain;
   const bottom = rows.has("bottom") ? odFlagY() + FLAG_R + 2 : TUBE_CY + SPIRAL_HALF + 12;
   return { x: 0, y: top, w: BUILDER_W, h: bottom - top };
 }
