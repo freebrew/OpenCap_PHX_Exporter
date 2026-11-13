@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self'; worker-src 'self'" />
+  <title>3D Wells Probe</title>
+  <style>
+    body { margin: 0; background: #d5dee6; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="gl" width="640" height="480" style="width: 640px; height: 480px"></canvas>
+  <canvas id="gpu" width="64" height="64" style="width: 64px; height: 64px"></canvas>
+  <script type="module" src="/src/wells/wellsProbe.ts"></script>
+</body>
+</html>

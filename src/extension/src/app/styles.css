@@ -1,0 +1,810 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", sans-serif;
+  color: #1c2430;
+  background: #f4f6f8;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar, .status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #17324d;
+  color: white;
+}
+
+.stamp {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+.job-picker {
+  max-width: 460px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  background: #e7edf2;
+  color: #17324d;
+  min-height: 36px;
+}
+
+button, select {
+  font: inherit;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 10px;
+  background: white;
+  color: #17324d;
+}
+
+button:disabled {
+  opacity: 0.55;
+}
+
+.workspace {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.grid-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: white;
+}
+
+/* The grid has no workbook: the reason sits where the sheet would be. */
+.no-workbook {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  background: #f4f6f8;
+}
+
+.no-workbook h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.no-workbook p {
+  margin: 0;
+  max-width: 560px;
+}
+
+.no-workbook button {
+  margin-top: 8px;
+  background: #17324d;
+  color: white;
+}
+
+/* Excel form buttons and the plan gauge, laid over the cells they are anchored to. */
+.sheet-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.sheet-clip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.sheet-button {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 0 2px;
+  border: 1px solid #adadad;
+  border-radius: 0;
+  background: #f0f0f0;
+  color: #000;
+  font-family: Calibri, "Segoe UI", sans-serif;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: normal;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.sheet-button:hover:not(:disabled) {
+  background: #e5f1fb;
+  border-color: #0078d7;
+}
+
+.plan-gauge-box {
+  position: absolute;
+  background: white;
+}
+
+.plan-gauge {
+  display: block;
+}
+
+.modal.floating {
+  position: fixed;
+  top: 96px;
+  right: 24px;
+  z-index: 900;
+}
+
+.pipe-tally .tally-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #c9d3dc;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+.pipe-tally .tally-list > div {
+  display: grid;
+  grid-template-columns: 70px 90px;
+  gap: 8px;
+  padding: 1px 6px;
+}
+
+.pipe-tally .tally-head {
+  position: sticky;
+  top: 0;
+  background: #e7edf2;
+  font-weight: 700;
+}
+
+.modal.dl-entry {
+  width: min(616px, 94vw);
+}
+
+.dl-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+
+.dl-col {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.dl-field {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  align-items: center;
+  font-size: 13px;
+}
+
+.modal .dl-field input, .modal .dl-field select {
+  font: inherit;
+  padding: 2px 4px;
+}
+
+.dl-field span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dl-wide input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dl-setting {
+  min-height: 18px;
+  padding: 1px 4px;
+  border: 1px solid #bfbfbf;
+  background: #f2f2f2;
+  font-size: 12px;
+  font-weight: 700;
+  color: #000;
+}
+
+.dl-setting.hint {
+  color: #808080;
+}
+
+.dl-setting.error {
+  color: #c00000;
+}
+
+.spin {
+  display: inline-grid;
+}
+
+.modal .spin button {
+  padding: 0 3px;
+  font-size: 7px;
+  line-height: 9px;
+  border-radius: 0;
+}
+
+.dl-buttons {
+  justify-content: flex-end;
+}
+
+.modal.targets {
+  width: min(430px, 94vw);
+}
+
+.targets-note {
+  font-size: 12px;
+}
+
+.targets table {
+  border-collapse: collapse;
+}
+
+.targets th {
+  text-align: left;
+  font-size: 12px;
+}
+
+.modal.targets input {
+  width: 70px;
+  font-size: 12px;
+}
+
+.dock {
+  flex: none;
+  width: min(400px, 40vw);
+  min-width: 0;
+  max-width: min(400px, 40vw);
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #1e3348;
+  border-left: 1px solid #0e1c2b;
+}
+
+.dock:empty {
+  display: none;
+}
+
+.panel {
+  margin: 24px auto;
+  max-width: 640px;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.panel h1 {
+  font-size: 22px;
+  margin-top: 0;
+}
+
+.log {
+  white-space: pre-wrap;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #f4f7fa;
+  padding: 12px;
+}
+
+.tools-note {
+  margin: 0;
+  font-size: 13px;
+}
+
+.tool-bound {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 2px solid #e2c56a;
+  border-radius: 10px;
+  background: #f6f3ec;
+  color: #17324d;
+}
+
+.bound-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tools h2 {
+  width: auto;
+  margin: 0;
+  font-size: 15px;
+}
+
+.tools button {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid #c9d3dc;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.tools .mail-setup > button {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+.tools header {
+  justify-content: space-between;
+}
+
+.tools header, .tool-row, .tools form, .tools fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tools fieldset.tool-bound {
+  align-items: stretch;
+  min-inline-size: 0;
+  width: 100%;
+  overflow: visible;
+}
+
+.tools input:not([type="checkbox"]):not([type="radio"]), .tools textarea {
+  width: 72px;
+  max-width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.tool-bound label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool-bound label input[type="checkbox"], .tool-bound label input[type="radio"] {
+  margin-right: 8px;
+}
+
+.tool-bound legend {
+  padding: 0 6px;
+  color: #17324d;
+  font-weight: 700;
+}
+
+.cost-calendar {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+.cost-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  padding: 0 0 2px;
+  overflow: hidden;
+  border: 1px solid #c5b89a;
+  border-radius: 4px;
+  background: white;
+  color: #17324d;
+  text-align: center;
+  cursor: pointer;
+}
+
+.cost-chip.selected {
+  outline: 2px solid #b45309;
+  outline-offset: 1px;
+}
+
+.chip-month {
+  display: block;
+  padding: 2px 1px 1px;
+  overflow: hidden;
+  background: #17324d;
+  color: white;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chip-day {
+  padding: 1px 1px 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chip-week, .chip-total, .chip-batch, .chip-hours {
+  display: none;
+}
+
+.chip-daily {
+  display: block;
+  padding: 0 1px 2px;
+  overflow: hidden;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cost-empty {
+  margin: 0;
+  font-size: 13px;
+}
+
+.tools form.cost-form {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+
+.tools form.cost-form input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  min-width: 0;
+}
+
+.corridor-frame {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #c5b89a;
+  border-radius: 8px;
+  background: #102033;
+}
+
+.corridor-empty {
+  display: grid;
+  place-items: center;
+  min-height: 140px;
+  margin: 0;
+  padding: 12px;
+  color: #d5dee8;
+  text-align: center;
+}
+
+.corridor-caption {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mail-setup {
+  width: 100%;
+  align-items: flex-start;
+}
+
+.tools .mail-setup label.mail-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tools .mail-setup input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  min-width: 0;
+}
+
+.mail-note {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mail-setup ol,
+.mail-setup ul {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding-left: 0;
+  list-style-position: inside;
+}
+
+.mail-setup li {
+  overflow-wrap: anywhere;
+}
+
+.tools textarea {
+  width: 100%;
+}
+
+.corridor {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.report {
+  white-space: pre-wrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(23, 50, 77, 0.35);
+}
+
+.modal {
+  display: grid;
+  gap: 8px;
+  width: min(360px, 90vw);
+  padding: 18px 20px;
+  border-radius: 8px;
+  background: white;
+  color: #17324d;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.modal h1 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.modal p {
+  margin: 0;
+}
+
+.modal dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.modal dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modal input {
+  width: 120px;
+  font: inherit;
+}
+
+.modal button {
+  border: 1px solid #c9d3dc;
+}
+
+.modal .delta {
+  justify-self: end;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-line {
+  color: #404040;
+}
+
+.status-line.error {
+  color: #c00000;
+}
+
+.view-switch {
+  display: flex;
+  gap: 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.view-switch button {
+  border-radius: 0;
+  background: transparent;
+  color: white;
+}
+
+.view-switch button[aria-pressed="true"] {
+  background: white;
+  color: #17324d;
+}
+
+.wells-view {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: #d5dee6;
+}
+
+.wells-view[data-active="false"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.wells-canvas, .wells-hit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.wells-hit {
+  z-index: 1;
+  cursor: grab;
+}
+
+.wells-legend, .wells-controls, .wells-badge, .wells-missing, .wells-empty, .wells-tip {
+  position: absolute;
+  z-index: 2;
+}
+
+.wells-legend, .wells-controls, .wells-missing {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.wells-legend {
+  top: 12px;
+  left: 12px;
+  pointer-events: none;
+}
+
+.wells-legend p, .wells-controls label, .wells-missing p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+
+.wells-axes {
+  color: #5c6b7a;
+}
+
+.swatch {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.swatch.plan { background: #17324d; }
+.swatch.drilled { background: #0e7490; }
+.swatch.red { background: #c62828; }
+.swatch.yellow { background: #f9a825; }
+.swatch.green { background: #2e7d32; }
+
+.wells-controls {
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wells-controls button {
+  background: #17324d;
+  color: white;
+}
+
+.wells-badge {
+  left: 12px;
+  bottom: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+}
+
+.wells-badge.bad {
+  color: #9b1c1c;
+}
+
+.wells-missing {
+  right: 12px;
+  bottom: 12px;
+  max-width: 280px;
+}
+
+.wells-missing ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.wells-empty {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  color: #17324d;
+}
+
+.wells-tip {
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #17324d;
+  color: white;
+  font-size: 12px;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.wells-tip p {
+  margin: 2px 0;
+}
+
+@media print {
+  .toolbar, .status, .grid-wrap, .tools header, .tools form, .tools fieldset, .tool-row {
+    display: none;
+  }
+
+  .dock {
+    width: auto;
+    border: 0;
+  }
+}
