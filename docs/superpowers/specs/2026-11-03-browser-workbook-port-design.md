@@ -4,7 +4,7 @@
 
 Replace the Excel `Slide Sheet - <job>.xlsm` with a Chrome extension that is the workbook: a full grid-and-formula clone of every sheet, the VBA re-implemented in TypeScript, live FieldCap data written straight into the cache sheets (no CSV hop), and the job folder on the local machine kept as the single store. One copy per job, no distributed spreadsheets, no server.
 
-Example job folder (kept as-is): `D:\TEL HZ CARROT\TEL HZ CARROT 12-21-52-11 (35782)\` with `BHA/`, `Cost/`, `Fit Document/`, `Midnight Reports/`, `OpenCap/`, `Safety/`, `Surveys/`, `Town/`, `Well Plans/`.
+Example job folder (kept as-is): `D:\NWE HZ WILLOWBEND\NWE HZ WILLOWBEND 04-22-68-08 (20803)\` with `BHA/`, `Cost/`, `Fit Document/`, `Midnight Reports/`, `OpenCap/`, `Safety/`, `Surveys/`, `Town/`, `Well Plans/`.
 
 ## Approved choices
 

@@ -16,8 +16,7 @@ $pocDir = Join-Path $root "docs\ac_poc"
 $wbPath = Join-Path $pocDir "AC_Corridor_POC.xlsm"
 if (-not (Test-Path -LiteralPath $wbPath)) { throw "missing $wbPath ; run bas/_build_ac_poc_workbook.ps1 first" }
 
-if (-not $PlanPdf) { $PlanPdf = Join-Path $root "TEL HZ 102 CARROT 4-28-52-11 P3.pdf" }
-if (-not $AcPdf) { $AcPdf = Join-Path $root "TEL HZ 102 CARROT 4-28-52-11 P3 AC.pdf" }
+if (-not $PlanPdf -or -not $AcPdf) { throw "pass -PlanPdf and -AcPdf (the plan and AC report PDFs for one well)" }
 if (-not (Test-Path -LiteralPath $PlanPdf)) { throw "missing plan PDF: $PlanPdf" }
 if (-not (Test-Path -LiteralPath $AcPdf)) { throw "missing AC PDF: $AcPdf" }
 
