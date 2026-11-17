@@ -26,6 +26,10 @@ export interface PrintCard {
   statics: [number, number, string][];
   /** [row, col, column] or [row, col, column, column]: a value cell, the columns joined by a space. */
   fields: ([number, number, number] | [number, number, number, number])[];
+  /** [first column, column count] of each header cell merged across columns in a card's first label and value rows. */
+  headerSpans?: [number, number][];
+  /** The column where the yellow block of the second label row starts, when its labels are not all "A LEN"-style. */
+  metricFrom?: number;
 }
 
 export type VectorOp =

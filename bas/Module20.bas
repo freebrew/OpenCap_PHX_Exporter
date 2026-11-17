@@ -7,7 +7,7 @@ Sub Printdatapdf()
 '
 Dim name As String
 
-    name = ThisWorkbook.Path & "\" & "Drilling Data" & ".pdf"
+    name = ThisWorkbook.path & "\" & "Drilling Data" & ".pdf"
     Range("B5:F70").Select
     ActiveSheet.PageSetup.PrintArea = "$B$5:$F$70"
     

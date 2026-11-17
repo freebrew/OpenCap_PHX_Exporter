@@ -1,0 +1,33 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HP 35s Formula Card</title>
+<style>
+  @page { size: letter portrait; margin: 0.4in; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Consolas, "Courier New", monospace; color: #000; }
+  /* Cut-out card: same shape as the strip on the calculator cover. Change width/height to resize. */
+  .card { width: 4.3in; height: auto; border: 0.5pt solid #000; padding: 0.06in 0.08in; font-size: 5.9pt; line-height: 1.15; }
+  .l { display: block; }
+  .l i { font-style: normal; font-family: Arial, sans-serif; font-weight: bold; font-size: 5.6pt; }
+  .leg { font-family: Arial, sans-serif; font-size: 5.3pt; line-height: 1.2; border-top: 0.5pt solid #000; margin-top: 2.5pt; padding-top: 2pt; }
+  .leg b { font-family: Consolas, monospace; font-size: 5.8pt; }
+</style>
+</head>
+<body>
+<div class="card">
+  <span class="l"><i>BURR</i> (1719*(SIN(P)-SIN(Z)))/(T-V)</span>
+  <span class="l"><i>DOGLEG</i> ((ACOS((COS(A)*COS(B))+((SIN(A)*SIN(B))*COS(C-D))))/L)*30</span>
+  <span class="l"><i>ANN VEL</i> F*(1/(&pi;*((A/2000)^2)-(&pi;*((B/2000)^2))))</span>
+  <span class="l"><i>TOOLFACE</i> SGN(SIN(D-C)+.0000001)*ACOS((COS(P)*COS(D-C)-SIN(P)/TAN(ACOS(2*(V-T)/L-COS(P))))<wbr>/SQRT(SQ(COS(P)*COS(D-C)-SIN(P)/TAN(ACOS(2*(V-T)/L-COS(P))))+SQ(SIN(D-C))))</span>
+  <span class="l"><i>END INC</i> ACOS(2*(V-T)/L-COS(P))</span>
+  <div class="leg">
+    DEG. <b>P</b> cur inc &middot; <b>Z</b> tgt inc &middot; <b>C</b> cur azm &middot; <b>D</b> tgt azm &middot; <b>T</b> cur TVD &middot; <b>V</b> tgt TVD &middot;
+    <b>L</b> course (proj MD &minus; cur MD) &middot; <b>A,B</b> inc 1,2 (DOGLEG) / ID,OD mm (ANN VEL) &middot; <b>F</b> flow m&sup3;/min.
+    TF: + right / &minus; left of HS. TF or END INC error = target not reachable in L.
+  </div>
+</div>
+</body>
+</html>
+

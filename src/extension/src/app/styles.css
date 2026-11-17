@@ -695,7 +695,7 @@ button:disabled {
   cursor: grab;
 }
 
-.wells-legend, .wells-controls, .wells-badge, .wells-missing, .wells-empty, .wells-tip {
+.wells-legend, .wells-controls, .wells-badge, .wells-missing, .wells-empty, .wells-tip, .wells-status {
   position: absolute;
   z-index: 2;
 }
@@ -733,6 +733,16 @@ button:disabled {
 
 .swatch.plan { background: #17324d; }
 .swatch.drilled { background: #0e7490; }
+.swatch.shadow { background: #7a848c; }
+.swatch.formation { background: #6b4f2a; }
+.swatch.target {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #1b4d2e;
+  border-radius: 50%;
+  background: transparent;
+  box-sizing: border-box;
+}
 .swatch.red { background: #c62828; }
 .swatch.yellow { background: #f9a825; }
 .swatch.green { background: #2e7d32; }
@@ -748,6 +758,47 @@ button:disabled {
 .wells-controls button {
   background: #17324d;
   color: white;
+}
+
+.wells-filter {
+  justify-content: space-between;
+}
+
+.wells-controls select {
+  font: inherit;
+  max-width: 180px;
+}
+
+.wells-count {
+  color: #5c6b7a;
+  margin: 0;
+}
+
+.wells-status {
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 380px;
+}
+
+.wells-status .wells-badge,
+.wells-report {
+  position: static;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+}
+
+.wells-report p {
+  margin: 2px 0;
+}
+
+.wells-report .bad {
+  color: #9b1c1c;
 }
 
 .wells-badge {

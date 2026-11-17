@@ -180,7 +180,7 @@ End Function
 
 Private Function TrackerLastRow(ByVal tr As Worksheet) As Long
     Dim r As Long
-    r = tr.Cells(tr.Rows.Count, TR_SERIAL).End(xlUp).Row
+    r = tr.Cells(tr.rows.Count, TR_SERIAL).End(xlUp).row
     If r < 1 Then r = 1
     TrackerLastRow = r
 End Function
@@ -271,7 +271,7 @@ Private Sub DedupTracker(ByVal tr As Worksheet)
                 If NumOrZero(tr.Cells(r, TR_PREJOB).Value) > NumOrZero(tr.Cells(other, TR_PREJOB).Value) Then
                     tr.Cells(other, TR_PREJOB).Value = tr.Cells(r, TR_PREJOB).Value
                 End If
-                tr.Rows(r).Delete
+                tr.rows(r).Delete
                 Exit For
             End If
         Next other
@@ -283,7 +283,7 @@ Private Sub PurgeBadTrackerRows(ByVal tr As Worksheet)
     Dim r As Long
     For r = TrackerLastRow(tr) To 2 Step -1
         If Not LooksLikeSerial(CStr(tr.Cells(r, TR_SERIAL).Value & "")) Then
-            tr.Rows(r).Delete
+            tr.rows(r).Delete
         End If
     Next r
 End Sub
@@ -306,7 +306,7 @@ Private Sub UpsertKnownSerials(ByVal tr As Worksheet)
         cDesc = HeaderCol(bhaWs, "Description")
         cSub = HeaderCol(bhaWs, "Sub Description")
         If cSn > 0 Then
-            lastR = bhaWs.Cells(bhaWs.Rows.Count, cSn).End(xlUp).Row
+            lastR = bhaWs.Cells(bhaWs.rows.Count, cSn).End(xlUp).row
             For r = 2 To lastR
                 sN = CellSerial(bhaWs.Cells(r, cSn))
                 If LooksLikeSerial(sN) Then
@@ -345,7 +345,7 @@ Private Sub UpsertMotorsFromInventory(ByVal tr As Worksheet)
     If cName = 0 Then cName = HeaderCol(inv, "Description")
     cSub = HeaderCol(inv, "SubCategory")
     If cSn = 0 Then Exit Sub
-    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    lastR = inv.Cells(inv.rows.Count, cSn).End(xlUp).row
     For r = 2 To lastR
         sN = CellSerial(inv.Cells(r, cSn))
         itemName = ""
@@ -432,7 +432,7 @@ Private Function BhaHoursMap() As Collection
     cNum = HeaderCol(ws, "BHA #")
     cHrs = HeaderCol(ws, "BHA Total Hrs")
     If cNum = 0 Or cHrs = 0 Then Exit Function
-    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, cNum).End(xlUp).row
     For r = 2 To lastR
         n = BhaNumber(ws.Cells(r, cNum).Value)
         If n > 0 Then
@@ -461,7 +461,7 @@ Private Function BhaMembersMap() As Collection
     cNum = HeaderCol(ws, "BHA #")
     cSn = HeaderCol(ws, "Serial #")
     If cNum = 0 Or cSn = 0 Then Exit Function
-    lastR = ws.Cells(ws.Rows.Count, cSn).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, cSn).End(xlUp).row
     For r = 2 To lastR
         n = BhaNumber(ws.Cells(r, cNum).Value)
         sN = CellSerial(ws.Cells(r, cSn))
@@ -579,7 +579,7 @@ Private Sub PaintDataRows(ByVal ws As Worksheet, ByVal firstR As Long, ByVal las
         rng.HorizontalAlignment = xlLeft
         ws.Cells(r, COL_PREV).numberFormat = "0.00"
         ws.Cells(r, COL_CURRENT).numberFormat = "0.00"
-        ws.Cells(r, COL_TOTAL).Formula = "=IFERROR(IF(O" & r & "<>"""",SUM(Q" & r & ":R" & r & "),""""),"""")"
+        ws.Cells(r, COL_TOTAL).formula = "=IFERROR(IF(O" & r & "<>"""",SUM(Q" & r & ":R" & r & "),""""),"""")"
         ws.Range(ws.Cells(r, COL_SERIAL), ws.Cells(r, COL_TOTAL)).Borders.LineStyle = xlContinuous
     Next r
 End Sub
@@ -669,7 +669,7 @@ Private Function ActiveBhaToolSerials(ByVal bha As Long) As Collection
     cDesc = HeaderCol(ws, "Description")
     cSub = HeaderCol(ws, "Sub Description")
     If cNum = 0 Or cSn = 0 Then Exit Function
-    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, cNum).End(xlUp).row
     For r = 2 To lastR
         If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
             sN = CellSerial(ws.Cells(r, cSn))
@@ -703,7 +703,7 @@ Private Sub AppendBhaMotors(ByVal col As Collection, ByVal bha As Long)
     cSn = HeaderCol(ws, "Serial #")
     cDesc = HeaderCol(ws, "Description")
     If cNum = 0 Or cSn = 0 Or cDesc = 0 Then Exit Sub
-    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, cNum).End(xlUp).row
     For r = 2 To lastR
         If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
             sN = CellSerial(ws.Cells(r, cSn))
@@ -745,21 +745,21 @@ Private Sub FixDependentFormulas(ByVal ws As Worksheet)
         SetListValidation ws.Cells(r, 4), "=$O$" & TOOLS_FIRST & ":$O$" & TOOLS_LAST
     Next r
 
-    ws.Range(CELL_PREV_MOTOR).Formula = "=IFERROR(VLOOKUP($C$22," & motorTbl & ",3,0),"""")"
+    ws.Range(CELL_PREV_MOTOR).formula = "=IFERROR(VLOOKUP($C$22," & motorTbl & ",3,0),"""")"
 
     For r = 45 To 55
-        ws.Cells(r, 6).Formula = "=IFERROR(VLOOKUP(B" & r & "," & motorTbl & ",5,FALSE),IFERROR(VLOOKUP(B" & r & "," & SH_TRACK & "!$A$2:$E$80,5,FALSE),""""))"
+        ws.Cells(r, 6).formula = "=IFERROR(VLOOKUP(B" & r & "," & motorTbl & ",5,FALSE),IFERROR(VLOOKUP(B" & r & "," & SH_TRACK & "!$A$2:$E$80,5,FALSE),""""))"
     Next r
 
     SetListValidation ws.Range(CELL_MOTOR), "=$B$45:$B$55"
 
-    f = CStr(ws.Range("C23").Formula & "")
+    f = CStr(ws.Range("C23").formula & "")
     If InStr(1, f, "B45:F52", vbTextCompare) > 0 Then
-        ws.Range("C23").Formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
+        ws.Range("C23").formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
     End If
-    f = CStr(ws.Range("C24").Formula & "")
+    f = CStr(ws.Range("C24").formula & "")
     If InStr(1, f, "B45:F52", vbTextCompare) > 0 Then
-        ws.Range("C24").Formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
+        ws.Range("C24").formula = Replace(f, "B45:F52", "B45:F55", 1, -1, vbTextCompare)
     End If
 
     ApplyHoursNumberFormat ws
@@ -779,19 +779,19 @@ End Sub
 Private Sub SetLookup(ByVal c As Range, ByVal keyAddr As String, _
                       ByVal tbl As String, ByVal col As Long)
     Dim f As String
-    f = CStr(c.Formula & "")
+    f = CStr(c.formula & "")
     If Len(f) = 0 Then Exit Sub
     If InStr(1, f, "VLOOKUP", vbTextCompare) = 0 Then Exit Sub
-    c.Formula = "=IFERROR(VLOOKUP(" & keyAddr & "," & tbl & "," & col & ",FALSE),"""")"
+    c.formula = "=IFERROR(VLOOKUP(" & keyAddr & "," & tbl & "," & col & ",FALSE),"""")"
 End Sub
 
 Private Sub SetLookupBlank(ByVal c As Range, ByVal keyAddr As String, _
                            ByVal tbl As String, ByVal col As Long)
     Dim f As String
-    f = CStr(c.Formula & "")
+    f = CStr(c.formula & "")
     If Len(f) = 0 Then Exit Sub
     If InStr(1, f, "VLOOKUP", vbTextCompare) = 0 Then Exit Sub
-    c.Formula = "=IFERROR(IF(ISBLANK(" & keyAddr & "),"""",VLOOKUP(" & keyAddr & "," & tbl & "," & col & ",0)),"""")"
+    c.formula = "=IFERROR(IF(ISBLANK(" & keyAddr & "),"""",VLOOKUP(" & keyAddr & "," & tbl & "," & col & ",0)),"""")"
 End Sub
 
 Private Sub SetListValidation(ByVal c As Range, ByVal listRef As String)
@@ -866,7 +866,7 @@ Private Function CanonicalSerial(ByVal sN As String) As String
     cSn = HeaderCol(inv, "SerialNumber")
     If cSn = 0 Then cSn = HeaderCol(inv, "Serial #")
     If cSn = 0 Then Exit Function
-    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    lastR = inv.Cells(inv.rows.Count, cSn).End(xlUp).row
     For r = 2 To lastR
         other = Trim$(CStr(inv.Cells(r, cSn).text & ""))
         If Len(other) = 0 Then other = Trim$(CStr(inv.Cells(r, cSn).Value & ""))
@@ -944,7 +944,7 @@ Private Function BhaMotorSerial(ByVal bha As Long) As String
     cSn = HeaderCol(ws, "Serial #")
     cDesc = HeaderCol(ws, "Description")
     If cNum = 0 Or cSn = 0 Or cDesc = 0 Then Exit Function
-    lastR = ws.Cells(ws.Rows.Count, cNum).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, cNum).End(xlUp).row
     For r = 2 To lastR
         If BhaNumber(ws.Cells(r, cNum).Value) = bha Then
             sN = CellSerial(ws.Cells(r, cSn))
@@ -983,7 +983,7 @@ Private Function InventoryMeta(ByVal sN As String, ByRef cat As String, _
     If cName = 0 Then cName = HeaderCol(inv, "Description")
     cShip = HeaderCol(inv, "ShippingStatus")
     If cSn = 0 Then Exit Function
-    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    lastR = inv.Cells(inv.rows.Count, cSn).End(xlUp).row
     For r = 2 To lastR
         If NormSerial(CellSerial(inv.Cells(r, cSn))) = want Then
             If cCat > 0 Then cat = CStr(inv.Cells(r, cCat).Value & "")
@@ -1160,7 +1160,7 @@ Private Function InventorySerialsOfKind(ParamArray kinds() As Variant) As Collec
     cSub = HeaderCol(inv, "SubCategory")
     If cSn = 0 Or cSub = 0 Then Exit Function
 
-    lastR = inv.Cells(inv.Rows.Count, cSn).End(xlUp).Row
+    lastR = inv.Cells(inv.rows.Count, cSn).End(xlUp).row
     For r = 2 To lastR
         sub_ = " " & Trim$(CStr(inv.Cells(r, cSub).Value & "")) & " "
         For k = LBound(kinds) To UBound(kinds)

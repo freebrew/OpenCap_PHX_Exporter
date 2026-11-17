@@ -10,7 +10,7 @@ export type WellsIn =
   | { type: "scene"; scene: WellScene | null }
   | { type: "pointer"; phase: "down" | "move" | "up" | "wheel"; x: number; y: number; button: number; shift: boolean; deltaY: number }
   | { type: "hover"; x: number; y: number }
-  | { type: "options"; drilled: boolean; allOffsets: boolean }
+  | { type: "options"; drilled: boolean; shown: string[] }
   | { type: "reset" }
   | { type: "bench"; frames: number }
   | { type: "sample" };

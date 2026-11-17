@@ -48,6 +48,24 @@ export function interpPlan(plan: AcPlanPoint[], md: number): AcPlanPoint | null 
   return null;
 }
 
+/**
+ * How far a station is from the printed centre-to-centre, in metres: the 3D distance from the plan at
+ * the station's Ref MD to the offset point, less the printed C2C. Null when the row has no C2C to test.
+ */
+export function frameResidual(plan: AcPlanPoint[], station: AcDetailStation): number | null {
+  if (station.c2c <= 0) return null;
+  const at = interpPlan(plan, station.refMd);
+  if (!at) return null;
+  const distance = Math.hypot(at.n - station.n, at.e - station.e, at.tvd - station.offTvd);
+  return Math.abs(distance - station.c2c);
+}
+
+/** A station sits where the report says it does. */
+export function stationInFrame(plan: AcPlanPoint[], station: AcDetailStation): boolean {
+  const residual = frameResidual(plan, station);
+  return residual != null && residual <= FRAME_TOLERANCE;
+}
+
 function fail(notes: string[], badge: string, stations: number, worstM: number): AcCheck {
   return { ok: false, stations, worstM, badge, notes };
 }
@@ -88,12 +106,9 @@ export function checkAcReport(shown: AcHit[], stations: AcDetailStation[], plan:
   let worst = 0;
   let bad = 0;
   for (const station of stations) {
-    if (station.c2c <= 0) continue;
     if (!shown.some((hit) => wellsMatch(hit.well, station.well))) continue;
-    const at = interpPlan(plan, station.refMd);
-    if (!at) continue;
-    const distance = Math.hypot(at.n - station.n, at.e - station.e, at.tvd - station.offTvd);
-    const residual = Math.abs(distance - station.c2c);
+    const residual = frameResidual(plan, station);
+    if (residual == null) continue;
     checked += 1;
     if (residual > worst) worst = residual;
     if (residual > FRAME_TOLERANCE) {

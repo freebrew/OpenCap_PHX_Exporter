@@ -13,11 +13,10 @@ Option Explicit
 '
 '  Frames (plan = origin):
 '    GRAVITY  (Inc >= 5 deg), no sail corridor active
-'      Well Seeker convention: perpendicular offset from the plan line,
-'      decomposed in the plan borehole frame at the same MD.
-'      Y = high-side component (+ = UP), X = right-side component (+ = RT).
-'      (Along-tangent lead/lag is projected out, so numbers match the office
-'      software's "distance from plan" exactly.)
+'      DD software convention: closest point on the plan (3D, min-curvature
+'      plan). Y = plan TVD - actual TVD there (+ = UP). X = horizontal
+'      distance to that point, + when right of the plan azimuth. TOT =
+'      hypot = 3D distance. 35783 @ 2929: 0.57 DN / 4.15 LT / 4.18.
 '    GRAVITY, sail-calculator mode (waypoint corridor active at this MD)
 '      Y = planTVD - actualTVD (+ = UP): the geo window is TVD-defined, so the
 '      dial and green band speak true TVD while steering the corridor.
@@ -25,11 +24,15 @@ Option Explicit
 '      Plan foot at actual TVD. Y = ahead/back, X = right/left; PRP = hypot.
 '
 '  Way points: AC14:AD33 (MD/TVD). Half-width: AB14.
-'  Actual N/E from min-curvature on green survey rows only (Inc/Azm fill
-'  RGB 204,255,204). Yellow / other fills are user projections and are
-'  ignored for last-survey, plan offset, and PTB. LOOKUP rows skipped.
-'  PTB bit depth = column D on that last green survey row, whenever bit MD
-'  is ahead of the survey. Not gated on U2 (next named-target MD).
+'  The last survey is the last green row (Inc/Azm fill color index 35 /
+'  RGB(204,255,204)); its N/E are the sheet's AL/AM and TVD is H. Any other
+'  fill is a station that is not drilled yet and is not part of the well.
+'  LOOKUP rows skipped.
+'  PTB is the last survey row with numeric MD/Inc/Azm, whatever its fill.
+'  When that row is deeper than the last green survey, the hollow marker
+'  is the min-curve step from the green survey to that entered station.
+'  When the last entered survey IS the green one, PTB stays column D on
+'  that row (bit ahead of the survey). Not gated on U2.
 '
 '  Plan foot is ALWAYS min-curvature between _OC_Survey stations (PlanAt /
 '  PlanAtTvd). Never lerp NS/EW/TVD — section plans only store course ends.
@@ -53,7 +56,7 @@ Private Const WP_COL_MD As Long = 29          ' AC
 Private Const WP_COL_TVD As Long = 30         ' AD
 Private Const WP_HALFWIDTH_ADDR As String = "AB14"
 
-Private Const PI As Double = 3.14159265358979
+Private Const pI As Double = 3.14159265358979
 
 Private Function cInk() As Long:    cInk = RGB(40, 40, 40):      End Function
 Private Function cGrid() As Long:   cGrid = RGB(180, 180, 180):  End Function
@@ -69,7 +72,7 @@ Private Function cBandEdge() As Long: cBandEdge = RGB(35, 130, 65): End Function
 Private Function cBandOutInk() As Long: cBandOutInk = RGB(180, 40, 40): End Function
 
 Private Function Deg2Rad(ByVal d As Double) As Double
-    Deg2Rad = d * PI / 180#
+    Deg2Rad = d * pI / 180#
 End Function
 
 Private Function ClampDbl(ByVal v As Double, ByVal lo As Double, ByVal hi As Double) As Double
@@ -121,11 +124,11 @@ Private Function LoadPlan(ByRef pMD() As Double, ByRef pInc() As Double, _
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
 
-    Dim cMD As Long, cInc As Long, cAzi As Long, cTvd As Long, cNS As Long, cEW As Long
+    Dim cmd As Long, cInc As Long, cAzi As Long, cTvd As Long, cNS As Long, cEW As Long
     Dim c As Long
     For c = 1 To 20
         Select Case UCase$(Trim$(CStr(ws.Cells(2, c).Value2 & "")))
-            Case "MD":  cMD = c
+            Case "MD":  cmd = c
             Case "INC": cInc = c
             Case "AZI", "AZM": cAzi = c
             Case "TVD": cTvd = c
@@ -133,9 +136,9 @@ Private Function LoadPlan(ByRef pMD() As Double, ByRef pInc() As Double, _
             Case "EW":  cEW = c
         End Select
     Next c
-    If cMD = 0 Or cInc = 0 Or cAzi = 0 Or cTvd = 0 Or cNS = 0 Or cEW = 0 Then Exit Function
+    If cmd = 0 Or cInc = 0 Or cAzi = 0 Or cTvd = 0 Or cNS = 0 Or cEW = 0 Then Exit Function
 
-    Dim lastR As Long: lastR = ws.Cells(ws.Rows.Count, cMD).End(xlUp).Row
+    Dim lastR As Long: lastR = ws.Cells(ws.rows.Count, cmd).End(xlUp).row
     If lastR < 3 Then Exit Function
 
     Dim n As Long: n = 0
@@ -144,8 +147,8 @@ Private Function LoadPlan(ByRef pMD() As Double, ByRef pInc() As Double, _
 
     Dim r As Long
     For r = 3 To lastR
-        If IsNumeric(ws.Cells(r, cMD).Value2) And Len(CStr(ws.Cells(r, cMD).Value2 & "")) > 0 Then
-            Dim mdv As Double: mdv = CDbl(ws.Cells(r, cMD).Value2)
+        If IsNumeric(ws.Cells(r, cmd).Value2) And Len(CStr(ws.Cells(r, cmd).Value2 & "")) > 0 Then
+            Dim mdv As Double: mdv = CDbl(ws.Cells(r, cmd).Value2)
             Dim takeIt As Boolean
             If n = 0 Then takeIt = True Else takeIt = (mdv > pMD(n - 1))
             If takeIt Then
@@ -159,8 +162,25 @@ Private Function LoadPlan(ByRef pMD() As Double, ByRef pInc() As Double, _
             End If
         End If
     Next r
+    ' Crystal Planned Survey import stored Subsea in EW (NS stuck at 0). The
+    ' angles are good — rebuild wellhead-relative N/E so the dial matches the
+    ' DD software even before the plan is re-imported.
+    RebuildPlanNE n, pMD, pInc, pAzi, pNS, pEW
     LoadPlan = n
 End Function
+
+Private Sub RebuildPlanNE(ByVal n As Long, _
+        ByRef md() As Double, ByRef inc() As Double, ByRef azm() As Double, _
+        ByRef ns() As Double, ByRef ew() As Double)
+    Dim i As Long, dV As Double, dN As Double, dE As Double
+    If n < 1 Then Exit Sub
+    ns(0) = 0#: ew(0) = 0#
+    For i = 1 To n - 1
+        McStep md(i - 1), inc(i - 1), azm(i - 1), md(i), inc(i), azm(i), dV, dN, dE
+        ns(i) = ns(i - 1) + dN
+        ew(i) = ew(i - 1) + dE
+    Next i
+End Sub
 
 Private Sub PlanAt(ByVal md As Double, ByVal n As Long, _
                    pMD() As Double, pInc() As Double, pAzi() As Double, _
@@ -243,11 +263,11 @@ Private Sub InterpCourseDir(ByVal i1 As Double, ByVal a1 As Double, _
     End If
     If v > 1# Then v = 1#
     If v < -1# Then v = -1#
-    outInc = WorksheetFunction.Acos(v) * 180# / PI
+    outInc = WorksheetFunction.Acos(v) * 180# / pI
     If Abs(n) < 0.0000000001 And Abs(e) < 0.0000000001 Then
         outAzi = a1
     Else
-        outAzi = WorksheetFunction.Atan2(n, e) * 180# / PI
+        outAzi = WorksheetFunction.Atan2(n, e) * 180# / pI
         If outAzi < 0# Then outAzi = outAzi + 360#
     End If
 End Sub
@@ -374,9 +394,9 @@ End Function
 Private Function IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     Dim fE As String, fF As String, fd As String
     On Error Resume Next
-    fE = UCase$(CStr(ws.Cells(r, 5).Formula & ""))
-    fF = UCase$(CStr(ws.Cells(r, 6).Formula & ""))
-    fd = UCase$(CStr(ws.Cells(r, 4).Formula & ""))
+    fE = UCase$(CStr(ws.Cells(r, 5).formula & ""))
+    fF = UCase$(CStr(ws.Cells(r, 6).formula & ""))
+    fd = UCase$(CStr(ws.Cells(r, 4).formula & ""))
     On Error GoTo 0
     IsSurveySummaryRow = (InStr(1, fE, "LOOKUP", vbBinaryCompare) > 0) _
                       Or (InStr(1, fF, "LOOKUP", vbBinaryCompare) > 0) _
@@ -426,23 +446,130 @@ NextSurveyRow:
     ActualAtLastSurvey = n
 End Function
 
+' Deepest row with a numeric survey (E/F/G), any Inc/Azm fill. LOOKUP rows
+' skipped. This is the station the user typed, including a projection that
+' is not the survey green.
+Private Function LastEnteredSurvey(ByVal ws As Worksheet, _
+        ByRef mdv As Double, ByRef incv As Double, ByRef aziv As Double, _
+        ByRef rowOut As Long) As Boolean
+    Dim r As Long
+    Dim bestMd As Double
+    Dim vMd As Variant, vInc As Variant, vAzi As Variant
+    LastEnteredSurvey = False
+    bestMd = -1#
+    rowOut = 0
+    For r = SURV_ROW_FIRST To SURV_ROW_LAST
+        If IsSurveySummaryRow(ws, r) Then GoTo NextEntered
+        vMd = ws.Cells(r, 5).Value2
+        vInc = ws.Cells(r, 6).Value2
+        vAzi = ws.Cells(r, 7).Value2
+        If Not (IsNumeric(vMd) And IsNumeric(vInc) And IsNumeric(vAzi) _
+                And Len(CStr(vMd & "")) > 0 And Len(CStr(vInc & "")) > 0 _
+                And Len(CStr(vAzi & "")) > 0) Then
+            GoTo NextEntered
+        End If
+        If CDbl(vMd) > bestMd Then
+            bestMd = CDbl(vMd)
+            mdv = bestMd
+            incv = CDbl(vInc)
+            aziv = CDbl(vAzi)
+            rowOut = r
+            LastEnteredSurvey = True
+        End If
+NextEntered:
+    Next r
+End Function
+
 Private Sub FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Double, _
         ByVal dN As Double, ByVal dE As Double, ByVal dTvdUp As Double, _
         ByRef x As Double, ByRef y As Double, _
         Optional ByVal planInc As Double = 90#)
-    Dim right As Double, along As Double
-    right = dE * Cos(Deg2Rad(planAzi)) - dN * Sin(Deg2Rad(planAzi))
+    Dim Right As Double, along As Double
+    Right = dE * Cos(Deg2Rad(planAzi)) - dN * Sin(Deg2Rad(planAzi))
     along = dN * Cos(Deg2Rad(planAzi)) + dE * Sin(Deg2Rad(planAzi))
     If gravityMode Then
         ' Perpendicular high-side component (Well Seeker "distance from plan"):
         ' project the offset onto the plan high-side axis at plan inclination.
         ' planInc = 90 (default) degenerates to y = dTvdUp, the old TVD delta.
-        x = right
+        x = Right
         y = along * Cos(Deg2Rad(planInc)) + dTvdUp * Sin(Deg2Rad(planInc))
     Else
-        x = right
+        x = Right
         y = along
     End If
+End Sub
+
+' Survey N/E as the sheet carries them (AL/AM, 0/0 at the first survey).
+' The DD software ties on there too; integrating from surface instead adds
+' the first course (~0.26 m on 35783) and shifts LT/RT by that much.
+Private Sub SheetSurveyNE(ws As Worksheet, ByVal lastRow As Long, _
+                          ByRef sN As Double, ByRef sE As Double)
+    Dim vN As Variant, vE As Variant
+    On Error Resume Next
+    vN = ws.Cells(lastRow, 38).Value2
+    vE = ws.Cells(lastRow, 39).Value2
+    On Error GoTo 0
+    If VarType(vN) <> vbDouble Or VarType(vE) <> vbDouble Then Exit Sub
+    sN = CDbl(vN)
+    sE = CDbl(vE)
+End Sub
+
+' Closest point on the plan to (n, e, v), searched within +-60 m MD of md0.
+Private Sub ClosestPlanPoint(ByVal md0 As Double, ByVal n As Double, ByVal e As Double, _
+        ByVal v As Double, ByVal nPlan As Long, _
+        pMD() As Double, pInc() As Double, pAzi() As Double, _
+        pTvd() As Double, pNS() As Double, pEW() As Double, _
+        ByRef outN As Double, ByRef outE As Double, ByRef outV As Double, _
+        ByRef outAzi As Double, ByRef outInc As Double)
+    Dim lo As Double, hi As Double, q As Double, bestQ As Double
+    Dim d As Double, bestD As Double
+    Dim a As Double, b As Double, m1 As Double, m2 As Double, d1 As Double, d2 As Double
+    Dim k As Long
+    lo = md0 - 60#: If lo < pMD(0) Then lo = pMD(0)
+    hi = md0 + 60#: If hi > pMD(nPlan - 1) Then hi = pMD(nPlan - 1)
+    bestD = -1#
+    For q = lo To hi Step 1#
+        d = PlanDist2(q, n, e, v, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW)
+        If bestD < 0# Or d < bestD Then bestD = d: bestQ = q
+    Next q
+    a = bestQ - 1#: If a < lo Then a = lo
+    b = bestQ + 1#: If b > hi Then b = hi
+    For k = 1 To 40
+        m1 = a + (b - a) / 3#
+        m2 = b - (b - a) / 3#
+        d1 = PlanDist2(m1, n, e, v, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW)
+        d2 = PlanDist2(m2, n, e, v, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW)
+        If d1 < d2 Then b = m2 Else a = m1
+    Next k
+    PlanAt (a + b) / 2#, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, outN, outE, outV, outAzi, outInc
+End Sub
+
+Private Function PlanDist2(ByVal q As Double, ByVal n As Double, ByVal e As Double, _
+        ByVal v As Double, ByVal nPlan As Long, _
+        pMD() As Double, pInc() As Double, pAzi() As Double, _
+        pTvd() As Double, pNS() As Double, pEW() As Double) As Double
+    Dim cN As Double, cE As Double, cV As Double, cA As Double, cI As Double
+    PlanAt q, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, cN, cE, cV, cA, cI
+    PlanDist2 = (n - cN) * (n - cN) + (e - cE) * (e - cE) + (v - cV) * (v - cV)
+End Function
+
+' Gravity marker from the closest plan point, as the DD software reports it:
+' y = plan TVD - actual TVD (UP +), x = horizontal distance, signed RT + / LT -
+' by which side of the plan azimuth it falls. hypot(x, y) is the 3D distance.
+Private Sub ClosestComponents(ByVal md0 As Double, ByVal n As Double, ByVal e As Double, _
+        ByVal v As Double, ByVal nPlan As Long, _
+        pMD() As Double, pInc() As Double, pAzi() As Double, _
+        pTvd() As Double, pNS() As Double, pEW() As Double, _
+        ByRef x As Double, ByRef y As Double)
+    Dim cN As Double, cE As Double, cV As Double, cA As Double, cI As Double
+    Dim dN As Double, dE As Double, rt As Double
+    ClosestPlanPoint md0, n, e, v, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, cN, cE, cV, cA, cI
+    dN = n - cN
+    dE = e - cE
+    rt = dE * Cos(Deg2Rad(cA)) - dN * Sin(Deg2Rad(cA))
+    x = Sqr(dN * dN + dE * dE)
+    If rt < 0# Then x = -x
+    y = cV - v
 End Sub
 
 Private Function ActualTvdForGauge(ws As Worksheet, ByVal lastRow As Long, _
@@ -453,6 +580,11 @@ Private Function ActualTvdForGauge(ws As Worksheet, ByVal lastRow As Long, _
     On Error GoTo 0
     If IsNumeric(vH) And Len(CStr(vH & "")) > 0 Then
         ActualTvdForGauge = CDbl(vH)
+        ' H is a running sum down the sheet: one row with a shifted reference moves
+        ' every depth below it (seen: 18.7 m, the gauge read 16 m UP instead of
+        ' 2.5 m DOWN). The survey method differs from this integration by well under
+        ' a metre, so a bigger gap means H is damaged. Trust the integration.
+        If Abs(ActualTvdForGauge - integratedTvd) > 1# Then ActualTvdForGauge = integratedTvd
     Else
         ActualTvdForGauge = integratedTvd
     End If
@@ -492,6 +624,7 @@ Private Sub RenderPlanGaugeCore()
                   "NO DATA - Import Plan / enter surveys", False, 0, 0, 1#
         Exit Sub
     End If
+    SheetSurveyNE ws, lastRow, sN, sE
     Dim actTvd As Double
     actTvd = ActualTvdForGauge(ws, lastRow, sV)
 
@@ -524,10 +657,42 @@ Private Sub RenderPlanGaugeCore()
 
     Dim ax As Double, ay As Double
     FrameComponents gravityMode, plAzi, dN, dE, dTvdUp, ax, ay, frameInc
+    Dim closestMode As Boolean: closestMode = (gravityMode And Not sailMode)
+    If closestMode Then
+        ClosestComponents sMD, sN, sE, actTvd, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, ax, ay
+    End If
     Dim showPtb As Boolean: showPtb = False
     Dim bx As Double, by As Double
+    Dim entMd As Double, entInc As Double, entAzi As Double, entRow As Long
+    Dim haveEntered As Boolean
+    haveEntered = LastEnteredSurvey(ws, entMd, entInc, entAzi, entRow)
+    ' A later typed station (any fill) is the PTB point. Gravity stays on
+    ' the last green survey above.
+    If haveEntered And entRow <> lastRow And entMd > sMD + 0.01 Then
+        Dim stepVe As Double, stepNe As Double, stepEe As Double
+        McStep sMD, sInc, sAzi, entMd, entInc, entAzi, stepVe, stepNe, stepEe
+        Dim bitTvdE As Double: bitTvdE = actTvd + stepVe
+        Dim peN As Double, peE As Double, peV As Double, peAzi As Double, peInc As Double
+        If gravityMode Then
+            PlanAt entMd, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, peN, peE, peV, peAzi, peInc
+        Else
+            PlanAtTvd bitTvdE, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, peN, peE, peV, peAzi, peInc
+        End If
+        Dim eDN As Double, eDE As Double, eUp As Double
+        eDN = (sN + stepNe) - peN
+        eDE = (sE + stepEe) - peE
+        eUp = peV - bitTvdE
+        Dim frameIncE As Double
+        If sailMode Then frameIncE = 90# Else frameIncE = peInc
+        FrameComponents gravityMode, peAzi, eDN, eDE, eUp, bx, by, frameIncE
+        If closestMode Then
+            ClosestComponents entMd, sN + stepNe, sE + stepEe, bitTvdE, nPlan, _
+                              pMD, pInc, pAzi, pTvd, pNS, pEW, bx, by
+        End If
+        showPtb = True
+    End If
     Dim bitMd As Variant: bitMd = ws.Cells(lastRow, 4).Value2
-    If IsNumeric(bitMd) Then
+    If (Not showPtb) And IsNumeric(bitMd) Then
         If CDbl(bitMd) > sMD + 0.01 Then
             Dim incB As Double, azB As Double
             Dim vW As Variant: vW = ws.Cells(lastRow, 23).Value2
@@ -564,6 +729,10 @@ Private Sub RenderPlanGaugeCore()
             Dim frameIncB As Double
             If sailMode Then frameIncB = 90# Else frameIncB = pbInc
             FrameComponents gravityMode, pbAzi, bDN, bDE, bUp, bx, by, frameIncB
+            If closestMode Then
+                ClosestComponents CDbl(bitMd), sN + stepN, sE + stepE, bitTvd, nPlan, _
+                                  pMD, pInc, pAzi, pTvd, pNS, pEW, bx, by
+            End If
             showPtb = True
         End If
     End If
@@ -709,6 +878,7 @@ Reprotect:
     errNum = Err.Number: errDesc = Err.Description
     On Error Resume Next
     SheetReprotectAfterVba ws, wasProt
+    If StrComp(ws.name, "Slidesheet", vbTextCompare) = 0 Then SheetEnsureLocked ws
     On Error GoTo 0
     If errNum <> 0 Then Err.Raise errNum, "DrawGauge", errDesc
 End Sub
@@ -845,9 +1015,9 @@ Private Sub AddBandRect(ws As Worksheet, ByVal tag As String, _
 End Sub
 
 Private Sub AddBandHLine(ws As Worksheet, ByVal tag As String, _
-        ByVal x1 As Double, ByVal x2 As Double, ByVal y As Double, ByVal clr As Long)
+        ByVal X1 As Double, ByVal X2 As Double, ByVal y As Double, ByVal clr As Long)
     Dim shp As Shape
-    Set shp = ws.Shapes.AddLine(x1, y, x2, y)
+    Set shp = ws.Shapes.AddLine(X1, y, X2, y)
     StyleGaugeShape shp, SHP_PREFIX & tag
     shp.line.ForeColor.RGB = clr
     shp.line.Weight = 1.5
@@ -944,7 +1114,7 @@ Private Sub AddGaugeText(ws As Worksheet, ByVal nm As String, _
         With .TextRange
             .text = txt
             .Font.name = "Consolas"
-            .Font.Size = sz
+            .Font.size = sz
             .Font.bold = IIf(bold, msoTrue, msoFalse)
             .Font.fill.ForeColor.RGB = clr
         End With
@@ -1035,6 +1205,14 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
+
+
+
+
+
+
 
 
 

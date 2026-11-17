@@ -1,0 +1,41 @@
+name: Browser workbook
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  phase1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Unit tests
+        run: pnpm -r --if-present test
+      - name: Browser preview
+        working-directory: src/extension
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright test
+      - name: Demo parity gate
+        run: pnpm parity -- "Slide Sheet - Demo.xlsm" --oracle src/packages/parity-harness/oracle/demo.manifest.json --out src/packages/parity-harness/reports/demo.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-parity
+          path: src/packages/parity-harness/reports/demo.md
+      - name: SBOM
+        run: pnpm sbom --sbom-format cyclonedx > sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+      - name: Audit high vulnerabilities
+        run: pnpm audit --audit-level=high

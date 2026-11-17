@@ -52,6 +52,17 @@ describe("AC detail pages", () => {
     expect(stations[0]).toMatchObject({ refMd: 1200, n: 12.5, e: -8.25, c2c: 20, sf: 1.8 });
   });
 
+  it("reads the Ref MD 0 row, which prints no ellipse or SF columns, from its left side", () => {
+    // The header's left padding is gone in the text the PDF gives, so its columns do not line up with the row.
+    const header = "Toolface        +N/-S        +E/-W           Centres       Ellipses         Separation          Factor";
+    const surface = "0.00        0.00         0.10        0.00          0.00       0.00         45.00           -3.00        30.00          30.15";
+    const next = "30.00       30.00        30.10       29.99          0.28       0.33          45.00           -3.10        30.10          30.25         29.60              0.65         46.000";
+    const stations = parseAcDetail([`Offset Design ${NORTH}`, "Offset Site Pad", header, surface, next].join("\n"));
+    expect(stations).toHaveLength(2);
+    expect(stations[0]).toMatchObject({ refMd: 0, offMd: 0.1, offTvd: 0, n: -3, e: 30, c2c: 30.15, sf: 0 });
+    expect(stations[1]).toMatchObject({ refMd: 30, n: -3.1, e: 30.1, c2c: 30.25, sf: 46 });
+  });
+
   it("stores the detail sheet and the check badge on import", () => {
     const book = makeBook({
       Setup: {},

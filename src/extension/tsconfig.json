@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": ["chrome", "vite/client"],
+    "paths": {
+      "@phx/job-store": ["../packages/job-store/src/index.ts"],
+      "@phx/mail": ["../packages/mail/src/index.ts"],
+      "@phx/xlsx-bridge": ["../packages/xlsx-bridge/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "manifest.config.ts", "vite.config.ts"]
+}

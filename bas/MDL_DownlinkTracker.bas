@@ -1,7 +1,7 @@
 Attribute VB_Name = "MDL_DownlinkTracker"
 Option Explicit
 
-' DL Tracker tab (Field only; Demo has no tracker). ADD ENTRY (A1) opens
+' DL Tracker tab. ADD ENTRY (A1) opens
 ' frmDLEntry prefilled from the last entry; CLEAR (U1) empties the log.
 ' Entry writes touch only unlocked, non-formula cells, so D/L Setting (H),
 ' Dnlk # (B), hidden helper columns and the command tables (AA:AR) stay.
@@ -57,6 +57,43 @@ Private mPFmtCells As Boolean, mPFmtCols As Boolean, mPFmtRows As Boolean
 Private mPInsCols As Boolean, mPInsRows As Boolean, mPInsLinks As Boolean
 Private mPDelCols As Boolean, mPDelRows As Boolean
 Private mPSort As Boolean, mPFilter As Boolean, mPPivot As Boolean
+
+' Mouse wheel on an open form dropdown. Excel's ComboBox list ignores the
+' wheel; while frmDLEntry is open a low-level hook scrolls that list.
+Private mWheelHook As LongPtr
+Private mWheelBusy As Boolean
+Private mWheelComboName As String
+
+#If VBA7 Then
+Private Declare PtrSafe Function SetWindowsHookEx Lib "user32" Alias "SetWindowsHookExA" ( _
+    ByVal idHook As Long, ByVal lpfn As LongPtr, ByVal hMod As LongPtr, ByVal dwThreadId As Long) As LongPtr
+Private Declare PtrSafe Function CallNextHookEx Lib "user32" ( _
+    ByVal hHook As LongPtr, ByVal nCode As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As LongPtr
+Private Declare PtrSafe Function UnhookWindowsHookEx Lib "user32" (ByVal hHook As LongPtr) As Long
+Private Declare PtrSafe Function IsWindowVisible Lib "user32" (ByVal hwnd As LongPtr) As Long
+Private Declare PtrSafe Function GetClassNameW Lib "user32" (ByVal hwnd As LongPtr, ByVal lpClassName As LongPtr, ByVal nMaxCount As Long) As Long
+Private Declare PtrSafe Function GetWindowThreadProcessId Lib "user32" (ByVal hwnd As LongPtr, ByRef lpdwProcessId As Long) As Long
+Private Declare PtrSafe Function GetCurrentProcessId Lib "kernel32" () As Long
+Private Declare PtrSafe Function GetDesktopWindow Lib "user32" () As LongPtr
+Private Declare PtrSafe Function GetWindow Lib "user32" (ByVal hwnd As LongPtr, ByVal wCmd As Long) As LongPtr
+Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" ( _
+    Destination As Any, Source As Any, ByVal Length As LongPtr)
+#Else
+Private Declare Function SetWindowsHookEx Lib "user32" Alias "SetWindowsHookExA" ( _
+    ByVal idHook As Long, ByVal lpfn As Long, ByVal hMod As Long, ByVal dwThreadId As Long) As Long
+Private Declare Function CallNextHookEx Lib "user32" ( _
+    ByVal hHook As Long, ByVal nCode As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Declare Function UnhookWindowsHookEx Lib "user32" (ByVal hHook As Long) As Long
+Private Declare Function FindWindowEx Lib "user32" Alias "FindWindowExA" ( _
+    ByVal hWnd1 As Long, ByVal hWnd2 As Long, ByVal lpsz1 As String, ByVal lpsz2 As String) As Long
+Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" ( _
+    ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" ( _
+    Destination As Any, Source As Any, ByVal Length As Long)
+#End If
+
+Private Const WH_MOUSE_LL As Long = 14
+Private Const WM_MOUSEWHEEL As Long = &H20A
 
 ' ================================================================================
 '  BUTTONS
@@ -212,7 +249,7 @@ Public Function DLT_RepairDnlkCounter() As Long
     For r = DLT_FIRST To DLT_LAST
         If Not ws.Cells(r, DLC_NUM).HasFormula Then
             If Len(Trim$(CStr(ws.Cells(r, DLC_NUM).Value2 & ""))) > 0 Then
-                ws.Cells(r, DLC_NUM).Formula = CounterFormula(r)
+                ws.Cells(r, DLC_NUM).formula = CounterFormula(r)
                 n = n + 1
             End If
         End If
@@ -229,7 +266,7 @@ Private Sub EnsureCounter(ByVal ws As Worksheet, ByVal r As Long)
     If ws.Cells(r, DLC_NUM).HasFormula Then Exit Sub
     wasProt = DltUnprotect(ws)
     On Error Resume Next
-    ws.Cells(r, DLC_NUM).Formula = CounterFormula(r)
+    ws.Cells(r, DLC_NUM).formula = CounterFormula(r)
     On Error GoTo 0
     DltReprotect ws, wasProt
 End Sub
@@ -266,7 +303,7 @@ End Function
 ' A (Run#) and Q:T are template-filled down the log, so they cannot mark it.
 Public Function DLT_LastEntryRow(ByVal ws As Worksheet) As Long
     Dim r As Long
-    r = ws.Cells(DLT_LAST + 1, DLC_CMD).End(xlUp).Row
+    r = ws.Cells(DLT_LAST + 1, DLC_CMD).End(xlUp).row
     If r > DLT_LAST Then r = DLT_LAST
     Do While r >= DLT_FIRST
         If Len(Trim$(CStr(ws.Cells(r, DLC_CMD).Value2 & ""))) > 0 Then Exit Do
@@ -284,8 +321,8 @@ Public Function DLT_PageKey(ByVal v As Variant) As String
     DLT_PageKey = s
 End Function
 
-Private Function PageTableCol(ByVal pageKey As String) As Long
-    Select Case pageKey
+Private Function PageTableCol(ByVal PageKey As String) As Long
+    Select Case PageKey
         Case "0": PageTableCol = 27   ' AA:AB Page 0 Manual
         Case "1": PageTableCol = 29   ' AC:AD Page 1 Vertical
         Case "2": PageTableCol = 31   ' AE:AF Page 2 IH
@@ -297,32 +334,32 @@ Private Function PageTableCol(ByVal pageKey As String) As Long
 End Function
 
 ' D/L Setting text for a page + command, as the tab's H column shows it.
-Public Function DLT_LookupSetting(ByVal ws As Worksheet, ByVal pageKey As String, _
+Public Function DLT_LookupSetting(ByVal ws As Worksheet, ByVal PageKey As String, _
                                   ByVal cmd As String) As String
     Dim c As Long, r As Long
-    c = PageTableCol(pageKey)
+    c = PageTableCol(PageKey)
     cmd = Trim$(cmd)
     If c = 0 Or Len(cmd) = 0 Then Exit Function
     For r = TBL_FIRST To TBL_LAST
-        If StrComp(Trim$(ws.Cells(r, c).Text), cmd, vbTextCompare) = 0 Then
-            DLT_LookupSetting = Trim$(ws.Cells(r, c + 1).Text)
+        If StrComp(Trim$(ws.Cells(r, c).text), cmd, vbTextCompare) = 0 Then
+            DLT_LookupSetting = Trim$(ws.Cells(r, c + 1).text)
             Exit Function
         End If
     Next r
 End Function
 
 ' Supported commands for a page as a 2-column list (key, setting).
-Public Function DLT_CommandList(ByVal ws As Worksheet, ByVal pageKey As String) As Variant
+Public Function DLT_CommandList(ByVal ws As Worksheet, ByVal PageKey As String) As Variant
     Dim c As Long, r As Long, n As Long
     Dim k As String, s As String
     Dim tmp() As String, out() As String
 
-    c = PageTableCol(pageKey)
+    c = PageTableCol(PageKey)
     If c = 0 Then Exit Function
     ReDim tmp(1 To TBL_LAST - TBL_FIRST + 1, 1 To 2)
     For r = TBL_FIRST To TBL_LAST
-        k = Trim$(ws.Cells(r, c).Text)
-        s = Trim$(ws.Cells(r, c + 1).Text)
+        k = Trim$(ws.Cells(r, c).text)
+        s = Trim$(ws.Cells(r, c + 1).text)
         If Len(k) > 0 And Len(s) > 0 And InStr(1, s, "ERROR", vbTextCompare) = 0 Then
             n = n + 1
             tmp(n, 1) = k
@@ -351,7 +388,7 @@ Public Function DLT_ValidationList(ByVal c As Range) As Variant
     If Len(f) = 0 Then GoTo Done
     ReDim items(0 To 0)
     If Left$(f, 1) = "=" Then
-        Set src = c.Worksheet.Range(Mid$(f, 2))
+        Set src = c.Worksheet.Range(mid$(f, 2))
         ReDim items(0 To src.Cells.Count - 1)
         For Each cell In src.Cells
             t = Trim$(CStr(cell.Value2 & ""))
@@ -382,7 +419,7 @@ Public Function DLT_SuccessCodes(ByVal cmd As String, ByRef lo As Long, ByRef hi
     p = InStr(s, "-")
     If p < 2 Then Exit Function
     a = Left$(s, p - 1)
-    b = Mid$(s, p + 1)
+    b = mid$(s, p + 1)
     If Not IsNumeric(a) Or Not IsNumeric(b) Then Exit Function
     g = CLng(a)
     x = CLng(b)
@@ -412,11 +449,11 @@ End Function
 ' ================================================================================
 
 ' Nearest row above on the same DL page with numeric I and J.
-Public Function DLT_PrevIJ(ByVal ws As Worksheet, ByVal beforeRow As Long, ByVal pageKey As String, _
+Public Function DLT_PrevIJ(ByVal ws As Worksheet, ByVal beforeRow As Long, ByVal PageKey As String, _
                            ByRef prevI As Double, ByRef prevJ As Double) As Boolean
     Dim r As Long
     For r = beforeRow - 1 To DLT_FIRST Step -1
-        If DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2) = pageKey Then
+        If DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2) = PageKey Then
             If IsNumber(ws.Cells(r, DLC_I).Value2) And IsNumber(ws.Cells(r, DLC_J).Value2) Then
                 prevI = CDbl(ws.Cells(r, DLC_I).Value2)
                 prevJ = CDbl(ws.Cells(r, DLC_J).Value2)
@@ -478,19 +515,19 @@ End Function
 ' Recompute I/J on one log row from its page, command and Pass/Fail.
 ' A failed downlink leaves the tool where it was, so it carries the prior values.
 Public Sub DLT_RefreshIJ(ByVal ws As Worksheet, ByVal r As Long)
-    Dim cmd As String, pageKey As String, setting As String
+    Dim cmd As String, PageKey As String, setting As String
     Dim pI As Double, pJ As Double, oI As Double, oJ As Double
     Dim hasPrev As Boolean
 
     cmd = Trim$(CStr(ws.Cells(r, DLC_CMD).Value2 & ""))
     If Len(cmd) = 0 Then Exit Sub
-    pageKey = DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2)
-    hasPrev = DLT_PrevIJ(ws, r, pageKey, pI, pJ)
+    PageKey = DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2)
+    hasPrev = DLT_PrevIJ(ws, r, PageKey, pI, pJ)
     If UCase$(Trim$(CStr(ws.Cells(r, DLC_PASS).Value2 & ""))) = "FAIL" Then
         If hasPrev Then WriteIJ ws, r, pI, pJ
         Exit Sub
     End If
-    setting = DLT_LookupSetting(ws, pageKey, cmd)
+    setting = DLT_LookupSetting(ws, PageKey, cmd)
     Select Case DLT_ComputeIJ(setting, hasPrev, pI, pJ, oI, oJ)
         Case DLT_IJ_SET: WriteIJ ws, r, oI, oJ
         Case DLT_IJ_BLANK: ws.Range(ws.Cells(r, DLC_I), ws.Cells(r, DLC_J)).ClearContents
@@ -513,9 +550,9 @@ Public Sub DLT_OnSheetChange(ByVal ws As Worksheet, ByVal Target As Range)
     On Error GoTo Done
     lastRow = 0
     For Each c In hit.Cells
-        If c.Row <> lastRow Then
-            DLT_RefreshIJ ws, c.Row
-            lastRow = c.Row
+        If c.row <> lastRow Then
+            DLT_RefreshIJ ws, c.row
+            lastRow = c.row
         End If
     Next c
 Done:
@@ -572,19 +609,19 @@ Private Function NumAfter(ByVal s As String, ByVal key As String, ByRef v As Dou
     If p = 0 Then Exit Function
     i = p + Len(key)
     Do While i <= Len(s)
-        ch = Mid$(s, i, 1)
+        ch = mid$(s, i, 1)
         If ch Like "[0-9.]" Then Exit Do
         If ch <> " " Then Exit Function
         i = i + 1
     Loop
     Do While i <= Len(s)
-        ch = Mid$(s, i, 1)
+        ch = mid$(s, i, 1)
         If Not ch Like "[0-9.]" Then Exit Do
         num = num & ch
         i = i + 1
     Loop
     If Len(num) = 0 Or Not IsNumeric(num) Then Exit Function
-    v = Val(num)
+    v = val(num)
     NumAfter = True
 End Function
 
@@ -594,7 +631,7 @@ Private Function Wrap360(ByVal a As Double) As Double
 End Function
 
 Private Function IsNumber(ByVal v As Variant) As Boolean
-    If IsError(v) Or IsEmpty(v) Then Exit Function
+    If isError(v) Or IsEmpty(v) Then Exit Function
     If VarType(v) = vbString Then Exit Function
     IsNumber = IsNumeric(v)
 End Function
@@ -626,6 +663,110 @@ Private Function DltUnprotect(ByVal ws As Worksheet) As Boolean
     DltUnprotect = True
 End Function
 
+' ================================================================================
+'  DROPDOWN MOUSE WHEEL (frmDLEntry)
+' ================================================================================
+
+' The combo whose list is opening. DropButtonClick on the form reports it,
+' because ActiveControl is not always that combo while the list is open.
+Public Sub DLT_WheelCombo(ByVal controlName As String)
+    mWheelComboName = controlName
+End Sub
+
+Public Function DLT_WheelReady() As Boolean
+    DLT_WheelReady = (mWheelHook <> 0)
+End Function
+
+Public Sub DLT_WheelOn()
+    If mWheelHook <> 0 Then Exit Sub
+    mWheelHook = SetWindowsHookEx(WH_MOUSE_LL, AddressOf DLT_WheelProc, 0, 0)
+End Sub
+
+Public Sub DLT_WheelOff()
+    If mWheelHook = 0 Then Exit Sub
+    UnhookWindowsHookEx mWheelHook
+    mWheelHook = 0
+End Sub
+
+' Every mouse event while the form is open comes through here. Only a wheel
+' notch is handled, and only when a dropdown list is actually open.
+Public Function DLT_WheelProc(ByVal nCode As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As LongPtr
+    On Error GoTo Pass
+    If nCode < 0 Or mWheelBusy Then GoTo Pass
+    If wParam = WM_MOUSEWHEEL Then
+        mWheelBusy = True
+        If ScrollOpenCombo(lParam) Then
+            mWheelBusy = False
+            DLT_WheelProc = 1
+            Exit Function
+        End If
+        mWheelBusy = False
+    End If
+Pass:
+    DLT_WheelProc = CallNextHookEx(mWheelHook, nCode, wParam, lParam)
+End Function
+
+' The popup ignores wheel and key messages. Moving the open combo's ListIndex
+' keeps the list open and scrolls the highlight. Positive wheel goes up the list.
+Private Function ScrollOpenCombo(ByVal lParam As LongPtr) As Boolean
+    Dim w As Integer
+    Dim lines As Long
+    Dim cbo As Object
+    Dim i As Long
+
+    If FindPopup() = 0 Then Exit Function
+    CopyMemory w, ByVal (lParam + 10), 2
+    If w = 0 Then Exit Function
+    lines = CLng(w) \ 120
+    If lines = 0 Then
+        If w > 0 Then lines = 1 Else lines = -1
+    Else
+        lines = lines * 3
+    End If
+    If lines > 12 Then lines = 12
+    If lines < -12 Then lines = -12
+    On Error GoTo Done
+    If Len(mWheelComboName) > 0 Then Set cbo = frmDLEntry.Controls(mWheelComboName)
+    If cbo Is Nothing Then Set cbo = frmDLEntry.ActiveControl
+    If cbo Is Nothing Then Exit Function
+    If TypeName(cbo) <> "ComboBox" Then Exit Function
+    If cbo.ListCount < 1 Then Exit Function
+    i = cbo.ListIndex - lines
+    If i < 0 Then i = 0
+    If i > cbo.ListCount - 1 Then i = cbo.ListCount - 1
+    If i <> cbo.ListIndex Then cbo.ListIndex = i
+    ScrollOpenCombo = True
+Done:
+End Function
+
+' The open MSForms list is a top-level window whose class starts with
+' "F3 MdcPopup". The rest of the class name changes every Excel session.
+Private Function FindPopup() As LongPtr
+    Dim h As LongPtr
+    Dim buf As String
+    Dim n As Long
+    Dim pid As Long
+    Const GW_CHILD As Long = 5
+    Const GW_HWNDNEXT As Long = 2
+
+    h = GetWindow(GetDesktopWindow(), GW_CHILD)
+    Do While h <> 0
+        pid = 0
+        GetWindowThreadProcessId h, pid
+        If pid = GetCurrentProcessId() And IsWindowVisible(h) <> 0 Then
+            buf = String$(160, 0)
+            n = GetClassNameW(h, StrPtr(buf), 160)
+            If n >= 11 Then
+                If Left$(buf, 11) = "F3 MdcPopup" Then
+                    FindPopup = h
+                    Exit Function
+                End If
+            End If
+        End If
+        h = GetWindow(h, GW_HWNDNEXT)
+    Loop
+End Function
+
 Private Sub DltReprotect(ByVal ws As Worksheet, ByVal wasProt As Boolean)
     If Not wasProt Then Exit Sub
     On Error Resume Next
@@ -637,3 +778,7 @@ Private Sub DltReprotect(ByVal ws As Worksheet, ByVal wasProt As Boolean)
                AllowDeletingRows:=mPDelRows, AllowSorting:=mPSort, _
                AllowFiltering:=mPFilter, AllowUsingPivotTables:=mPPivot
 End Sub
+
+
+
+

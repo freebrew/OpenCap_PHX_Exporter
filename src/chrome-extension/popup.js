@@ -1,4 +1,4 @@
-// OpenCap Data Exporter — Popup v3.2.6
+// OpenCap Data Exporter — Popup v3.2.9
 
 (async () => {
   "use strict";
@@ -8,7 +8,115 @@
 
   // ── Version ──────────────────────────────────────────────────────────────
   const vEl = document.getElementById("extVersion");
-  if (vEl) vEl.textContent = chrome.runtime.getManifest().version;
+  const localVersion = chrome.runtime.getManifest().version;
+  if (vEl) vEl.textContent = localVersion;
+  const IS_EDGE = globalThis.OC?.isEdge === true;
+  const STORE_NAME = globalThis.OC?.storeName || "Chrome Web Store";
+  const HOST_NAME = IS_EDGE ? "Edge" : "Chrome";
+
+  const btnUpdate = document.getElementById("btnUpdate");
+  const updateBar = document.getElementById("updateBar");
+  const updateStatus = document.getElementById("updateStatus");
+  const KEY_PENDING_UPDATE = "fieldcap_pending_update";
+
+  const installedFromStore = () => {
+    const url = chrome.runtime.getManifest().update_url || "";
+    return url.length > 0;
+  };
+
+  const cmpVer = (a, b) => {
+    const pa = String(a || "").split(".").map((n) => parseInt(n, 10) || 0);
+    const pb = String(b || "").split(".").map((n) => parseInt(n, 10) || 0);
+    const n = Math.max(pa.length, pb.length);
+    for (let i = 0; i < n; i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d) return d;
+    }
+    return 0;
+  };
+
+  const showUpdate = (message, mode) => {
+    if (updateStatus) updateStatus.textContent = message || "";
+    if (updateBar) updateBar.classList.toggle("visible", !!message);
+    if (!btnUpdate) return;
+    btnUpdate.disabled = mode === "busy";
+    const ready = mode === "install";
+    btnUpdate.classList.toggle("btn-update-ready", ready);
+    if (updateBar) updateBar.classList.toggle("ready", ready);
+    if (ready) {
+      btnUpdate.textContent = "Install update";
+      btnUpdate.dataset.mode = "install";
+    } else {
+      btnUpdate.textContent = "Check for update";
+      btnUpdate.dataset.mode = "check";
+    }
+  };
+
+  const requestStoreUpdateCheck = () => new Promise((resolve, reject) => {
+    chrome.runtime.requestUpdateCheck((status, details) => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message));
+      else resolve({ status, version: details && details.version ? String(details.version) : "" });
+    });
+  });
+
+  const offerInstall = (version) => {
+    const label = version ? `Version ${version} is ready.` : "A store update is ready.";
+    showUpdate(`${label} Install update restarts the extension with the new version.`, "install");
+  };
+
+  const checkForStoreUpdate = async () => {
+    if (!installedFromStore()) {
+      showUpdate(
+        `This copy was loaded from a folder, so ${HOST_NAME} will not replace it. Install OpenCap once from ${STORE_NAME}; after that, Check for update downloads and installs the new version here.`,
+        "check"
+      );
+      return;
+    }
+    showUpdate(`Checking ${STORE_NAME}…`, "busy");
+    try {
+      const { status, version } = await requestStoreUpdateCheck();
+      if (status === "update_available") {
+        if (version) await chrome.storage.local.set({ [KEY_PENDING_UPDATE]: version });
+        offerInstall(version);
+        return;
+      }
+      const stored = await chrome.storage.local.get(KEY_PENDING_UPDATE);
+      const pending = stored[KEY_PENDING_UPDATE] || "";
+      if (pending && cmpVer(pending, localVersion) > 0) {
+        offerInstall(pending);
+        return;
+      }
+      if (pending) await chrome.storage.local.remove(KEY_PENDING_UPDATE);
+      if (status === "throttled") {
+        showUpdate(`${HOST_NAME} checked the store a moment ago. Try again in a few minutes.`, "check");
+        return;
+      }
+      showUpdate(`Version ${localVersion} is the latest on ${STORE_NAME}.`, "check");
+    } catch (err) {
+      showUpdate(err && err.message ? err.message : `Could not reach ${STORE_NAME}.`, "check");
+    }
+  };
+
+  if (btnUpdate) {
+    if (IS_EDGE) btnUpdate.title = "Ask Edge to check Add-ons and install the update here";
+    btnUpdate.addEventListener("click", () => {
+      if (btnUpdate.dataset.mode === "install") {
+        chrome.runtime.reload();
+        return;
+      }
+      checkForStoreUpdate();
+    });
+    chrome.storage.local.get(KEY_PENDING_UPDATE, (stored) => {
+      const pending = stored[KEY_PENDING_UPDATE] || "";
+      if (pending && cmpVer(pending, localVersion) > 0) offerInstall(pending);
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes[KEY_PENDING_UPDATE]) return;
+      const pending = changes[KEY_PENDING_UPDATE].newValue || "";
+      if (pending && cmpVer(pending, localVersion) > 0) offerInstall(pending);
+    });
+  }
 
   // ── DOM refs ─────────────────────────────────────────────────────────────
   const jobIdInput      = document.getElementById("jobId");
@@ -207,6 +315,7 @@
   const KEY_CSV_SLIDE_DAY = "fieldcap_csv_slide_by_day";
   const KEY_CSV_INVENTORY = "fieldcap_csv_inventory";
   const KEY_CSV_TICKET_COSTS = "fieldcap_csv_ticket_costs";
+  const KEY_CSV_ACTIVITY_LOG = "fieldcap_csv_activity_log";
   const KEY_SUPPRESS_BOTTOM_LINE_MODAL = "fieldcap_suppress_bottom_line_modal";
 
   // ── Restore cached CSV state ──────────────────────────────────────────────
@@ -269,11 +378,15 @@
   // ── File write helpers ────────────────────────────────────────────────────
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const downloadViaChromeDownloads = (csvText, filename) =>
+  const downloadViaBrowser = (csvText, filename) =>
     new Promise((resolve, reject) => {
       const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
       const url  = URL.createObjectURL(blob);
-      chrome.downloads.download({ url, filename, saveAs: false, conflictAction: "overwrite" }, () => {
+      // Edge rejects a nested "OpenCap/file.csv" name and sometimes rejects
+      // conflictAction. Chrome keeps the subfolder and overwrites.
+      const opts = { url, filename, saveAs: false };
+      if (!IS_EDGE) opts.conflictAction = "overwrite";
+      chrome.downloads.download(opts, () => {
         URL.revokeObjectURL(url);
         const err = chrome.runtime.lastError;
         if (err) reject(new Error(err.message));
@@ -308,7 +421,7 @@
         lastMsg = msg;
         if (/denied|used by another process|being used|lock|busy/i.test(msg))
           throw new Error(`${filename} is open/locked. Close it in Excel and retry.`);
-        if (/aborted due to security policy/i.test(msg) && attempt < 3) {
+        if (/aborted due to security policy|not allowed by the user agent|NotAllowedError/i.test(msg) && attempt < 3) {
           if (attempt === 2) { try { await openCapDir.removeEntry(filename); } catch (_) {} }
           await sleep(350 * attempt);
           continue;
@@ -317,9 +430,9 @@
       }
     }
 
-    const fallbackName = `${OPENCAP_SUBDIR}/${filename}`;
-    await downloadViaChromeDownloads(csv, fallbackName);
-    return `${fallbackName} → Chrome Downloads (folder write blocked by OS policy)`;
+    const fallbackName = IS_EDGE ? filename : `${OPENCAP_SUBDIR}/${filename}`;
+    await downloadViaBrowser(csv, fallbackName);
+    return `${fallbackName} → ${HOST_NAME} Downloads (folder write blocked by OS policy)`;
   };
 
   const saveAllCachedCsvs = async (jobId) => {
@@ -330,6 +443,7 @@
       slideDay:    KEY_CSV_SLIDE_DAY,
       inventory:   KEY_CSV_INVENTORY,
       ticketCosts: KEY_CSV_TICKET_COSTS,
+      activityLog: KEY_CSV_ACTIVITY_LOG,
     };
     const nameMap = {
       job:         `fieldcap-job-${jobId}-job-details.csv`,
@@ -338,13 +452,14 @@
       slideDay:    `fieldcap-job-${jobId}-slide-rotate-metres-by-day.csv`,
       inventory:   `fieldcap-job-${jobId}-inventory.csv`,
       ticketCosts: `fieldcap-job-${jobId}-ticket-costs-by-day.csv`,
+      activityLog: `fieldcap-job-${jobId}-activity-log-detail.csv`,
     };
 
     const stored = await chrome.storage.local.get(Object.values(keyMap));
     const saved  = [];
     const failed = [];
 
-    for (const which of ["job", "crew", "bha", "slideDay", "inventory", "ticketCosts"]) {
+    for (const which of ["job", "crew", "bha", "slideDay", "inventory", "ticketCosts", "activityLog"]) {
       const csv = stored[keyMap[which]];
       if (!csv) continue;
       try {

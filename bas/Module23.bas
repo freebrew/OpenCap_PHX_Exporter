@@ -87,7 +87,7 @@ Public Sub RefreshData()
     ' CSV hunt matches Setup REFRESH CSVs (OpenCap\, workbook folder,
     ' remembered job folder, Setup path list).
     Dim wbPath As String
-    wbPath = ThisWorkbook.Path
+    wbPath = ThisWorkbook.path
 
     If wbPath = "" Then
         MsgBox "Save the workbook to a folder first." & vbLf & _
@@ -140,6 +140,24 @@ Public Sub RefreshData()
     Application.Calculate
     On Error GoTo ErrHandler
     DayRoll_BackfillSlideMetrics
+    On Error Resume Next
+    DDTools_SyncActiveBhaRow
+    If SheetExists(SH_UI) And fBha <> "" Then
+        Application.StatusBar = "Refresh: redrawing DD Tools BHA detail..."
+        Dim activeBha As Long, dM As Double, dSm As Double, dSh As Double, dRh As Double, dCh As Double
+        If DayRoll_ActiveBhaTotals(activeBha, dM, dSm, dSh, dRh, dCh) Then
+            If GetFirstBHARow(activeBha) > 0 Then
+                Dim ddWs As Worksheet, ddProt As Boolean
+                Set ddWs = Worksheets(SH_UI)
+                ddProt = SheetUnprotectForVba(ddWs)
+                HighlightBHAButton ddWs, activeBha
+                DrawBHADetail ddWs, activeBha
+                SheetReprotectAfterVba ddWs, ddProt
+            End If
+        End If
+    End If
+    Application.Calculate
+    On Error GoTo ErrHandler
 
     ' 3rd-party / motor hours: hidden _TH_Hours tracker + active-BHA front tables
     On Error Resume Next
@@ -159,6 +177,10 @@ Public Sub RefreshData()
     On Error GoTo 0
 
     ScreenEndBusy
+
+    Dim slideWarn As String
+    slideWarn = DayRoll_SlideHoursWarning()
+    If slideWarn <> "" Then MsgBox slideWarn, vbExclamation, "Refresh"
 
     Dim missing As String
     If fJob = "" Then missing = missing & vbLf & "  *job-details*.csv"
@@ -417,7 +439,7 @@ Private Sub SetupUISheet(ws As Worksheet)
         .Cells.Interior.Color = cWhite()
         .Cells.Font.Color = cBlack()
         .Cells.Font.name = "Consolas"
-        .Cells.Font.Size = 9
+        .Cells.Font.size = 9
         .Tab.Color = cTeal()
     End With
 
@@ -434,10 +456,10 @@ Private Sub SetupUISheet(ws As Worksheet)
     ws.Columns("E:W").ColumnWidth = 11  ' hours + KPI island + gap + RAW BHA SUMMARY
 
     ' Row heights
-    ws.Rows(R_TOOLBAR).rowHeight = 26
-    ws.Rows(R_JOB).rowHeight = 15
-    ws.Rows(R_KPI).rowHeight = 14
-    ws.Rows(R_DIV).rowHeight = 2
+    ws.rows(R_TOOLBAR).rowHeight = 26
+    ws.rows(R_JOB).rowHeight = 15
+    ws.rows(R_KPI).rowHeight = 14
+    ws.rows(R_DIV).rowHeight = 2
 End Sub
 
 ' ================================================================================
@@ -449,7 +471,7 @@ Private Sub DrawToolbar(ws As Worksheet)
     With ws.Range("A1:C1")
         .Merge
         .Value = "FIELDCAP DD TOOLS"
-        .Font.Size = 13
+        .Font.size = 13
         .Font.bold = True
         .Font.Color = cBlack()
         .VerticalAlignment = xlVAlignCenter
@@ -461,7 +483,7 @@ Private Sub DrawToolbar(ws As Worksheet)
     jobLabel = GetJobHeaderLabel()
     With ws.Cells(R_JOB, 1)
         .Value = jobLabel
-        .Font.Size = 8
+        .Font.size = 8
         .Font.Color = cGrayDk()
         .Font.bold = False
     End With
@@ -484,7 +506,7 @@ Private Sub IslandSummaryPair(ws As Worksheet, r As Long, labelCol As Long, _
         .Value = label
         .Interior.Color = rowBg
         .Font.Color = cGrayDk()
-        .Font.Size = 8
+        .Font.size = 8
         .Font.bold = True
         .HorizontalAlignment = xlHAlignRight
     End With
@@ -492,7 +514,7 @@ Private Sub IslandSummaryPair(ws As Worksheet, r As Long, labelCol As Long, _
         .Value = val
         .Interior.Color = rowBg
         .Font.Color = cBlack()
-        .Font.Size = 9
+        .Font.size = 9
         .HorizontalAlignment = xlHAlignLeft
     End With
 End Sub
@@ -530,14 +552,14 @@ Private Sub DrawSummaryIslandFourColumns(ws As Worksheet, bhaNum As Long, _
 
     Dim hdr As Long
     hdr = R_DETAIL
-    ws.Rows(hdr).rowHeight = 15
+    ws.rows(hdr).rowHeight = 15
 
     With ws.Range(ws.Cells(hdr, COL_SUMMARY_L), ws.Cells(hdr, COL_SUMMARY_L + 1))
         .Merge
         .Value = "SELECTED BHA"
         .Interior.Color = cGrayBg()
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
         .Font.Color = cGrayDk()
         .HorizontalAlignment = xlHAlignCenter
         .VerticalAlignment = xlVAlignCenter
@@ -547,7 +569,7 @@ Private Sub DrawSummaryIslandFourColumns(ws As Worksheet, bhaNum As Long, _
         .Value = "BHA " & CStr(bhaNum)
         .Interior.Color = cGrayBg()
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
         .Font.Color = cGrayDk()
         .HorizontalAlignment = xlHAlignCenter
         .VerticalAlignment = xlVAlignCenter
@@ -572,7 +594,7 @@ Private Sub DrawSummaryIslandFourColumns(ws As Worksheet, bhaNum As Long, _
 
     For i = 1 To maxRows
         r = hdr + i
-        ws.Rows(r).rowHeight = 15
+        ws.rows(r).rowHeight = 15
         ' Match component table stripe: row 1 white, row 2 gray, ...
         If i Mod 2 = 1 Then rowBg = cWhite() Else rowBg = cGrayBg()
 
@@ -755,7 +777,7 @@ Private Sub StyleBtn(btn As Button, caption As String, fillColor As Long, lineCo
     On Error Resume Next
     btn.caption = caption
     btn.Font.name = "Consolas"
-    btn.Font.Size = 9
+    btn.Font.size = 9
     btn.Font.bold = isBold
     btn.Font.Color = textColor
     btn.ShapeRange.fill.ForeColor.RGB = fillColor
@@ -778,7 +800,7 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
         .Interior.Color = cWhite()
         .Font.Color = cBlack()
         .Font.name = "Consolas"
-        .Font.Size = 9
+        .Font.size = 9
         .Font.bold = False
         .Borders.LineStyle = xlNone
     End With
@@ -823,6 +845,17 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
     Dim actOn As String: actOn = SafeStr(bhaWs.Cells(fr, cAct))
     Dim cmpOn As String: cmpOn = SafeStr(bhaWs.Cells(fr, cCmp))
 
+    Dim dayBha As Long
+    Dim dayM As Double, daySlideM As Double, daySlideH As Double, dayRotH As Double, dayCircH As Double
+    If DayRoll_ActiveBhaTotals(dayBha, dayM, daySlideM, daySlideH, dayRotH, dayCircH) Then
+        If dayBha = bhaNum And dayM > 0# Then
+            metres = Round(dayM, 2)
+            sldHrs = Round(daySlideH, 2)
+            rotHrs = Round(dayRotH, 2)
+            crcHrs = Round(dayCircH, 2)
+        End If
+    End If
+
     Dim crewCount As Long
     crewCount = 0
     If SheetExists(SH_CREW) Then
@@ -846,12 +879,12 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
     ' #, SERIAL #, ITEM CODE, DESCRIPTION, HRS SLD, HRS ROT, TOTAL HRS, BHAs
     ' ========================================================================
     ' Column headers
-    ws.Rows(r).rowHeight = 15
+    ws.rows(r).rowHeight = 15
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cGrayBg()
         .Font.Color = cGrayDk()
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
     End With
     ws.Cells(r, 1).Value = "#"
     ws.Cells(r, 1).HorizontalAlignment = xlHAlignCenter
@@ -875,7 +908,7 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
 
     ' -- Component data rows --
     Dim lastRow As Long
-    lastRow = bhaWs.Cells(bhaWs.Rows.Count, cBNum).End(xlUp).Row
+    lastRow = bhaWs.Cells(bhaWs.rows.Count, cBNum).End(xlUp).row
 
     Dim compIdx As Long: compIdx = 1
     Dim dr As Long
@@ -890,7 +923,7 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
                 Dim sDes As String: sDes = SafeStr(bhaWs.Cells(dr, cDes))
                 If sSer = "" And sCod = "" And sDes = "" Then GoTo SkipComp
 
-                ws.Rows(r).rowHeight = 15
+                ws.rows(r).rowHeight = 15
 
                 Dim bg As Long
                 If compIdx Mod 2 = 0 Then bg = cGrayBg() Else bg = cWhite()
@@ -907,14 +940,14 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
                     .Value = Format(sldHrs, "0.00")
                     .Interior.Color = bg
                     .Font.Color = cBlack()
-                    .Font.Size = 9
+                    .Font.size = 9
                     .HorizontalAlignment = xlHAlignRight
                 End With
                 With ws.Cells(r, 6)
                     .Value = Format(rotHrs, "0.00")
                     .Interior.Color = bg
                     .Font.Color = cBlack()
-                    .Font.Size = 9
+                    .Font.size = 9
                     .HorizontalAlignment = xlHAlignRight
                 End With
                 With ws.Cells(r, 7)
@@ -922,14 +955,14 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
                     .Interior.Color = bg
                     .Font.Color = cBlack()
                     .Font.bold = True
-                    .Font.Size = 9
+                    .Font.size = 9
                     .HorizontalAlignment = xlHAlignRight
                 End With
                 With ws.Cells(r, COL_DATA_LAST)
                     .Value = bhaNum
                     .Interior.Color = bg
                     .Font.Color = cGrayDk()
-                    .Font.Size = 9
+                    .Font.size = 9
                     .HorizontalAlignment = xlHAlignRight
                 End With
 
@@ -957,12 +990,12 @@ End Sub
 Private Sub MetricRow(ws As Worksheet, r As Long, c As Long, label As String, val As String)
     ws.Cells(r, c).Value = label
     ws.Cells(r, c).Font.Color = cGrayDk()
-    ws.Cells(r, c).Font.Size = 8
+    ws.Cells(r, c).Font.size = 8
     ws.Cells(r, c).Font.bold = True
     ws.Cells(r, c).HorizontalAlignment = xlHAlignRight
     ws.Cells(r, c + 1).Value = val
     ws.Cells(r, c + 1).Font.Color = cBlack()
-    ws.Cells(r, c + 1).Font.Size = 9
+    ws.Cells(r, c + 1).Font.size = 9
     ws.Cells(r, c + 1).HorizontalAlignment = xlHAlignLeft
 End Sub
 
@@ -973,7 +1006,7 @@ End Sub
 Private Sub DrawCumulativeTable(ws As Worksheet)
     Dim cStart As Long: cStart = 0
     On Error Resume Next
-    cStart = ws.Range("DD_CumulRow").Row
+    cStart = ws.Range("DD_CumulRow").row
     On Error GoTo 0
     If cStart = 0 Then cStart = 60
 
@@ -985,7 +1018,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         .Interior.Color = cWhite()
         .Font.Color = cBlack()
         .Font.name = "Consolas"
-        .Font.Size = 9
+        .Font.size = 9
         .Borders.LineStyle = xlNone
     End With
 
@@ -1000,12 +1033,12 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
     Dim k As Long
 
     ' Section header
-    ws.Rows(r).rowHeight = 18
+    ws.rows(r).rowHeight = 18
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cGrayBg()
         .Font.Color = cBlack()
         .Font.bold = True
-        .Font.Size = 10
+        .Font.size = 10
     End With
     ws.Cells(r, 1).Value = "SERIAL HOURS PER BHA (BHA-tab items)"
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
@@ -1016,12 +1049,12 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
     r = r + 1
 
     ' Column headers: #, SERIAL #, DESCRIPTION, HRS CIRC, HSLS, BHA #
-    ws.Rows(r).rowHeight = 15
+    ws.rows(r).rowHeight = 15
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cGrayBg()
         .Font.Color = cGrayDk()
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
     End With
     ws.Cells(r, 1).Value = "#"
     ws.Cells(r, 1).HorizontalAlignment = xlHAlignCenter
@@ -1042,7 +1075,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
 
     Dim bg As Long
     For k = 0 To rSz - 1
-        ws.Rows(r).rowHeight = 15
+        ws.rows(r).rowHeight = 15
         If (k + 1) Mod 2 = 0 Then bg = cGrayBg() Else bg = cWhite()
         ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Interior.Color = bg
 
@@ -1056,7 +1089,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
             .Value = Format(aHsls(k), "0.00")
             .Interior.Color = bg
             .HorizontalAlignment = xlHAlignRight
-            .Font.Size = 9
+            .Font.size = 9
             If aHsls(k) > 300 Then
                 .Font.Color = cRed()
                 .Font.bold = True
@@ -1087,12 +1120,12 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
     r = r + 1
 
     ' OVER-LIMIT (>300h since service): one warning row per serial
-    ws.Rows(r).rowHeight = 18
+    ws.rows(r).rowHeight = 18
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST))
         .Interior.Color = cWhite()
         .Font.Color = cRed()
         .Font.bold = True
-        .Font.Size = 10
+        .Font.size = 10
     End With
     ws.Cells(r, 1).Value = "OVER-LIMIT (>300h since service)"
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
@@ -1111,7 +1144,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
             If Err.Number = 0 Then
                 On Error GoTo 0
                 nOver = nOver + 1
-                ws.Rows(r).rowHeight = 15
+                ws.rows(r).rowHeight = 15
                 PutCell ws, r, 1, CStr(nOver), cWhite(), cGrayDk(), False, xlHAlignCenter
                 PutCell ws, r, 2, aSer(k), cWhite(), cRed(), True, xlHAlignLeft
                 PutCell ws, r, 3, aDes(k), cWhite(), cBlack(), False, xlHAlignLeft
@@ -1177,7 +1210,7 @@ Private Function CollectBhaTabSerialRows(ByRef aSer() As String, ByRef aDes() As
         Dim iHrs As Long: iHrs = FindCol(inv, "HrsSinceService")
         If iSer > 0 Then
             Dim iLast As Long
-            iLast = inv.Cells(inv.Rows.Count, iSer).End(xlUp).Row
+            iLast = inv.Cells(inv.rows.Count, iSer).End(xlUp).row
             Dim ir As Long
             Dim ky As String
             For ir = 2 To iLast
@@ -1194,7 +1227,7 @@ Private Function CollectBhaTabSerialRows(ByRef aSer() As String, ByRef aDes() As
     End If
 
     Dim lastRow As Long
-    lastRow = bhaWs.Cells(bhaWs.Rows.Count, cBNum).End(xlUp).Row
+    lastRow = bhaWs.Cells(bhaWs.rows.Count, cBNum).End(xlUp).row
 
     Dim n As Long: n = 0
     ReDim aSer(0 To lastRow): ReDim aDes(0 To lastRow)
@@ -1318,7 +1351,7 @@ Public Sub BuildDataSerialHoursTable()
         .ClearContents
         .ClearFormats
         .Font.name = "Calibri"
-        .Font.Size = 11
+        .Font.size = 11
         .Font.Color = RGB(0, 0, 0)
         .Interior.ColorIndex = xlColorIndexNone
         .Borders.LineStyle = xlNone
@@ -1427,7 +1460,7 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
         .Interior.Color = cWhite()
         .Font.Color = cBlack()
         .Font.name = "Consolas"
-        .Font.Size = 9
+        .Font.size = 9
         .Borders.LineStyle = xlNone
     End With
 
@@ -1436,7 +1469,7 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
         .Merge
         .Value = "RAW BHA SUMMARY"
         .Font.bold = True
-        .Font.Size = 9
+        .Font.size = 9
         .Font.Color = cGrayDk()
         .HorizontalAlignment = xlHAlignLeft
         .VerticalAlignment = xlVAlignCenter
@@ -1455,14 +1488,14 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
         .Interior.Color = cGrayBg()
         .Font.Color = cGrayDk()
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
         With .Borders(xlEdgeBottom)
             .LineStyle = xlContinuous
             .Color = cGrayMed()
             .Weight = xlHairline
         End With
     End With
-    ws.Rows(hdrRow).rowHeight = 15
+    ws.rows(hdrRow).rowHeight = 15
 
     ' Data rows ? same stripe pattern as component table (row 1 white, 2 gray, ?)
     Dim bhaList As Variant
@@ -1480,8 +1513,8 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
             Dim rawBg As Long
             If stripe Mod 2 = 1 Then rawBg = cWhite() Else rawBg = cGrayBg()
 
-            ws.Rows(r).Hidden = False
-            If ws.Rows(r).rowHeight < 14 Then ws.Rows(r).rowHeight = 15
+            ws.rows(r).Hidden = False
+            If ws.rows(r).rowHeight < 14 Then ws.rows(r).rowHeight = 15
 
             ws.Cells(r, startCol + 0).Value = CLng(bhaList(i))
             Dim totalM As Double: totalM = GetBHAMetricValue(bhaWs, cBNum, cMtr, CLng(bhaList(i)))
@@ -1508,10 +1541,10 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
             For j = 1 To 8
                 ws.Cells(r, startCol + j).HorizontalAlignment = xlHAlignRight
                 ws.Cells(r, startCol + j).Font.Color = cBlack()
-                ws.Cells(r, startCol + j).Font.Size = 9
+                ws.Cells(r, startCol + j).Font.size = 9
             Next j
             ws.Cells(r, startCol + 0).HorizontalAlignment = xlHAlignCenter
-            ws.Cells(r, startCol + 0).Font.Size = 9
+            ws.Cells(r, startCol + 0).Font.size = 9
 
             r = r + 1
         End If
@@ -1530,10 +1563,52 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
         .Borders.Weight = xlHairline
     End With
 
+    WriteActiveBhaFromDayRows ws
+
     On Error Resume Next
     ws.names.Add "DD_RawBHASummary", "='" & SH_UI & "'!" & _
         ws.Range(ws.Cells(hdrRow, startCol), ws.Cells(tblEnd, endCol)).Address
     On Error GoTo 0
+End Sub
+
+' The BHA on Data!H3 is the one the day rows describe. Its raw-summary row
+' (and through it the Data!H36:M47 mirror) shows the day-row totals, so the
+' BHA table and the email's BHA lines agree. Other BHAs keep FieldCap's.
+Private Sub WriteActiveBhaFromDayRows(ws As Worksheet)
+    Dim bha As Long
+    Dim metres As Double, slideM As Double, slideH As Double, rotH As Double, circH As Double
+    Dim r As Long
+    Dim c As Long
+    If Not DayRoll_ActiveBhaTotals(bha, metres, slideM, slideH, rotH, circH) Then Exit Sub
+    If metres <= 0# Then Exit Sub
+    c = COL_RAW_SUMMARY_START
+    For r = R_DETAIL + 1 To R_DETAIL + 45
+        If IsNumeric(ws.Cells(r, c).Value) And Not IsEmpty(ws.Cells(r, c).Value) Then
+            If CLng(ws.Cells(r, c).Value) = bha Then
+                ws.Cells(r, c + 1).Value = Round(metres, 2)
+                ws.Cells(r, c + 2).Value = Round(slideM, 2)
+                ws.Cells(r, c + 3).Value = Round(metres - slideM, 2)
+                ws.Cells(r, c + 4).Value = Round(slideH, 2)
+                ws.Cells(r, c + 5).Value = Round(rotH, 2)
+                ws.Cells(r, c + 6).Value = Round(circH, 2)
+                Exit Sub
+            End If
+        End If
+    Next r
+End Sub
+
+' After the day rows change (Day Roll, Refresh): rewrite the active BHA's row.
+Public Sub DDTools_SyncActiveBhaRow()
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    If Not SheetExists(SH_UI) Then Exit Sub
+    Set ws = Worksheets(SH_UI)
+    On Error GoTo Done
+    wasProt = SheetUnprotectForVba(ws)
+    WriteActiveBhaFromDayRows ws
+Done:
+    On Error Resume Next
+    SheetReprotectAfterVba ws, wasProt
 End Sub
 
 ' ================================================================================
@@ -1552,7 +1627,7 @@ Private Function GetBHAList() As Variant
     If col = 0 Then Exit Function
 
     Dim lastRow As Long
-    lastRow = ws.Cells(ws.Rows.Count, col).End(xlUp).Row
+    lastRow = ws.Cells(ws.rows.Count, col).End(xlUp).row
 
     Dim seen As New Collection
     Dim r As Long
@@ -1600,7 +1675,7 @@ Private Function GetFirstBHARow(bhaNum As Long) As Long
     If col = 0 Then Exit Function
 
     Dim lastRow As Long
-    lastRow = ws.Cells(ws.Rows.Count, col).End(xlUp).Row
+    lastRow = ws.Cells(ws.rows.Count, col).End(xlUp).row
 
     Dim r As Long
     For r = 2 To lastRow
@@ -1618,7 +1693,7 @@ Private Function GetBHAMetricValue(ws As Worksheet, bhaCol As Long, metricCol As
     If bhaCol = 0 Or metricCol = 0 Then Exit Function
 
     Dim lastRow As Long
-    lastRow = ws.Cells(ws.Rows.Count, bhaCol).End(xlUp).Row
+    lastRow = ws.Cells(ws.rows.Count, bhaCol).End(xlUp).row
 
     Dim r As Long
     For r = 2 To lastRow
@@ -1719,7 +1794,7 @@ Private Sub PutCell(ws As Worksheet, r As Long, c As Long, val As String, _
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = bold
-        .Font.Size = 9
+        .Font.size = 9
         .Font.name = "Consolas"
         .HorizontalAlignment = align
         .VerticalAlignment = xlVAlignCenter
@@ -1731,7 +1806,7 @@ Private Sub PutNum(ws As Worksheet, r As Long, c As Long, val As Double, bg As L
         .Value = val
         .Interior.Color = bg
         .Font.Color = cBlack()
-        .Font.Size = 9
+        .Font.size = 9
         .Font.name = "Consolas"
         .HorizontalAlignment = xlHAlignRight
         .VerticalAlignment = xlVAlignCenter
@@ -1748,6 +1823,8 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
 
 
 

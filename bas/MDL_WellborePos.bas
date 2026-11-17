@@ -148,9 +148,9 @@ Private Function GeoWindowAtSurvey(ByVal survRow As Long, ByRef geoM As Double) 
     For r = SURV_LAST To SURV_FIRST Step -1
         If r = 14 Then GoTo NextR
         On Error Resume Next
-        fE = UCase$(CStr(ws.Cells(r, 5).Formula & ""))
-        fF = UCase$(CStr(ws.Cells(r, 6).Formula & ""))
-        fd = UCase$(CStr(ws.Cells(r, 4).Formula & ""))
+        fE = UCase$(CStr(ws.Cells(r, 5).formula & ""))
+        fF = UCase$(CStr(ws.Cells(r, 6).formula & ""))
+        fd = UCase$(CStr(ws.Cells(r, 4).formula & ""))
         On Error GoTo 0
         If InStr(1, fE, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR
         If InStr(1, fF, "LOOKUP", vbBinaryCompare) > 0 Then GoTo NextR

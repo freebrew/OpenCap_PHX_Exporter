@@ -13,6 +13,7 @@ Public Sub RTP_printW_Email()
     Dim wsData As Worksheet
     Dim r As Long
     Dim reportPng As String
+    Dim picOk As Boolean
     Dim prevInteractive As Boolean
     Dim prevCursor As XlMousePointer
     Dim tmpDir As String
@@ -37,13 +38,17 @@ Public Sub RTP_printW_Email()
     wsData.Range("B2:F55").Calculate
     On Error GoTo CleanFail
 
-    ' Daily plot PNG: attach a visible file AND inline a CID copy under the
-    ' B2:F55 table. Outlook hides CID-referenced images from the paperclip
-    ' list, so the visible attach must NOT get a Content-ID. No daily PDF.
+    ' Daily plot PNG: corridor band only (wellbore room, vertical section and
+    ' the survey / position / requirement cards). The ops tables are already in
+    ' the B2:F55 HTML table, so they are not repeated in the picture. The PNG is
+    ' attached as a visible file AND inlined (CID) as the last row of that
+    ' table, so table + picture read as one block. Outlook hides CID-referenced
+    ' images from the paperclip list, so the visible attach must NOT get a
+    ' Content-ID. No daily PDF.
     tmpDir = Environ$("TEMP")
     reportPng = ""
     On Error Resume Next
-    reportPng = MDL_CorridorImage.RenderCorridorPng(tmpDir & "\daily_report.png", "all")
+    reportPng = MDL_CorridorImage.RenderCorridorPng(tmpDir & "\daily_report.png", "corridor")
     On Error GoTo CleanFail
 
     Set OutApp = GetOutlookAppSafe()
@@ -74,16 +79,15 @@ Public Sub RTP_printW_Email()
             End If
         Next c
 
-        .HTMLBody = RangeToHTML(wsData.Range("B2:F55"))
-
-        If Len(reportPng) > 0 Then
-            If FileExistsFast(reportPng) Then
-                .Attachments.Add reportPng
-                attachedCount = attachedCount + 1
-                AttachDailyPngInline OutMail, reportPng
-                .HTMLBody = .HTMLBody & DailyPngHtml()
-            End If
+        picOk = False
+        If Len(reportPng) > 0 Then picOk = FileExistsFast(reportPng)
+        If picOk Then
+            .Attachments.Add reportPng
+            attachedCount = attachedCount + 1
+            AttachDailyPngInline OutMail, reportPng, RangePxWidth(wsData.Range("B2:F55")) - 2
         End If
+        ' Picture is the last row of the table (one unit), not a block below it.
+        .HTMLBody = RangeToHTML(wsData.Range("B2:F55"), "", picOk)
     End With
 
     ' I29:I31 are one-shot. Keep Attachement 4 (I32) and 5 (I33) for every email.
@@ -92,7 +96,7 @@ Public Sub RTP_printW_Email()
     ' when a file is picked, but this send-path write did not.
     wasProt = SheetUnprotectForVba(wsData)
     For r = 29 To 31
-        wsData.Range("I" & r).MergeArea.ClearContents
+        ClearAttachCell wsData.Range("I" & r)
     Next r
     SheetReprotectAfterVba wsData, wasProt
     wasProt = False
@@ -156,23 +160,30 @@ Private Function GetOutlookAppSafe() As Object
         Exit Function
     End If
 
-    If MsgBox( _
-        "Outlook is not running." & vbCrLf & vbCrLf & _
-        "Click Yes to start Outlook (may take a few seconds)." & vbCrLf & _
-        "Click No to cancel.", _
-        vbYesNo + vbQuestion, "EMAIL") <> vbYes Then
-        Set GetOutlookAppSafe = Nothing
-        Exit Function
-    End If
-
+    ' Outlook is installed but not running: start it automatically (no prompt).
+    Application.StatusBar = "EMAIL: starting Outlook..."
     On Error Resume Next
     Set app = CreateObject("Outlook.Application")
-    If Err.Number <> 0 Or app Is Nothing Then
-        Err.Clear
-        Set GetOutlookAppSafe = Nothing
-        Exit Function
-    End If
+    If Err.Number <> 0 Then Err.Clear
     On Error GoTo 0
+
+    If app Is Nothing Then
+        ' CreateObject can fail while Outlook is still loading its profile:
+        ' launch it, then wait up to ~30 s for it to register.
+        Dim wsh As Object, t As Single
+        On Error Resume Next
+        Set wsh = CreateObject("WScript.Shell")
+        wsh.Run "outlook.exe", 6, False
+        If Err.Number <> 0 Then Err.Clear
+        t = Timer
+        Do While app Is Nothing And Abs(Timer - t) < 30!
+            DoEvents
+            Set app = GetObject(, "Outlook.Application")
+            If Err.Number <> 0 Then Err.Clear
+        Loop
+        On Error GoTo 0
+    End If
+    Application.StatusBar = False
 
     Set GetOutlookAppSafe = app
 End Function
@@ -191,7 +202,8 @@ End Function
 ' Second copy of the PNG, Content-ID only. Outlook hides this one from the
 ' attachment well because the HTML body references cid:daily_report.png.
 ' The visible paperclip file is the plain .Attachments.Add above.
-Private Sub AttachDailyPngInline(ByVal mail As Object, ByVal pngPath As String)
+Private Sub AttachDailyPngInline(ByVal mail As Object, ByVal pngPath As String, _
+                                 ByVal widthPx As Long)
     Dim att As Object
     Dim inlinePath As String
     Dim fso As Object
@@ -202,7 +214,15 @@ Private Sub AttachDailyPngInline(ByVal mail As Object, ByVal pngPath As String)
     If fso.FileExists(inlinePath) Then fso.DeleteFile inlinePath, True
     fso.CopyFile pngPath, inlinePath, True
     On Error GoTo 0
-    If Not FileExistsFast(inlinePath) Then inlinePath = pngPath
+    If Not FileExistsFast(inlinePath) Then
+        inlinePath = pngPath
+    Else
+        ' The inline copy is resampled (anti-aliased) to the width it is shown
+        ' at, so Outlook never rescales it. The attached file stays full size.
+        On Error Resume Next
+        MDL_CorridorImage.PngDownscale inlinePath, widthPx
+        On Error GoTo 0
+    End If
 
     Set att = mail.Attachments.Add(inlinePath)
     On Error Resume Next
@@ -213,10 +233,20 @@ Private Sub AttachDailyPngInline(ByVal mail As Object, ByVal pngPath As String)
     On Error GoTo 0
 End Sub
 
-Private Function DailyPngHtml() As String
-    DailyPngHtml = "<div style='margin-top:14px;background:#ffffff;'>" & _
-        "<img src='cid:daily_report.png' width='1023' alt='Daily wellbore plot' " & _
-        "style='display:block;max-width:100%;height:auto;border:0;'></div>"
+' Table width in CSS pixels (same sum RangeToHTML uses).
+Private Function RangePxWidth(ByVal rng As Range) As Long
+    Dim c As Long
+    For c = 1 To rng.Columns.Count
+        RangePxWidth = RangePxWidth + ColWidthToPx(rng.Columns(c).ColumnWidth)
+    Next c
+End Function
+
+' The picture sized to the table's inner width so it fills the last row.
+Private Function DailyPngHtml(ByVal widthPx As Long) As String
+    If widthPx < 100 Then widthPx = 100
+    DailyPngHtml = "<img src='cid:daily_report.png' width='" & CStr(widthPx) & _
+        "' alt='Daily wellbore plot' " & _
+        "style='display:block;width:" & CStr(widthPx) & "px;max-width:100%;height:auto;border:0;'>"
 End Function
 
 Private Function FileExistsFast(ByVal filePath As String) As Boolean
@@ -238,7 +268,8 @@ Private Function FileExistsFast(ByVal filePath As String) As Boolean
     On Error GoTo 0
 End Function
 
-Public Function RangeToHTML(rng As Range, Optional TempFile As String = "") As String
+Public Function RangeToHTML(rng As Range, Optional TempFile As String = "", _
+                            Optional ByVal withPicRow As Boolean = False) As String
     ' Build HTML that preserves Excel column widths / row heights / light styling
     ' so the Outlook body matches the workbook aspect ratio.
     Dim r As Long
@@ -246,7 +277,7 @@ Public Function RangeToHTML(rng As Range, Optional TempFile As String = "") As S
     Dim nRows As Long
     Dim nCols As Long
     Dim html As String
-    Dim cellText As String
+    Dim CellText As String
     Dim cell As Range
     Dim bg As Long
     Dim fg As Long
@@ -263,7 +294,7 @@ Public Function RangeToHTML(rng As Range, Optional TempFile As String = "") As S
     Dim mergeRows As Long
     Dim style As String
 
-    nRows = rng.Rows.Count
+    nRows = rng.rows.Count
     nCols = rng.Columns.Count
     ReDim colPx(1 To nCols)
 
@@ -298,7 +329,7 @@ Public Function RangeToHTML(rng As Range, Optional TempFile As String = "") As S
     html = html & "</colgroup>"
 
     For r = 1 To nRows
-        rowPx = RowHeightToPx(rng.Rows(r).rowHeight)
+        rowPx = RowHeightToPx(rng.rows(r).rowHeight)
         html = html & "<tr style='height:" & CStr(rowPx) & "px;'>"
 
         For c = 1 To nCols
@@ -312,9 +343,9 @@ Public Function RangeToHTML(rng As Range, Optional TempFile As String = "") As S
             End If
 
             If Not skipCell Then
-                cellText = Trim$(CStr(cell.text))
-                cellText = HtmlEncode(cellText)
-                If Len(cellText) = 0 Then cellText = "&nbsp;"
+                CellText = Trim$(CStr(cell.text))
+                CellText = HtmlEncode(CellText)
+                If Len(CellText) = 0 Then CellText = "&nbsp;"
 
                 bgCss = "background-color:#ffffff;"
                 fgCss = "color:#000000;"
@@ -363,18 +394,25 @@ Public Function RangeToHTML(rng As Range, Optional TempFile As String = "") As S
 
                 If cell.MergeCells Then
                     mergeCols = cell.MergeArea.Columns.Count
-                    mergeRows = cell.MergeArea.Rows.Count
+                    mergeRows = cell.MergeArea.rows.Count
                     html = html & "<td colspan='" & mergeCols & "' rowspan='" & mergeRows & _
                            "' bgcolor='#" & mid$(bgCss, InStr(bgCss, "#") + 1, 6) & "' style='" & style & "'>" & _
-                           "<font color='#000000'>" & cellText & "</font></td>"
+                           "<font color='#000000'>" & CellText & "</font></td>"
                 Else
                     html = html & "<td bgcolor='#" & mid$(bgCss, InStr(bgCss, "#") + 1, 6) & _
-                           "' style='" & style & "'><font color='#000000'>" & cellText & "</font></td>"
+                           "' style='" & style & "'><font color='#000000'>" & CellText & "</font></td>"
                 End If
             End If
         Next c
         html = html & "</tr>"
     Next r
+
+    ' Daily picture = last row, full table width, same black frame as the cells.
+    If withPicRow Then
+        html = html & "<tr><td colspan='" & CStr(nCols) & "' bgcolor='#262626' " & _
+               "style='padding:0;background-color:#262626;border:1px solid #000000;'>" & _
+               DailyPngHtml(totalPx - 2) & "</td></tr>"
+    End If
 
     html = html & "</table></body></html>"
     RangeToHTML = html
@@ -410,7 +448,7 @@ Private Function NormalizeBgColor(ByVal oleColor As Long) As String
     ElseIf r > 245 And g > 245 And b > 245 Then
         NormalizeBgColor = "FFFFFF"
     Else
-        NormalizeBgColor = right$("0" & Hex$(r), 2) & right$("0" & Hex$(g), 2) & right$("0" & Hex$(b), 2)
+        NormalizeBgColor = Right$("0" & Hex$(r), 2) & Right$("0" & Hex$(g), 2) & Right$("0" & Hex$(b), 2)
     End If
 End Function
 
@@ -427,7 +465,7 @@ Private Function NormalizeFgColor(ByVal oleColor As Long, ByVal bgCss As String)
     ElseIf lum < 30 Then
         NormalizeFgColor = "000000"
     Else
-        NormalizeFgColor = right$("0" & Hex$(r), 2) & right$("0" & Hex$(g), 2) & right$("0" & Hex$(b), 2)
+        NormalizeFgColor = Right$("0" & Hex$(r), 2) & Right$("0" & Hex$(g), 2) & Right$("0" & Hex$(b), 2)
     End If
 End Function
 
@@ -491,33 +529,54 @@ NextCc:
     MailCcFromSheet = acc
 End Function
 
+' The visible filename decides what is attached. The hidden note / hyperlink
+' only supply the full path for that same filename, so a blank cell (or a
+' stale note left behind after the text was cleared) attaches nothing.
 Public Function StoredAttachPath(ByVal cell As Range) As String
+    Dim shown As String
     Dim s As String
     StoredAttachPath = ""
     If cell Is Nothing Then Exit Function
-    On Error Resume Next
-    If cell.Comment Is Nothing Then
-        s = ""
-    Else
-        s = Trim$(cell.Comment.text)
+    Set cell = cell.MergeArea.Cells(1, 1)
+    shown = Trim$(CStr(cell.Value2 & ""))
+    If Len(shown) = 0 Then Exit Function
+    If InStr(shown, "\") > 0 Or InStr(shown, "/") > 0 Then
+        StoredAttachPath = shown
+        Exit Function
     End If
+
+    On Error Resume Next
+    If Not cell.Comment Is Nothing Then s = Trim$(cell.Comment.text)
     On Error GoTo 0
-    If Len(s) > 0 Then
+    If PathLeafIs(s, shown) Then
         StoredAttachPath = s
         Exit Function
     End If
+
+    s = ""
     On Error Resume Next
-    If cell.Hyperlinks.Count > 0 Then
-        s = Trim$(cell.Hyperlinks(1).Address)
-    End If
+    If cell.Hyperlinks.Count > 0 Then s = Trim$(cell.Hyperlinks(1).Address)
     On Error GoTo 0
-    If Len(s) > 0 Then
-        StoredAttachPath = s
-        Exit Function
-    End If
-    s = Trim$(CStr(cell.Value2 & ""))
-    If InStr(s, "\") > 0 Or InStr(s, "/") > 0 Then StoredAttachPath = s
+    If PathLeafIs(s, shown) Then StoredAttachPath = s
 End Function
+
+Private Function PathLeafIs(ByVal fullPath As String, ByVal leaf As String) As Boolean
+    Dim p As Long
+    PathLeafIs = False
+    If Len(fullPath) = 0 Then Exit Function
+    p = InStrRev(Replace(fullPath, "/", "\"), "\")
+    PathLeafIs = (StrComp(mid$(fullPath, p + 1), leaf, vbTextCompare) = 0)
+End Function
+
+Private Sub ClearAttachCell(ByVal cell As Range)
+    On Error Resume Next
+    With cell.MergeArea
+        .ClearContents
+        .ClearComments
+        .ClearHyperlinks
+    End With
+    On Error GoTo 0
+End Sub
 
 Public Sub StoreAttachPath(ByVal cell As Range, ByVal fullPath As String)
     Dim leaf As String
@@ -559,13 +618,13 @@ Public Sub StoreAttachPath(ByVal cell As Range, ByVal fullPath As String)
         On Error GoTo 0
     End If
 
-    If IsKeepAttachRow(dest.Row) Then
+    If IsKeepAttachRow(dest.row) Then
         dest.MergeArea.Interior.Color = KeepAttachFill()
     Else
         dest.MergeArea.Interior.Color = RGB(255, 255, 255)
     End If
     dest.Font.Color = RGB(0, 0, 0)
-    dest.Font.Size = 8
+    dest.Font.size = 8
     dest.Font.name = "Calibri"
     dest.HorizontalAlignment = xlLeft
 
@@ -647,7 +706,7 @@ Public Sub ApplyDataMailPanel()
 
     For r = 29 To 33
         ws.Cells(r, "H").Value = "Attach " & CStr(r - 28)
-        ws.Cells(r, "H").Font.Size = 8
+        ws.Cells(r, "H").Font.size = 8
         ws.Cells(r, "H").Font.bold = True
         ws.Cells(r, "H").Interior.Color = hdr
         ws.Cells(r, "H").Font.Color = RGB(0, 0, 0)
@@ -663,10 +722,10 @@ Public Sub ApplyDataMailPanel()
             ws.Cells(r, "L").Interior.Color = body
             ws.Cells(r, "M").Interior.Color = body
         End If
-        ws.Cells(r, "K").Font.Size = 8
+        ws.Cells(r, "K").Font.size = 8
         ws.Cells(r, "K").Font.bold = True
         ws.Cells(r, "K").HorizontalAlignment = xlCenter
-        ws.Cells(r, "L").Font.Size = 8
+        ws.Cells(r, "L").Font.size = 8
         ws.Cells(r, "L").HorizontalAlignment = xlLeft
         StoreAttachPath ws.Cells(r, "I"), saved(r)
         On Error Resume Next
@@ -696,7 +755,7 @@ Private Sub StyleMailHeader(ByVal rng As Range, ByVal fill As Long)
     With rng
         .Interior.Color = fill
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
         .Font.Color = RGB(0, 0, 0)
         .HorizontalAlignment = xlCenter
     End With
@@ -725,6 +784,12 @@ Private Sub SeedMailAddressesIfEmpty(ByVal ws As Worksheet)
 NextSeed:
     Next i
 End Sub
+
+
+
+
+
+
 
 
 

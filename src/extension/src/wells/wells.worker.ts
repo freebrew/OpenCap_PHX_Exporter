@@ -27,7 +27,7 @@ function handle(message: WellsIn): void {
       post({ type: "hover", hit: gpu.hover(message.x, message.y) });
       break;
     case "options":
-      gpu.setOptions(message.drilled, message.allOffsets);
+      gpu.setOptions(message.drilled, message.shown);
       break;
     case "reset":
       gpu.reset();

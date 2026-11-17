@@ -35,6 +35,26 @@ describe("hover", () => {
     expect(hit?.measuredM).toBeCloseTo(0);
   });
 
+  it("does not hover the gap where a path has a break", () => {
+    const broken: PickPath = {
+      kind: "offset",
+      name: "Broken Offset",
+      points: [point(0, 20, 0, 0, 0, 20, 1.2), point(100, 20, 0, 100, 10, 20, 1.4)],
+      breaks: [1],
+    };
+    expect(pickHover([broken], { x: 50, y: 20 }, flat, 12)).toBeNull();
+    expect(pickHover([broken], { x: 98, y: 20 }, flat, 12)).toMatchObject({ name: "Broken Offset", refMd: 100 });
+  });
+
+  it("lands on the tightest SF where stations share one point", () => {
+    const shared: PickPath = {
+      kind: "offset",
+      name: "Shared Offset",
+      points: [point(10, 20, 0, 300, 0, 20, 4.5), point(10, 20, 0, 100, 0, 20, 1.3)],
+    };
+    expect(pickHover([shared], { x: 10, y: 20 }, flat, 8)).toMatchObject({ refMd: 100, sf: 1.3 });
+  });
+
   it("measures the closest point of a straight run", () => {
     const closest = closestOnPath(plan.points, 40, 15, 0);
     expect(closest?.distance).toBeCloseTo(15);

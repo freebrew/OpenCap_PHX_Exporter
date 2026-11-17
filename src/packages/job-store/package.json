@@ -1,0 +1,20 @@
+{
+  "name": "@phx/job-store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "smoke:folder": "tsx test/folder-smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "fake-indexeddb": "6.2.7",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

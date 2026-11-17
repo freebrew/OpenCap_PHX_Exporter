@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OpenCap Data Exporter",
   "short_name": "OpenCap",
-  "version": "3.2.7",
+  "version": "3.2.17",
   "description": "Export FieldCap job, crew, BHA, inventory, and daily slide/rotate metres and slide hours to CSV using your login.",
   "author": "PHX OpenCap",
   "homepage_url": "https://freebrew.github.io/OpenCap_PHX_Exporter/",
@@ -12,7 +12,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "webRequest"
+    "webRequest",
+    "alarms"
   ],
   "host_permissions": [
     "https://fieldcap-cdn.phxtech.com/*",

@@ -15,9 +15,16 @@ Private Const MAX_JOINT_M As Double = 40#
 ' Excel cancels CutCopyMode (and empties the clipboard) as soon as a UserForm
 ' takes focus. Snapshot the text while the sheet still owns the copy, then
 ' reuse it when they click Paste. Selection stays even after the ants vanish.
+Private m_fastDepth As Long
+Private m_prevCalc As XlCalculation
+Private m_prevEv As Boolean
+Private m_prevScr As Boolean
 Private mClipCache As String
 Private mWatchOn As Boolean
 Private mWatchWhen As Date
+
+' Shown on the form after a CSV import. The form clears it on open.
+Public gPipeTallyNote As String
 
 ' ---------------------------------------------------------------------------------
 ' Sheet resolution
@@ -68,9 +75,8 @@ Public Sub ShowPipeTallyForm()
     End If
 
     On Error GoTo Fail
-    CachePipeTallyClipboard
+    ImportPipeTallyCsv
     frmPipeTally.Show vbModeless
-    StartPipeTallyClipWatch
     Exit Sub
 Fail:
     Dim msg As String
@@ -92,6 +98,217 @@ Public Sub ClosePipeTallyFormIfOpen()
     Unload frmPipeTally
     On Error GoTo 0
 End Sub
+
+' File chooser replaces Paste from clipboard. Column G (total length) is
+' matched to the last Slidesheet bit depth (column D). Lengths start on the
+' next row, column F, and run to the bottom of the file.
+Public Sub ImportPipeTallyCsv()
+    Dim picked As Variant
+    Dim lengths As Variant
+    Dim errMsg As String
+
+    ' Start in the folder of this workbook, where the rig export is saved.
+    ' Restore the caller's folder afterward.
+    Dim prevDir As String
+    Dim prevDrive As String
+    prevDir = CurDir$
+    prevDrive = Left$(prevDir, 1)
+    On Error Resume Next
+    ChDrive Left$(ThisWorkbook.path, 1)
+    ChDir ThisWorkbook.path
+    On Error GoTo 0
+    picked = Application.GetOpenFilename("Pipe tally CSV (*.csv),*.csv", , "Select pipe tally CSV")
+    On Error Resume Next
+    ChDrive prevDrive
+    ChDir prevDir
+    On Error GoTo 0
+    If VarType(picked) = vbBoolean Then
+        gPipeTallyNote = ""
+        Exit Sub
+    End If
+    gPipeTallyNote = ""
+    lengths = LoadPipeLengthsFromCsv(CStr(picked), errMsg)
+    If Len(errMsg) > 0 Then
+        gPipeTallyNote = errMsg
+        MsgBox errMsg, vbExclamation, "Pipe Tally Calculator"
+        Exit Sub
+    End If
+    If IsEmpty(lengths) Then Exit Sub
+    PipeTallyWriteLengths lengths
+    If Len(gPipeTallyNote) > 0 Then
+        gPipeTallyNote = "Imported " & CStr(UBound(lengths)) & " pipe length(s). " & gPipeTallyNote
+    Else
+        gPipeTallyNote = "Imported " & CStr(UBound(lengths)) & " pipe length(s). Set stands and split, then add."
+    End If
+End Sub
+
+' Whole file in, split on CRLF, CR, or LF. Line Input only breaks on CR, so an
+' export with Unix line endings came back as one giant line and column G never
+' parsed. Shared read so the file can stay open in Excel.
+Private Function ReadCsvLines(ByVal path As String, ByRef errMsg As String) As Variant
+    Dim fn As Long
+    Dim buf As String
+    Dim size As Long
+
+    ReadCsvLines = Empty
+    fn = FreeFile
+    On Error GoTo BadFile
+    Open path For Binary Access Read Shared As #fn
+    size = LOF(fn)
+    If size <= 0 Then
+        Close #fn
+        errMsg = "The file is empty: " & path
+        Exit Function
+    End If
+    buf = Space$(size)
+    Get #fn, 1, buf
+    Close #fn
+    On Error GoTo 0
+
+    buf = Replace(buf, vbCrLf, vbLf)
+    buf = Replace(buf, vbCr, vbLf)
+    ReadCsvLines = Split(buf, vbLf)
+    Exit Function
+
+BadFile:
+    On Error Resume Next
+    Close #fn
+    errMsg = "Could not read """ & path & """." & vbCrLf & Err.Description
+End Function
+
+Public Function LoadPipeLengthsFromCsv(ByVal path As String, ByRef errMsg As String) As Variant
+    Dim bitMd As Double
+    Dim rows As Variant
+    Dim i As Long
+    Dim gTxt As String
+    Dim fTxt As String
+    Dim gVal As Double
+    Dim fVal As Double
+    Dim bestRow As Long
+    Dim bestG As Double
+    Dim matched As Boolean
+    Dim tmp() As Double
+    Dim n As Long
+    Dim capped As Boolean
+
+    LoadPipeLengthsFromCsv = Empty
+    errMsg = ""
+    If Not LastSlidesheetBitMd(bitMd) Then
+        errMsg = "No bit depth in Slidesheet column D."
+        Exit Function
+    End If
+
+    rows = ReadCsvLines(path, errMsg)
+    If Len(errMsg) > 0 Then Exit Function
+    If IsEmpty(rows) Then
+        errMsg = "Could not read """ & path & """."
+        Exit Function
+    End If
+
+    ' Column G (totalLength): the row that matches the bit depth, or the
+    ' closest total at or below it. Row 0 is the header.
+    bestRow = -1
+    bestG = 0#
+    matched = False
+    For i = LBound(rows) To UBound(rows)
+        gTxt = CsvField(CStr(rows(i)), 7)
+        If IsNumeric(gTxt) And Len(gTxt) > 0 Then
+            gVal = val(gTxt)
+            If Abs(gVal - bitMd) <= 0.05 Then
+                bestRow = i
+                bestG = gVal
+                matched = True
+                Exit For
+            End If
+            If gVal <= bitMd + 0.001 Then
+                If bestRow < 0 Or gVal > bestG Then
+                    bestRow = i
+                    bestG = gVal
+                End If
+            End If
+        End If
+    Next i
+
+    If bestRow < 0 Then
+        errMsg = "No tally total in column G is at or below the bit depth " & Format$(bitMd, "0.00") & " m."
+        Exit Function
+    End If
+
+    ' G only runs upward. If the closest total is more than two joints under
+    ' the bit, the file stops before the bit: it is an older export.
+    If Not matched And (bitMd - bestG) > 20# Then
+        errMsg = "This file only reaches " & Format$(bestG, "0.00") & " m in column G, and the bit is at " & _
+                 Format$(bitMd, "0.00") & " m." & vbCrLf & "Pick a newer pipe tally export."
+        Exit Function
+    End If
+
+    ' One row down from the match, column F (length), to the end of the file.
+    ReDim tmp(1 To (PT_LAST - PT_FIRST + 1))
+    n = 0
+    For i = bestRow + 1 To UBound(rows)
+        fTxt = CsvField(CStr(rows(i)), 6)
+        If IsNumeric(fTxt) And Len(fTxt) > 0 Then
+            fVal = val(fTxt)
+            If fVal >= MIN_JOINT_M And fVal <= MAX_JOINT_M Then
+                If n >= (PT_LAST - PT_FIRST + 1) Then
+                    capped = True
+                    Exit For
+                End If
+                n = n + 1
+                tmp(n) = fVal
+            End If
+        End If
+    Next i
+
+    If n = 0 Then
+        errMsg = "Bit depth " & Format$(bitMd, "0.00") & " m matched tally total " & Format$(bestG, "0.00") & _
+                 " m. No single pipe lengths in column F below that row."
+        Exit Function
+    End If
+    ReDim Preserve tmp(1 To n)
+    LoadPipeLengthsFromCsv = tmp
+    If Not matched Then
+        gPipeTallyNote = "Closest tally total at or below the bit is " & Format$(bestG, "0.00") & " m (bit " & Format$(bitMd, "0.00") & " m)."
+    End If
+    If capped Then
+        gPipeTallyNote = gPipeTallyNote & " Stopped at " & CStr(n) & " joints (the form holds that many)."
+    End If
+End Function
+
+Private Function LastSlidesheetBitMd(ByRef bitMd As Double) As Boolean
+    Dim ss As Worksheet
+    Dim r As Long
+    Dim v As Variant
+    Dim col As Variant
+    LastSlidesheetBitMd = False
+    Set ss = ThisWorkbook.Worksheets(SS_SHEET)
+    col = ss.Range("D12:D505").Value2
+    For r = 494 To 1 Step -1
+        v = col(r, 1)
+        If isError(v) Then GoTo NextD
+        If IsNumeric(v) Then
+            If CDbl(v) > 0# Then
+                bitMd = CDbl(v)
+                LastSlidesheetBitMd = True
+                Exit Function
+            End If
+        End If
+NextD:
+    Next r
+End Function
+
+Private Function CsvField(ByVal line As String, ByVal index1 As Long) As String
+    Dim parts() As String
+    Dim s As String
+    CsvField = ""
+    If Len(line) = 0 Then Exit Function
+    parts = Split(line, ",")
+    If index1 < 1 Or index1 - 1 > UBound(parts) Then Exit Function
+    s = Trim$(parts(index1 - 1))
+    If Left$(s, 1) = """" Then s = mid$(s, 2)
+    If Right$(s, 1) = """" And Len(s) > 0 Then s = Left$(s, Len(s) - 1)
+    CsvField = s
+End Function
 
 Public Sub CachePipeTallyClipboard()
     Dim t As String
@@ -202,7 +419,7 @@ Public Sub EnsurePipeTallyFormButton()
     shp.Placement = xlMoveAndSize
     On Error Resume Next
     btn.Font.bold = True
-    btn.Font.Size = 10
+    btn.Font.size = 10
     On Error GoTo 0
 End Sub
 
@@ -230,32 +447,68 @@ Public Sub PipeTallyGetSettings(ByRef stands As Variant, ByRef splitLen As Varia
     splitLen = pt.Range("D11").Value2
 End Sub
 
+' Each cell write on this tab fires a recalc and the sheet's events. Writes
+' go through FastBegin / FastEnd so a batch recalculates once, at the end.
+Private Sub FastBegin()
+    If m_fastDepth = 0 Then
+        m_prevCalc = Application.Calculation
+        m_prevEv = Application.EnableEvents
+        m_prevScr = Application.ScreenUpdating
+        Application.ScreenUpdating = False
+        Application.EnableEvents = False
+        Application.Calculation = xlCalculationManual
+    End If
+    m_fastDepth = m_fastDepth + 1
+End Sub
+
+Private Sub FastEnd()
+    If m_fastDepth = 0 Then Exit Sub
+    m_fastDepth = m_fastDepth - 1
+    If m_fastDepth = 0 Then
+        Application.Calculation = m_prevCalc
+        Application.EnableEvents = m_prevEv
+        Application.ScreenUpdating = m_prevScr
+    End If
+End Sub
+
 Public Sub PipeTallySetSettings(ByVal stands As Variant, ByVal splitLen As Variant)
     Dim pt As Worksheet
+    Dim errNo As Long
+    Dim errTxt As String
     Set pt = TallySheet()
     If pt Is Nothing Then Exit Sub
+    FastBegin
+    On Error Resume Next
     pt.Range("C11").Value2 = stands
     If Len(Trim$(CStr(splitLen & ""))) = 0 Then
         pt.Range("D11").ClearContents
     Else
         pt.Range("D11").Value2 = splitLen
     End If
+    errNo = Err.Number: errTxt = Err.Description
+    On Error GoTo 0
+    FastEnd
+    If errNo <> 0 Then Err.Raise errNo, , errTxt
 End Sub
 
 Public Function PipeTallyReadLengths() As Variant
     Dim pt As Worksheet
     Dim r As Long, n As Long, v As Variant
+    Dim vals As Variant
     Dim tmp() As Double
     Set pt = TallySheet()
     If pt Is Nothing Then PipeTallyReadLengths = Empty: Exit Function
+    vals = pt.Range("F" & PT_FIRST & ":F" & PT_LAST).Value2
     ReDim tmp(1 To (PT_LAST - PT_FIRST + 1))
     n = 0
-    For r = PT_FIRST To PT_LAST
-        v = pt.Cells(r, "F").Value2
-        If IsNumeric(v) Then
-            If CDbl(v) > 0# Then
-                n = n + 1
-                tmp(n) = CDbl(v)
+    For r = 1 To UBound(vals, 1)
+        v = vals(r, 1)
+        If Not isError(v) Then
+            If IsNumeric(v) And Not IsEmpty(v) Then
+                If CDbl(v) > 0# Then
+                    n = n + 1
+                    tmp(n) = CDbl(v)
+                End If
             End If
         End If
     Next r
@@ -269,34 +522,51 @@ End Function
 
 Public Sub PipeTallyWriteLengths(ByRef lengths As Variant)
     Dim pt As Worksheet
-    Dim r As Long, i As Long, n As Long
+    Dim i As Long, n As Long, cap As Long
+    Dim arr() As Variant
+    Dim errNo As Long
+    Dim errTxt As String
     Set pt = TallySheet()
     If pt Is Nothing Then Exit Sub
+    cap = PT_LAST - PT_FIRST + 1
+    FastBegin
+    On Error Resume Next
     pt.Range("F" & PT_FIRST & ":F" & PT_LAST).ClearContents
-    If IsEmpty(lengths) Then Exit Sub
-    n = UBound(lengths)
-    i = 1
-    For r = PT_FIRST To PT_LAST
-        If i > n Then Exit For
-        pt.Cells(r, "F").Value2 = CDbl(lengths(i))
-        i = i + 1
-    Next r
+    If Not IsEmpty(lengths) Then
+        n = UBound(lengths)
+        If n > cap Then n = cap
+        If n > 0 Then
+            ReDim arr(1 To n, 1 To 1)
+            For i = 1 To n
+                arr(i, 1) = CDbl(lengths(i))
+            Next i
+            ' One write for the whole column, not one per joint.
+            pt.Range("F" & PT_FIRST).Resize(n, 1).Value2 = arr
+        End If
+    End If
+    errNo = Err.Number: errTxt = Err.Description
+    On Error GoTo 0
+    FastEnd
+    If errNo <> 0 Then Err.Raise errNo, , errTxt
 End Sub
 
 Public Function PipeTallyReadBitDepths() As Variant
     Dim pt As Worksheet
-    Dim r As Long, n As Long, v As Variant
+    Dim r As Long, n As Long
+    Dim vals As Variant
     Dim tmp() As Double
     Set pt = TallySheet()
     If pt Is Nothing Then PipeTallyReadBitDepths = Empty: Exit Function
-    Application.Calculate
+    ' Only this tab's depths are needed. A workbook-wide Calculate here made
+    ' every form action wait on the Slidesheet / Data / Cont DI chain.
+    pt.Calculate
+    vals = pt.Range("H" & PT_FIRST & ":H" & PT_LAST).Value2
     ReDim tmp(1 To (PT_LAST - PT_FIRST + 1))
     n = 0
-    For r = PT_FIRST To PT_LAST
-        v = pt.Cells(r, "H").Value2
-        If VarType(v) = vbDouble Then
+    For r = 1 To UBound(vals, 1)
+        If VarType(vals(r, 1)) = vbDouble Then
             n = n + 1
-            tmp(n) = CDbl(v)
+            tmp(n) = CDbl(vals(r, 1))
         End If
     Next r
     If n = 0 Then
@@ -311,7 +581,11 @@ Public Sub ClearPipeTallyInputs()
     Dim pt As Worksheet
     Set pt = TallySheet()
     If pt Is Nothing Then Exit Sub
+    FastBegin
+    On Error Resume Next
     pt.Range("F" & PT_FIRST & ":F" & PT_LAST).ClearContents
+    On Error GoTo 0
+    FastEnd
 End Sub
 
 ' Parse clipboard / pasted text into a single column of drill-pipe joint lengths.
@@ -481,19 +755,39 @@ Public Sub AppendTallyBitDepths()
     nAdded = 0
     truncated = False
 
-    ScreenBeginBusy "Pipe tally: adding bit depths..."
-    For i = 1 To nVals
-        If destRow > 505 Then
-            truncated = True
-            Exit For
-        End If
-        ss.Cells(destRow, "D").Value2 = depths(i)
-        destRow = destRow + 1
-        nAdded = nAdded + 1
-    Next i
+    ' One bulk write of D, then one recalc / comment / gauge pass. A cell-by-cell
+    ' write fired the Slidesheet's full calculation on every depth.
+    nAdded = nVals
+    If destRow + nAdded - 1 > 505 Then
+        nAdded = 505 - destRow + 1
+        If nAdded < 0 Then nAdded = 0
+        truncated = True
+    End If
 
-    pt.Range("F7:F315").ClearContents
-    RefreshSlideComments
+    ScreenBeginBusy "Pipe tally: adding bit depths..."
+    If nAdded > 0 Then
+        Dim outArr() As Variant
+        Dim bulk As Range
+        ReDim outArr(1 To nAdded, 1 To 1)
+        For i = 1 To nAdded
+            outArr(i, 1) = depths(i)
+        Next i
+        Set bulk = ss.Range(ss.Cells(destRow, "D"), ss.Cells(destRow + nAdded - 1, "D"))
+        FastBegin
+        bulk.Value2 = outArr
+        pt.Range("F7:F315").ClearContents
+        FastEnd
+        ' The sheet's own Change handler was off for the write; do its work once.
+        On Error Resume Next
+        ScreenCalcStaggered
+        RefreshRotateMetres bulk
+        RefreshSlideComments
+        MDL_PlanGauge.RenderPlanGauge
+        RefreshNewestSurveyIfMoved
+        On Error GoTo Fail
+    Else
+        pt.Range("F7:F315").ClearContents
+    End If
     ScreenEndBusy
 
     If truncated Then
@@ -544,7 +838,7 @@ Public Sub EnsureTallyAppendButton()
     shp.Placement = xlMoveAndSize
     On Error Resume Next
     btn.Font.bold = True
-    btn.Font.Size = 10
+    btn.Font.size = 10
     On Error GoTo 0
 End Sub
 
@@ -582,6 +876,10 @@ Private Function LastBitDepthRow(ss As Worksheet) As Long
     Next r
     LastBitDepthRow = last
 End Function
+
+
+
+
 
 
 

@@ -1,5 +1,6 @@
 import { checkAcReport } from "./acCheck";
-import { AC_DETAIL_SHEET, parseAcDetail, type AcDetailStation } from "./acDetail";
+import { AC_DETAIL_SHEET, parseAcDetail, wellsMatch, type AcDetailStation } from "./acDetail";
+import { compareHeaders, parseAcHeader, parseAcSites, readDatum, writeReportHeader } from "./acHeader";
 import { unreadablePdfText } from "./glyphText";
 import { cleanNum, SETUP_SHEET, showImportPath, SURVEY_SHEET } from "./planImport";
 import { cellText, numeric, rgb, type CellArea, type SheetBook } from "./sheetBook";
@@ -298,7 +299,7 @@ export function readAcHits(book: SheetBook): AcHit[] {
 
 function writeAcDetail(book: SheetBook, stations: AcDetailStation[]): void {
   book.resetSheet(AC_DETAIL_SHEET);
-  ["Well", "Ref MD", "Off MD", "Off TVD", "N", "E", "C2C", "SF", "Warning"].forEach((head, i) => {
+  ["Well", "Ref MD", "Off MD", "Off TVD", "N", "E", "C2C", "SF", "Warning", "Site"].forEach((head, i) => {
     book.setValue(AC_DETAIL_SHEET, 2, i + 1, head);
   });
   stations.forEach((station, i) => {
@@ -306,6 +307,7 @@ function writeAcDetail(book: SheetBook, stations: AcDetailStation[]): void {
     const values: Array<string | number | null> = [
       station.well, station.refMd, station.offMd, station.offTvd, station.n, station.e, station.c2c, station.sf,
       station.warn === "" ? null : station.warn,
+      station.site === "" ? null : station.site,
     ];
     values.forEach((value, col) => book.setValue(AC_DETAIL_SHEET, row, col + 1, value));
   });
@@ -382,14 +384,25 @@ export function importAntiCollision(book: SheetBook, path: string, text: string,
     book.setValue(AC_SHEET, i + 3, 3, hit.between);
     book.setValue(AC_SHEET, i + 3, 4, hit.sf);
   });
-  const stations = parseAcDetail(text);
+  const header = parseAcHeader(text);
+  writeReportHeader(book, header);
+  const sites = parseAcSites(text);
+  const stations = parseAcDetail(text).map((station) => ({
+    ...station,
+    site: sites.find((item) => wellsMatch(item.well, station.well))?.site ?? "",
+  }));
   writeAcDetail(book, stations);
   buildAcTable(book, hits);
   const overflow = writeAcConcerns(book, hits, quiet);
   const shown = concernWells(hits, acConcernCapacity(book));
-  const check = checkAcReport(shown, stations, readPlanPoints(book));
-  book.setValue(AC_SHEET, 1, AC_CHECK_COL, check.badge);
-  const note = hits.length === 0 && !quiet ? AC_NO_WELLS : overflow;
+  const frame = checkAcReport(shown, stations, readPlanPoints(book));
+  const plan = readDatum(book);
+  const headerCheck = compareHeaders(header, plan.planStored ? plan.plan : null);
+  // A report for a different well, datum or north is stored, and the sentence replaces the frame badge.
+  // With no plan identity stored, the frame proof decides on its own.
+  const badge = headerCheck.ok ? frame.badge : headerCheck.verdict;
+  book.setValue(AC_SHEET, 1, AC_CHECK_COL, badge);
+  const note = headerCheck.ok ? (hits.length === 0 && !quiet ? AC_NO_WELLS : overflow) : headerCheck.verdict;
   showImportPath(book, acRowAnchor, AC_SHEET);
   const concerns = hits.filter((hit) => hit.sf < AC_SF_YELLOW).length;
   return {
@@ -397,6 +410,6 @@ export function importAntiCollision(book: SheetBook, path: string, text: string,
     ...(note ? { note } : {}),
     status: `AC import complete: ${hits.length} offset well(s), ${concerns} with SF < ${AC_SF_YELLOW.toFixed(1)}.`,
     hits,
-    badge: check.badge,
+    badge,
   };
 }

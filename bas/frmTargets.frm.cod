@@ -1,0 +1,206 @@
+Option Explicit
+
+' Named plan targets (KOP, BUILD, HEEL, ...). Edits are saved on the plan
+' section sheet and then written back to Slidesheet T2:Y5 and Cont DI.
+' The next plan import clears them.
+
+Private WithEvents btnSave As MSForms.CommandButton
+Private WithEvents btnCancel As MSForms.CommandButton
+
+Private txtNm() As MSForms.TextBox
+Private txtMd() As MSForms.TextBox
+Private txtInc() As MSForms.TextBox
+Private txtAzm() As MSForms.TextBox
+Private txtTvd() As MSForms.TextBox
+Private m_row() As Long
+Private m_n As Long
+Private lblStatus As MSForms.Label
+
+Private Const ROW_H As Single = 22
+Private Const TOP0 As Single = 36
+Private m_contentBottom As Single
+Private m_placed As Boolean
+
+Private Sub UserForm_Initialize()
+    Me.StartUpPosition = 0
+    m_n = MDL_SlidesheetClear.TargetEditorCount()
+    BuildControls
+    LoadRows
+    FitToContent
+    MDL_ScreenGuard.PlaceFormOnExcel Me
+End Sub
+
+Private Sub UserForm_Activate()
+    If m_placed Then Exit Sub
+    m_placed = True
+    MDL_ScreenGuard.PlaceFormOnExcel Me
+End Sub
+
+' Height includes the title bar. Size from the client area so Save and Cancel
+' are not clipped on the bottom edge.
+Private Sub FitToContent()
+    Dim chrome As Single
+    chrome = 0
+    If Me.InsideHeight > 40 Then chrome = Me.Height - Me.InsideHeight
+    If chrome < 28 Or chrome > 90 Then chrome = 42
+    Me.Height = m_contentBottom + 18 + chrome
+End Sub
+
+Private Sub BuildControls()
+    Dim i As Long
+    Dim y As Single
+    Me.Caption = "Targets"
+    Me.Width = 430
+
+    Set lblStatus = Me.Controls.Add("Forms.Label.1", "lblNote")
+    With lblStatus
+        .Left = 10
+        .Top = 6
+        .Width = 400
+        .Height = 26
+        .WordWrap = True
+        .Font.Size = 8
+        .Caption = "Saved targets replace the plan on the Slidesheet and Cont DI. They stay until the next plan import."
+    End With
+
+    If m_n < 1 Then
+        lblStatus.Caption = "No named targets on this plan."
+        lblStatus.Height = 18
+        AddButton "Cancel", 10, 48, 70, False
+        m_contentBottom = 70
+        Exit Sub
+    End If
+
+    ReDim txtNm(1 To m_n)
+    ReDim txtMd(1 To m_n)
+    ReDim txtInc(1 To m_n)
+    ReDim txtAzm(1 To m_n)
+    ReDim txtTvd(1 To m_n)
+    ReDim m_row(1 To m_n)
+
+    y = TOP0
+    AddHead "Name", 10, y, 78
+    AddHead "MD", 92, y, 62
+    AddHead "INC", 158, y, 54
+    AddHead "AZM", 216, y, 54
+    AddHead "TVD", 274, y, 62
+
+    For i = 1 To m_n
+        y = TOP0 + ROW_H * i
+        Set txtNm(i) = AddBox("nm" & i, 10, y, 78)
+        Set txtMd(i) = AddBox("md" & i, 92, y, 62)
+        Set txtInc(i) = AddBox("inc" & i, 158, y, 54)
+        Set txtAzm(i) = AddBox("azm" & i, 216, y, 54)
+        Set txtTvd(i) = AddBox("tvd" & i, 274, y, 62)
+    Next i
+
+    y = TOP0 + ROW_H * (m_n + 1) + 12
+    AddButton "Save", 10, y, 70, True
+    AddButton "Cancel", 88, y, 70, False
+    m_contentBottom = y + 22
+End Sub
+
+Private Sub LoadRows()
+    Dim i As Long
+    Dim planRow As Long
+    Dim nm As String
+    Dim md As Double, incD As Double, azmD As Double, tvdD As Double
+    If m_n < 1 Then Exit Sub
+    For i = 1 To m_n
+        MDL_SlidesheetClear.TargetEditorItem i, planRow, nm, md, incD, azmD, tvdD
+        m_row(i) = planRow
+        txtNm(i).Text = nm
+        txtMd(i).Text = Format$(md, "0.00")
+        txtInc(i).Text = Format$(incD, "0.00")
+        txtAzm(i).Text = Format$(azmD, "0.00")
+        txtTvd(i).Text = Format$(tvdD, "0.00")
+    Next i
+End Sub
+
+Private Sub btnSave_Click()
+    Dim i As Long
+    Dim md As Double, incD As Double, azmD As Double, tvdD As Double
+    Dim msg As String
+    If m_n < 1 Then Exit Sub
+    For i = 1 To m_n
+        If Not RowNumbers(i, md, incD, azmD, tvdD) Then Exit Sub
+        If Not MDL_SlidesheetClear.TargetNameOk(txtNm(i).Text) Then
+            lblStatus.Caption = "Name must be one of: NUDGE, VERTICAL, KOP, TANGENT, SOT, EOT, ICP, BUILD, HEEL, TD"
+            Exit Sub
+        End If
+    Next i
+    For i = 1 To m_n
+        RowNumbers i, md, incD, azmD, tvdD
+        If azmD >= 360# Then azmD = azmD - 360#
+        msg = MDL_SlidesheetClear.TargetEditorStore(m_row(i), txtNm(i).Text, md, incD, azmD, tvdD)
+        If Len(msg) > 0 Then
+            lblStatus.Caption = msg
+            Exit Sub
+        End If
+    Next i
+    MDL_SlidesheetClear.TargetEditorCommit
+    Unload Me
+End Sub
+
+Private Sub btnCancel_Click()
+    Unload Me
+End Sub
+
+Private Function RowNumbers(ByVal i As Long, ByRef md As Double, ByRef incD As Double, _
+        ByRef azmD As Double, ByRef tvdD As Double) As Boolean
+    RowNumbers = False
+    If Not NumOf(txtMd(i), md) Or Not NumOf(txtInc(i), incD) _
+            Or Not NumOf(txtAzm(i), azmD) Or Not NumOf(txtTvd(i), tvdD) Then
+        lblStatus.Caption = "MD, INC, AZM and TVD have to be numbers (" & Trim$(txtNm(i).Text) & ")."
+        Exit Function
+    End If
+    RowNumbers = True
+End Function
+
+Private Function NumOf(ByVal box As MSForms.TextBox, ByRef n As Double) As Boolean
+    Dim s As String
+    s = Trim$(Replace$(box.Text, ",", ""))
+    NumOf = False
+    If Not IsNumeric(s) Then Exit Function
+    n = CDbl(s)
+    NumOf = True
+End Function
+
+Private Sub AddHead(ByVal caption As String, ByVal x As Single, ByVal y As Single, ByVal w As Single)
+    Dim lbl As MSForms.Label
+    Set lbl = Me.Controls.Add("Forms.Label.1")
+    With lbl
+        .Caption = caption
+        .Left = x
+        .Top = y
+        .Width = w
+        .Height = 16
+        .Font.Bold = True
+        .Font.Size = 8
+    End With
+End Sub
+
+Private Function AddBox(ByVal nm As String, ByVal x As Single, ByVal y As Single, _
+        ByVal w As Single) As MSForms.TextBox
+    Set AddBox = Me.Controls.Add("Forms.TextBox.1", nm)
+    With AddBox
+        .Left = x
+        .Top = y
+        .Width = w
+        .Height = 18
+        .Font.Size = 8
+    End With
+End Function
+
+Private Sub AddButton(ByVal caption As String, ByVal x As Single, ByVal y As Single, _
+        ByVal w As Single, ByVal isSave As Boolean)
+    Dim btn As MSForms.CommandButton
+    Set btn = Me.Controls.Add("Forms.CommandButton.1", IIf(isSave, "btnSave", "btnCancel"))
+    btn.Caption = caption
+    btn.Left = x
+    btn.Top = y
+    btn.Width = w
+    btn.Height = 22
+    btn.Font.Size = 9
+    If isSave Then Set btnSave = btn Else Set btnCancel = btn
+End Sub

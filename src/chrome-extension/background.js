@@ -1,4 +1,4 @@
-// OpenCap Data Exporter — Background Service Worker v3.2.6
+// OpenCap Data Exporter — Background Service Worker v3.2.9
 // Fetches data directly from FieldCap's OData API using the active session.
 // Produces typed CSVs including:
 //   • job-details, crew, bha-equipment
@@ -11,6 +11,13 @@ importScripts("browser-api.js");
 
 "use strict";
 
+// Chrome fetches OData from this service worker. Edge's worker does not
+// reliably send the FieldCap login cookies, so Edge runs the same request
+// inside the open FieldCap tab (page world) and falls back here if that tab
+// is missing.
+const IS_EDGE = globalThis.OC?.isEdge === true;
+let edgeFetchTabId = 0;
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BASE = "https://fieldcap-cdn.phxtech.com/odata";
 
@@ -21,7 +28,116 @@ const KEY_CSV_BHA  = "fieldcap_csv_bha";
 const KEY_CSV_SLIDE_DAY  = "fieldcap_csv_slide_by_day";
 const KEY_CSV_INVENTORY  = "fieldcap_csv_inventory";
 const KEY_CSV_TICKET_COSTS = "fieldcap_csv_ticket_costs";
+const KEY_CSV_ACTIVITY_LOG = "fieldcap_csv_activity_log";
 const KEY_TICKET_ENTITY = "fieldcap_ticket_entity";
+const KEY_PENDING_UPDATE = "fieldcap_pending_update";
+const UPDATE_ALARM = "opencap-update-pulse";
+let updatePulseTimer = null;
+let updatePulseOn = false;
+let updateIconBitmap = null;
+
+const cmpVer = (a, b) => {
+  const pa = String(a || "").split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || "").split(".").map((n) => parseInt(n, 10) || 0);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+};
+
+const pendingIsNewer = (version) =>
+  !!version && cmpVer(version, chrome.runtime.getManifest().version) > 0;
+
+const loadUpdateIcon = async () => {
+  if (updateIconBitmap) return updateIconBitmap;
+  const res = await fetch(chrome.runtime.getURL("icons/icon128.png"));
+  updateIconBitmap = await createImageBitmap(await res.blob());
+  return updateIconBitmap;
+};
+
+const paintUpdateIcon = async (bright) => {
+  const size = 128;
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+  const bmp = await loadUpdateIcon();
+  ctx.clearRect(0, 0, size, size);
+  const pad = bright ? 8 : 4;
+  ctx.drawImage(bmp, pad, pad, size - pad * 2, size - pad * 2);
+  ctx.strokeStyle = bright ? "#4fc878" : "rgba(79, 200, 120, 0.28)";
+  ctx.lineWidth = bright ? 12 : 6;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 8, 0, Math.PI * 2);
+  ctx.stroke();
+  chrome.action.setIcon({ imageData: ctx.getImageData(0, 0, size, size) });
+};
+
+const startUpdateIconPulse = () => {
+  chrome.action.setBadgeBackgroundColor({ color: "#1e6b35" });
+  if (chrome.action.setBadgeTextColor) {
+    chrome.action.setBadgeTextColor({ color: "#ffffff" });
+  }
+  chrome.action.setBadgeText({ text: "UP" });
+  chrome.action.setTitle({ title: "OpenCap update ready. Open the popup and choose Install update." });
+  if (!updatePulseTimer) {
+    updatePulseOn = true;
+    paintUpdateIcon(true).catch(() => {});
+    updatePulseTimer = setInterval(() => {
+      updatePulseOn = !updatePulseOn;
+      paintUpdateIcon(updatePulseOn).catch(() => {});
+    }, 700);
+  }
+  chrome.alarms.create(UPDATE_ALARM, { periodInMinutes: 1 });
+};
+
+const stopUpdateIconPulse = () => {
+  if (updatePulseTimer) {
+    clearInterval(updatePulseTimer);
+    updatePulseTimer = null;
+  }
+  chrome.alarms.clear(UPDATE_ALARM);
+  chrome.action.setBadgeText({ text: "" });
+  chrome.action.setTitle({ title: ".OpenCap Exporter" });
+  chrome.action.setIcon({
+    path: {
+      16: "icons/icon16.png",
+      48: "icons/icon48.png",
+      128: "icons/icon128.png",
+    },
+  });
+};
+
+// Chrome downloads a Web Store update, then waits until we reload.
+chrome.runtime.onUpdateAvailable.addListener((details) => {
+  const version = details && details.version ? String(details.version) : "";
+  if (version) chrome.storage.local.set({ [KEY_PENDING_UPDATE]: version });
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "update" || details.reason === "install") {
+    stopUpdateIconPulse();
+    chrome.storage.local.remove(KEY_PENDING_UPDATE);
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[KEY_PENDING_UPDATE]) return;
+  if (pendingIsNewer(changes[KEY_PENDING_UPDATE].newValue)) startUpdateIconPulse();
+  else stopUpdateIconPulse();
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== UPDATE_ALARM) return;
+  chrome.storage.local.get(KEY_PENDING_UPDATE, (stored) => {
+    if (pendingIsNewer(stored[KEY_PENDING_UPDATE])) startUpdateIconPulse();
+    else stopUpdateIconPulse();
+  });
+});
+
+chrome.storage.local.get(KEY_PENDING_UPDATE, (stored) => {
+  if (pendingIsNewer(stored[KEY_PENDING_UPDATE])) startUpdateIconPulse();
+});
 const KEY_INTERCEPT = "fieldcap_intercepted_assemblies"; // keyed by ToolAssemblyId
 const KEY_BHA_GRID = "fieldcap_bha_grid_rows"; // { [jobId]: { [bhaNumber]: canonicalRow } }
 const KEY_ACTIVITY_DAYS = "fieldcap_activity_day_totals"; // { [jobId]: { [yyyy-mm-dd]: { [bha]: patch } } }
@@ -213,6 +329,14 @@ const toLocalDateStr = (v) => {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+};
+
+const toLocalDateTimeStr = (v) => {
+  const ms = toMs(v);
+  const day = toLocalDateStr(v);
+  if (!day) return "";
+  const d = new Date(ms);
+  return `${day} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
 // Calendar bucket for reporting — reject garbage epochs (e.g. Unix seconds mis-read as ms → 1976).
@@ -873,13 +997,15 @@ const scrapeFromTab = async (tabId) => new Promise((resolve) => {
     }
 
     // If the content script is not attached yet, inject and retry once.
-    if (!/receiving end does not exist|could not establish connection/i.test(firstErr)) {
+    if (!/receiving end does not exist|could not establish connection|message port closed/i.test(firstErr)) {
       return resolve(empty);
     }
     if (!chrome.scripting?.executeScript) return resolve(empty);
 
+    // browser-api.js first. Edge's injected world sometimes has no chrome
+    // global; content.js alone then dies before it can scrape the ticket grid.
     chrome.scripting.executeScript(
-      { target: { tabId }, files: ["content.js"] },
+      { target: { tabId }, files: ["browser-api.js", "content.js"] },
       () => {
         chrome.tabs.sendMessage(tabId, { type: "SCRAPE_NOW" }, (res2) => {
           if (chrome.runtime.lastError) return resolve(empty);
@@ -930,15 +1056,71 @@ const scrapeNowFromFieldCapTabs = async (jobId) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ── OData fetch helper ────────────────────────────────────────────────────────
-const odataGet = async (path) => {
-  const url = `${BASE}/${path}`;
+const pickEdgeFetchTab = async (jobId) => {
+  edgeFetchTabId = 0;
+  if (!IS_EDGE) return;
+  const tabs = await chrome.tabs.query({ url: ["*://*.phxtech.com/*"] });
+  const field = (tabs || []).filter((t) => t.id && /fieldcap/i.test(String(t.url || "")));
+  const forJob = field.filter((t) => new RegExp(`/Jobs/${jobId}\\b`, "i").test(String(t.url || "")));
+  edgeFetchTabId = (forJob[0] || field[0] || {}).id || 0;
+};
+
+const fetchODataText = async (url, accept) => {
+  if (IS_EDGE && edgeFetchTabId) {
+    try {
+      const [inj] = await chrome.scripting.executeScript({
+        target: { tabId: edgeFetchTabId },
+        world: "MAIN",
+        args: [url, accept],
+        func: async (u, acceptHeader) => {
+          try {
+            const res = await fetch(u, {
+              credentials: "include",
+              headers: { Accept: acceptHeader },
+            });
+            const text = await res.text();
+            return { ok: res.ok, status: res.status, text };
+          } catch (e) {
+            return { ok: false, status: 0, text: "", error: String(e && e.message || e) };
+          }
+        },
+      });
+      const payload = inj && inj.result;
+      if (payload && payload.ok) return payload.text;
+    } catch (_) {
+      // Tab went away or the result was too large. Worker fetch is next.
+    }
+  }
   const res = await fetch(url, {
     credentials: "include",
-    headers: { Accept: "application/json;odata.metadata=minimal" },
+    headers: { Accept: accept },
   });
-  if (!res.ok) throw new Error(`OData ${res.status}: ${path}`);
-  const json = await res.json();
+  if (!res.ok) throw new Error(`OData ${res.status}`);
+  return res.text();
+};
+
+const fetchODataJson = async (url) => {
+  const accept = "application/json;odata.metadata=minimal";
+  if (IS_EDGE && edgeFetchTabId) {
+    try {
+      return JSON.parse(await fetchODataText(url, accept));
+    } catch (_) {
+      // Page world returned nothing usable. One worker attempt below.
+      const saved = edgeFetchTabId;
+      edgeFetchTabId = 0;
+      try {
+        return JSON.parse(await fetchODataText(url, accept));
+      } finally {
+        edgeFetchTabId = saved;
+      }
+    }
+  }
+  return JSON.parse(await fetchODataText(url, accept));
+};
+
+// ── OData fetch helper ────────────────────────────────────────────────────────
+const odataGet = async (path) => {
+  const json = await fetchODataJson(`${BASE}/${path}`);
   return json.value ?? json;
 };
 
@@ -948,12 +1130,7 @@ const odataGetAll = async (relativePath) => {
   let url = `${BASE}/${relativePath}`;
   let guard = 0;
   while (url && guard++ < 100) {
-    const res = await fetch(url, {
-      credentials: "include",
-      headers: { Accept: "application/json;odata.metadata=minimal" },
-    });
-    if (!res.ok) throw new Error(`OData ${res.status}`);
-    const json = await res.json();
+    const json = await fetchODataJson(url);
     if (Array.isArray(json.value)) out.push(...json.value);
     url = json["@odata.nextLink"] || null;
   }
@@ -1256,19 +1433,53 @@ const ROTATE_ACTIVITY_TYPE = "Drilling";
 const accumulateActivityLogMetres = (logs, idToBha) => {
   const lifetime = {};
   const byDay = {};
+  const detail = [];
+  const seen = new Set();
 
   for (const log of logs) {
+    const row = {
+      source: "ActivityLogs",
+      day: surveyDayBucketKey(log.StartDateTime),
+      bha: "",
+      start: toLocalDateTimeStr(log.StartDateTime),
+      end: toLocalDateTimeStr(log.EndDateTime),
+      elapsedHrs: activityLogDurationHours(log),
+      countedHrs: 0,
+      countedAs: "",
+      type: String(log.ActivityType ?? "").trim(),
+      activity: [log.ActivityCode, log.Code].filter(Boolean).join(" "),
+      duration: log.Duration ?? "",
+      startMd: log.Custom1 ?? "",
+      endMd: log.Custom2 ?? "",
+      metres: 0,
+      comments: log.Comments ?? "",
+      id: log.ActivityLogId ?? "",
+    };
+    detail.push(row);
+    // The last fetch filter has no delete clause, and paging can repeat a row.
+    if (log.DeletedOn || log.DeletedBy) { row.countedAs = "skipped: deleted"; continue; }
+    const logId = log.ActivityLogId != null ? String(log.ActivityLogId) : "";
+    if (logId) {
+      if (seen.has(logId)) { row.countedAs = "skipped: duplicate"; continue; }
+      seen.add(logId);
+    }
     const tid = log.ToolAssemblyId ? String(log.ToolAssemblyId) : "";
     const taNum = log.ToolAssemblyNumber ?? log.BHA ?? log.BhaNumber;
     const bha =
       (tid && idToBha[tid] ? idToBha[tid] : "") ||
       (taNum !== undefined && taNum !== "" ? String(toNum(taNum)) : "");
-    if (!bha) continue;
+    row.bha = bha;
+    if (!bha) { row.countedAs = "skipped: no BHA"; continue; }
 
-    const actBlob = [log.ActivityType, log.Comments, log.ActivityCode, log.Code]
-      .filter(Boolean).join(" ");
-    const isSlide = activityIsSlide(actBlob) || String(log.ActivityType ?? "").trim() === SLIDE_ACTIVITY_TYPE;
-    const isRot = activityIsRotate(actBlob) || String(log.ActivityType ?? "").trim() === ROTATE_ACTIVITY_TYPE;
+    // Classify from the activity type. Comments name slides on circulating,
+    // reaming and connection rows ("circ, prep to slide"), and counting those
+    // put a whole day of non-drilling time into Slide Hours. Comments only
+    // decide a row whose type is blank. A row is slide or rotate, never both.
+    const actType = String(log.ActivityType ?? "").trim();
+    const typeBlob = actType || [log.ActivityCode, log.Code, log.Comments].filter(Boolean).join(" ");
+    const isSlide = actType === SLIDE_ACTIVITY_TYPE || activityIsSlide(typeBlob);
+    const isRot = !isSlide && (actType === ROTATE_ACTIVITY_TYPE || activityIsRotate(typeBlob));
+    row.countedAs = isSlide ? "Slide" : isRot ? "Rotate" : "not slide or rotate";
     if (!isSlide && !isRot) continue;
 
     const lf = (lifetime[bha] ??= surveyCellShape());
@@ -1277,9 +1488,13 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
 
     // Prefer Start/End elapsed time; fall back to Duration / clock range so a
     // Sliding row with 2:50 in the Duration column still counts.
+    // A bare number in Duration has no unit (44 can be minutes), so only
+    // "H:MM" and clock ranges are read. One row cannot outlast a day.
     let hrs = activityLogDurationHours(log);
-    if (hrs <= 0) hrs = parseHoursNum(log.Duration) ?? 0;
+    if (hrs <= 0 && /^\s*\d{1,3}:\d{2}\s*$/.test(String(log.Duration ?? ""))) hrs = parseHoursNum(log.Duration) ?? 0;
     if (hrs <= 0) hrs = clockRangeHours(log.Duration) ?? 0;
+    if (hrs > 24) hrs = 0;
+    row.countedHrs = hrs;
     if (hrs > 0) {
       if (isSlide) lf.slideHrs += hrs;
       if (isRot) lf.rotHrs += hrs;
@@ -1294,6 +1509,7 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
     if (!Number.isFinite(startMd) || !Number.isFinite(endMd)) continue;
     const cl = endMd - startMd;
     if (cl <= 0) continue;
+    row.metres = cl;
 
     const slide = isSlide ? cl : 0;
     const rot = isRot ? cl : 0;
@@ -1306,7 +1522,7 @@ const accumulateActivityLogMetres = (logs, idToBha) => {
       dc.total += cl;
     }
   }
-  return { lifetime, byDay };
+  return { lifetime, byDay, detail };
 };
 
 const finalizeSurveyPatchMap = (totals) => {
@@ -1410,6 +1626,75 @@ const buildSlideRotateMetresByDayCsvFromActivities = (rows, jobId) => {
   return buildCsvString(SLIDE_DAY_COLUMNS, outRows);
 };
 
+const ACTIVITY_LOG_DETAIL_COLUMNS = [
+  "Job ID", "Source", "Builds By-Day File", "Date", "BHA #", "Start", "End",
+  "Elapsed Hours", "Counted Hours", "Counted As", "Activity Type", "Activity / Code",
+  "Duration", "Start MD", "End MD", "Metres", "Comments", "Id",
+];
+
+const activityRowDetail = (source, row) => {
+  const day = activityRowDay(row);
+  const bha = pickActivityRowBha(row, activityRowValueIncludes);
+  const activity = String(getByAliases(row, ["Activity/Code", "Activity Code", "Activity", "Code"]) ?? "");
+  if (row?.__activityFooter) {
+    return {
+      source, day, bha: bha ? String(toNum(bha)) : "", start: "", end: "", elapsedHrs: 0,
+      countedHrs: (parseHoursNum(row.__footerSlideHours) ?? 0) + (parseHoursNum(row.__footerRotateHours) ?? 0),
+      countedAs: `day footer: slide ${row.__footerSlideHours ?? ""} h / rotate ${row.__footerRotateHours ?? ""} h`,
+      type: "", activity, duration: "", startMd: "", endMd: "",
+      metres: (parseHoursNum(row.__footerSlideMetres) ?? 0) + (parseHoursNum(row.__footerRotateMetres) ?? 0),
+      comments: "", id: "",
+    };
+  }
+  const kind = classifyActivityKind(row);
+  const range = String(getByAliases(row, ["Start/End", "Start - End", "StartEnd", "From - To"]) ?? "");
+  return {
+    source, day, bha: bha ? String(toNum(bha)) : "", start: range, end: "", elapsedHrs: 0,
+    countedHrs: kind ? rowDurationHours(row) : 0,
+    countedAs: kind === "slide" ? "Slide" : kind === "rot" ? "Rotate" : "not slide or rotate",
+    type: "", activity, duration: getByAliases(row, ["Duration", "Hrs", "Hours", "Time"]) ?? "",
+    startMd: "", endMd: "", metres: kind ? rowCourseMetres(row) : 0,
+    comments: String(getByAliases(row, ["Comments", "Comment", "Remarks"]) ?? ""), id: "",
+  };
+};
+
+// One row per FieldCap activity the exporter saw, and how it was counted, so a
+// day whose slide hours look wrong can be traced to the entry that caused it.
+const buildActivityLogDetailCsv = (jobId, logDetail, odataRows, scrapeRows, byDaySource) => {
+  const rows = [
+    ...(logDetail ?? []),
+    ...(odataRows ?? []).map((r) => activityRowDetail("JobActivities", r)),
+    ...(scrapeRows ?? []).map((r) => activityRowDetail("Page scrape", r)),
+  ];
+  const fmt = (n) => (Number.isFinite(n) && n !== 0 ? Number(n.toFixed(2)) : "");
+  const out = rows.map((r) => ({
+    "Job ID": jobId,
+    "Source": r.source,
+    "Builds By-Day File": r.source === byDaySource ? "yes" : "",
+    "Date": r.day,
+    "BHA #": r.bha,
+    "Start": r.start,
+    "End": r.end,
+    "Elapsed Hours": fmt(r.elapsedHrs),
+    "Counted Hours": fmt(r.countedHrs),
+    "Counted As": r.countedAs,
+    "Activity Type": r.type,
+    "Activity / Code": r.activity,
+    "Duration": r.duration,
+    "Start MD": r.startMd,
+    "End MD": r.endMd,
+    "Metres": fmt(r.metres),
+    "Comments": r.comments,
+    "Id": r.id,
+  }));
+  out.sort((a, b) =>
+    String(a.Date).localeCompare(String(b.Date)) ||
+    String(a.Source).localeCompare(String(b.Source)) ||
+    String(a.Start).localeCompare(String(b.Start))
+  );
+  return buildCsvString(ACTIVITY_LOG_DETAIL_COLUMNS, out);
+};
+
 const fetchSurveyDerivedSlideRotate = async (jobId, assemblies) => {
   const idToBha = {};
   for (const a of assemblies ?? []) {
@@ -1429,15 +1714,25 @@ const fetchSurveyDerivedSlideRotate = async (jobId, assemblies) => {
     return { activityLogMap: {}, slideByDayCsv: "", slideByDayRowCount: 0 };
   }
 
-  const { lifetime, byDay } = accumulateActivityLogMetres(logs, idToBha);
+  const { lifetime, byDay, detail } = accumulateActivityLogMetres(logs, idToBha);
   const activityLogMap = finalizeSurveyPatchMap(lifetime);
   const slideByDayCsv = buildSlideRotateMetresByDayCsv(jobId, byDay, lifetime);
   const lines = slideByDayCsv.split("\r\n").filter((ln) => ln.length > 0);
   const slideByDayRowCount = Math.max(0, lines.length - 1);
-  return { activityLogMap, slideByDayCsv, slideByDayRowCount };
+  return { activityLogMap, slideByDayCsv, slideByDayRowCount, logDetail: detail };
 };
 
 // ── Job Details — core entity ─────────────────────────────────────────────────
+const entityName = (obj, ...keys) => {
+  if (obj == null || obj === "") return "";
+  if (typeof obj !== "object") return String(obj).trim();
+  for (const k of keys) {
+    const v = obj[k];
+    if (v !== null && v !== undefined && String(v).trim() !== "") return String(v).trim();
+  }
+  return "";
+};
+
 const fetchJobDetails = async (jobId) => {
   const filter = encodeURIComponent(
     `(ClientJobId eq ${jobId}) and (null eq DeletedBy)`
@@ -1466,7 +1761,7 @@ const fetchJobCustomValues = async (jobId) => {
   const filter = encodeURIComponent(
     `(ClientJobId eq ${jobId}) and (null eq DeletedBy)`
   );
-  return odataGet(`ClientJobCustomValues?$filter=${filter}`);
+  return odataGetAll(`ClientJobCustomValues?$filter=${filter}`);
 };
 
 // ── Crew / Personnel ──────────────────────────────────────────────────────────
@@ -1474,9 +1769,15 @@ const fetchCrew = async (jobId) => {
   const filter = encodeURIComponent(
     `(null eq DeletedBy) and (ClientJobId eq ${jobId})`
   );
-  return odataGet(
-    `JobSchedules?$expand=User,WorkType&$filter=${filter}&$orderby=LineNumber`
-  );
+  try {
+    return await odataGetAll(
+      `JobSchedules?$expand=User,WorkType&$filter=${filter}&$orderby=LineNumber`
+    );
+  } catch (_) {
+    return odataGetAll(
+      `JobSchedules?$expand=User&$filter=${filter}&$orderby=LineNumber`
+    );
+  }
 };
 
 // ── BHA Assemblies ────────────────────────────────────────────────────────────
@@ -1628,12 +1929,8 @@ const parseEdmMetadata = (xml) => {
 };
 
 const fetchMetadataEdm = async () => {
-  const res = await fetch(`${BASE}/$metadata`, {
-    credentials: "include",
-    headers: { Accept: "application/xml" },
-  });
-  if (!res.ok) throw new Error(`OData $metadata ${res.status}`);
-  return parseEdmMetadata(await res.text());
+  const xml = await fetchODataText(`${BASE}/$metadata`, "application/xml");
+  return parseEdmMetadata(xml);
 };
 
 const jobKeyFor = (props) =>
@@ -2024,12 +2321,7 @@ const parseTicketDate = (v) => {
 
 const discoverTicketEntityNames = async () => {
   try {
-    const res = await fetch(BASE, {
-      credentials: "include",
-      headers: { Accept: "application/json;odata.metadata=minimal" },
-    });
-    if (!res.ok) return [];
-    const json = await res.json();
+    const json = await fetchODataJson(BASE);
     const sets = Array.isArray(json?.value) ? json.value : [];
     return sets
       .map((s) => s?.name)
@@ -2059,6 +2351,11 @@ const fetchJobTickets = async (jobId) => {
   pushUnique(cachedEntity);
   for (const n of discovered) pushUnique(n);
   for (const n of TICKET_ENTITY_FALLBACKS) pushUnique(n);
+  candidates.sort((a, b) => {
+    if (a === cachedEntity) return -1;
+    if (b === cachedEntity) return 1;
+    return ticketEntityRank(a) - ticketEntityRank(b);
+  });
 
   let emptyButValid = null;
   for (const entity of candidates) {
@@ -2066,9 +2363,11 @@ const fetchJobTickets = async (jobId) => {
       try {
         const rows = await odataGetAll(`${entity}?$filter=${filter}`);
         if (!Array.isArray(rows)) continue;
-        chrome.storage.local.set({ [KEY_TICKET_ENTITY]: entity });
-        if (rows.length > 0) return rows;
-        emptyButValid = rows;
+        if (rows.some(ticketRowHasDailyCost)) {
+          chrome.storage.local.set({ [KEY_TICKET_ENTITY]: entity });
+          return rows;
+        }
+        if (rows.length === 0) emptyButValid = rows;
       } catch (_) {
         // try next filter / entity
       }
@@ -2082,6 +2381,24 @@ const normalizeTicketRow = (t) => {
   const date = parseTicketDate(getByAliases(t, TICKET_DATE_ALIASES));
   const total = parseMoney(getByAliases(t, TICKET_TOTAL_ALIASES));
   return { date, total: total ?? 0 };
+};
+
+// A Ticket* set can be attachments or comments. Those return rows and no
+// money. Chrome usually skips them because a previous fetch cached the real
+// entity; Edge's storage is empty, so the first non-empty set wins and the
+// cost CSV is a header with no days.
+const ticketRowHasDailyCost = (t) => {
+  if (!t || typeof t !== "object") return false;
+  const date = parseTicketDate(getByAliases(t, TICKET_DATE_ALIASES));
+  const total = parseMoney(getByAliases(t, TICKET_TOTAL_ALIASES));
+  return !!date && total !== null;
+};
+
+const ticketEntityRank = (name) => {
+  const n = String(name || "");
+  if (/attach|comment|note|file|document|photo|image|audit|history/i.test(n)) return 2;
+  if (/header|dailyticket|clientjobticket|fieldticket|jobticket|^tickets$/i.test(n)) return 0;
+  return 1;
 };
 
 const buildTicketCostsByDayCsv = (jobId, tickets) => {
@@ -2206,9 +2523,9 @@ const normalizeJobDetails = (j, customValues, rigNameHint = "") => {
     "Job ID":             j.ClientJobId ?? "",
     "Job Name":           j.ClientJobName ?? "",
     "Job Code":           j.JobCode ?? "",
-    "Client":             j.Client?.ClientName ?? j.ClientName ?? "",
-    "Job Type":           j.JobType ?? "",
-    "Ops Status":         j.JobStatus?.JobStatusName ?? "",
+    "Client":             entityName(j.Client, "ClientName", "Name", "CompanyName", "Client") || j.ClientName || "",
+    "Job Type":           entityName(j.JobType, "JobTypeName", "Name", "Code"),
+    "Ops Status":         entityName(j.JobStatus, "JobStatusName", "Name", "StatusName") || j.StatusName || "",
     "AFE (core)":         j.Afe ?? "",
     "Well (core)":        j.Well ?? "",
     "Description":        j.Description ?? "",
@@ -2266,8 +2583,8 @@ const normalizeCrewRow = (s, jobId) => ({
   "Employee Code": s.User?.EmployeeCode ?? s.User?.UserCode ?? "",
   "Email":         s.User?.Email ?? "",
   "Phone":         s.User?.Phone ?? s.User?.MobilePhone ?? "",
-  "Role":          s.WorkType?.WorkTypeName ?? s.Role ?? "",
-  "Work Type":     s.WorkType?.WorkTypeName ?? "",
+  "Role":          entityName(s.WorkType, "WorkTypeName", "Name", "Code") || s.Role || entityName(s.User, "Title", "Role", "Position") || "",
+  "Work Type":     entityName(s.WorkType, "WorkTypeName", "Name", "Code") || "",
   "Start Date":    toDateStr(s.StartDate),
   "End Date":      toDateStr(s.EndDate),
   "Line Number":   toNum(s.LineNumber),
@@ -2592,14 +2909,17 @@ const fetchAll = async (
     let activityLogMap = {};
     let slideByDayCsv = "";
     let slideByDayRowCount = 0;
+    let logDetail = [];
     try {
       const derived = await fetchSurveyDerivedSlideRotate(jobId, assemblies);
       activityLogMap = derived.activityLogMap ?? {};
       slideByDayCsv = derived.slideByDayCsv ?? "";
       slideByDayRowCount = derived.slideByDayRowCount ?? 0;
+      logDetail = derived.logDetail ?? [];
     } catch (_) {
       activityLogMap = {};
     }
+    let byDaySource = slideByDayRowCount > 0 ? "ActivityLogs" : "";
     const odataDayCsv = buildSlideRotateMetresByDayCsvFromActivities(odataActivityRows, jobId);
     const scrapeDayCsv = buildSlideRotateMetresByDayCsvFromActivities(liveActivityRows, jobId);
     const odataDayLines = odataDayCsv.split("\r\n").filter((ln) => ln.length > 0);
@@ -2607,10 +2927,13 @@ const fetchAll = async (
     if (odataDayLines.length > 1) {
       slideByDayCsv = odataDayCsv;
       slideByDayRowCount = odataDayLines.length - 1;
+      byDaySource = "JobActivities";
     } else if (scrapeDayLines.length > 1) {
       slideByDayCsv = scrapeDayCsv;
       slideByDayRowCount = scrapeDayLines.length - 1;
+      byDaySource = "Page scrape";
     }
+    results.activityLogCsv = buildActivityLogDetailCsv(jobId, logDetail, odataActivityRows, liveActivityRows, byDaySource);
     const interceptedMap = stored[KEY_INTERCEPT] ?? {};
     const bhaGridRowsByJob = stored[KEY_BHA_GRID] ?? {};
     const cachedBhaGridMap = bhaGridRowsByJob[String(jobId)] ?? {};
@@ -2688,6 +3011,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     try {
+      await pickEdgeFetchTab(jobId);
       send({ type: "PROGRESS", pct: 3, label: "Scraping live data…" });
       let liveData = (flags.bha || flags.jobDetails || flags.ticketCosts)
         ? await scrapeNowFromFieldCapTabs(jobId)
@@ -2745,6 +3069,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (results.slideByDayCsv)  stored[KEY_CSV_SLIDE_DAY]    = results.slideByDayCsv;
       if (results.inventoryCsv)   stored[KEY_CSV_INVENTORY]    = results.inventoryCsv;
       if (results.ticketCostsCsv) stored[KEY_CSV_TICKET_COSTS] = results.ticketCostsCsv;
+      if (results.activityLogCsv) stored[KEY_CSV_ACTIVITY_LOG] = results.activityLogCsv;
       stored[KEY_META] = meta;
 
       chrome.storage.local.set(stored, () => {
@@ -2752,6 +3077,8 @@ chrome.runtime.onConnect.addListener((port) => {
       });
     } catch (err) {
       send({ type: "DONE", ok: false, error: err.message });
+    } finally {
+      edgeFetchTabId = 0;
     }
   });
 });
@@ -2773,6 +3100,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     (async () => {
+      try {
+      await pickEdgeFetchTab(jobId);
       let liveData = (flags.bha || flags.jobDetails || flags.ticketCosts)
         ? await scrapeNowFromFieldCapTabs(jobId)
         : { bhaRows: [], activityRows: [], ticketRows: [], rigName: "" };
@@ -2827,11 +3156,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (results.slideByDayCsv)  stored[KEY_CSV_SLIDE_DAY]    = results.slideByDayCsv;
         if (results.inventoryCsv)   stored[KEY_CSV_INVENTORY]    = results.inventoryCsv;
         if (results.ticketCostsCsv) stored[KEY_CSV_TICKET_COSTS] = results.ticketCostsCsv;
+        if (results.activityLogCsv) stored[KEY_CSV_ACTIVITY_LOG] = results.activityLogCsv;
         stored[KEY_META] = meta;
 
         chrome.storage.local.set(stored, () => {
           sendResponse({ ok: true, ...meta });
         });
+      } finally {
+        edgeFetchTabId = 0;
+      }
       })().catch((err) => {
       sendResponse({ ok: false, error: err.message });
     });
@@ -2849,6 +3182,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       slideDay: KEY_CSV_SLIDE_DAY,
       inventory: KEY_CSV_INVENTORY,
       ticketCosts: KEY_CSV_TICKET_COSTS,
+      activityLog: KEY_CSV_ACTIVITY_LOG,
     };
     const key = keyMap[which];
     if (!key) {
@@ -2873,6 +3207,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         slideDay: `fieldcap-job-${jid}-slide-rotate-metres-by-day.csv`,
         inventory: `fieldcap-job-${jid}-inventory.csv`,
         ticketCosts: `fieldcap-job-${jid}-ticket-costs-by-day.csv`,
+        activityLog: `fieldcap-job-${jid}-activity-log-detail.csv`,
       }[which];
 
       const blob   = new Blob([csv], { type: "text/csv;charset=utf-8" });

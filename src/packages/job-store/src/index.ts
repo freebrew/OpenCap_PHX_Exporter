@@ -1,0 +1,11 @@
+export { grantJobFolder, reopenStoredFolder } from "./connect.js";
+export { createRestorePoint, listBackups } from "./backups.js";
+export { directoryFromHandle, MemoryDirectory } from "./directory.js";
+export type { StoredDirectory, StoredFile } from "./directory.js";
+export { mirrorSnapshot, packMirror } from "./mirror.js";
+export { openRegistry } from "./registry.js";
+export type { JobRegistry } from "./registry.js";
+export { JobSession, openJob } from "./session.js";
+export { createEnvelope, encodeEnvelope, parseEnvelope, semanticSignature, sha256 } from "./snapshot.js";
+export { SCHEMA_VERSION, StoreError } from "./types.js";
+export type { JobRecord, MirrorRecord, PhxEnvelope, Recovery, SaveState } from "./types.js";

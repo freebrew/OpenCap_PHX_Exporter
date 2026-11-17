@@ -40,13 +40,27 @@ End Function
 Public Sub SheetReprotectAfterVba(ByVal ws As Worksheet, ByVal wasProtected As Boolean)
     If Not wasProtected Then Exit Sub
     If ws Is Nothing Then Exit Sub
+    SheetEnsureLocked ws
+End Sub
 
+' Lock the sheet for the user even when the calc started unlocked.
+' Slidesheet calculations used to re-lock only if they had unlocked a
+' protected sheet, so a pass that began unlocked finished unlocked.
+Public Sub SheetEnsureLocked(ByVal ws As Worksheet)
+    Dim allowFmt As Boolean
+    If ws Is Nothing Then Exit Sub
     On Error Resume Next
+    If ws.ProtectContents Then Exit Sub
+    ' Slidesheet stays locked (F/G values cannot be typed over) but the
+    ' DD can still change fill colors. Excel has no per-column format
+    ' permission, so formatting is allowed on this sheet only.
+    allowFmt = (StrComp(ws.name, "Slidesheet", vbTextCompare) = 0)
     ws.Protect Password:=SHEET_PROTECT_PWD, _
                DrawingObjects:=True, _
                Contents:=True, _
                Scenarios:=True, _
-               UserInterfaceOnly:=True
+               UserInterfaceOnly:=True, _
+               AllowFormattingCells:=allowFmt
     On Error GoTo 0
 End Sub
 
@@ -65,6 +79,10 @@ Fail:
     On Error Resume Next
     SheetReprotectAfterVba ws, wasProt
 End Sub
+
+
+
+
 
 
 

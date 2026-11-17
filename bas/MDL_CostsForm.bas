@@ -102,7 +102,7 @@ Public Sub EnsureCostsFormButton()
 
     On Error Resume Next
     btn.Font.bold = True
-    btn.Font.Size = 9
+    btn.Font.size = 9
     btn.Font.name = "Consolas"
     On Error GoTo 0
 
@@ -257,16 +257,16 @@ Public Function CostsSetDay(ByVal dateSerial As Long, ByVal daily As Double, _
             If r = COSTS_FIRST_ROW Or prevSerial = 0 Or dateSerial <> prevSerial + 1 Then
                 .Value = dateSerial
             Else
-                .Formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
+                .formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
             End If
         End With
 
         ws.Cells(r, COSTS_COL_TOTAL).numberFormat = "$#,##0.00"
         If r = COSTS_FIRST_ROW Then
-            ws.Cells(r, COSTS_COL_TOTAL).Formula = _
+            ws.Cells(r, COSTS_COL_TOTAL).formula = _
                 "=IF(ISBLANK(E" & r & "),"""",E" & r & ")"
         Else
-            ws.Cells(r, COSTS_COL_TOTAL).Formula = _
+            ws.Cells(r, COSTS_COL_TOTAL).formula = _
                 "=IF(ISBLANK(E" & r & "),"""",SUM($E$" & COSTS_FIRST_ROW & ":E" & r & "))"
         End If
     End If

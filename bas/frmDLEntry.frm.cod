@@ -40,6 +40,7 @@ Private m_src As Long
 Private m_dt As Date
 Private m_high As Boolean
 Private m_busy As Boolean
+Private m_placed As Boolean
 
 Private Const X1 As Single = 12
 Private Const C1 As Single = 90
@@ -53,6 +54,7 @@ Private Const TOP0 As Single = 10
 ' ================================================================================
 
 Private Sub UserForm_Initialize()
+    Me.StartUpPosition = 0
     m_busy = True
     Set m_ws = MDL_DownlinkTracker.DltSheet()
     m_row = MDL_DownlinkTracker.gDLT_TargetRow
@@ -61,8 +63,27 @@ Private Sub UserForm_Initialize()
     LoadDefaults
     m_busy = False
     RefreshCommand
+    MDL_DownlinkTracker.DLT_WheelOn
+    If Not MDL_DownlinkTracker.DLT_WheelReady() Then
+        ShowStatus "Mouse wheel on the dropdown did not start. The list still works with the arrow keys.", True
+    End If
     On Error Resume Next
     cboCmd.SetFocus
+    MDL_ScreenGuard.PlaceFormOnExcel Me
+End Sub
+
+Private Sub UserForm_Activate()
+    If m_placed Then Exit Sub
+    m_placed = True
+    MDL_ScreenGuard.PlaceFormOnExcel Me
+End Sub
+
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    MDL_DownlinkTracker.DLT_WheelOff
+End Sub
+
+Private Sub UserForm_Terminate()
+    MDL_DownlinkTracker.DLT_WheelOff
 End Sub
 
 Private Sub BuildControls()
@@ -211,9 +232,9 @@ Private Sub LoadDefaults()
     txtJ.Text = NumText(m_ws.Cells(src, DLC_J).Value2)
 
     If MDL_DownlinkTracker.DLT_LastSurveyBitDepth(d) Then
-        txtDepth.Text = NumText(d)
+        txtDepth.Text = DepthText(d)
     Else
-        txtDepth.Text = NumText(m_ws.Cells(src, DLC_DEPTH).Value2)
+        txtDepth.Text = DepthText(m_ws.Cells(src, DLC_DEPTH).Value2)
     End If
     m_dt = CDate(Int(CDbl(Now) * 1440# + 0.5) / 1440#)
     ShowDateTime
@@ -245,6 +266,28 @@ End Sub
 ' ================================================================================
 '  EVENTS
 ' ================================================================================
+
+Private Sub cboPage_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboPage"
+End Sub
+Private Sub cboCmd_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboCmd"
+End Sub
+Private Sub cboPeriod_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboPeriod"
+End Sub
+Private Sub cboType_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboType"
+End Sub
+Private Sub cboBottom_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboBottom"
+End Sub
+Private Sub cboPass_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboPass"
+End Sub
+Private Sub cboCode_DropButtonClick()
+    MDL_DownlinkTracker.DLT_WheelCombo "cboCode"
+End Sub
 
 Private Sub cboPage_Change()
     Dim keep As String
@@ -520,8 +563,14 @@ End Function
 
 Private Sub BumpDepth(ByVal stepM As Double)
     If Not IsNumeric(txtDepth.Text) Then Exit Sub
-    txtDepth.Text = NumText(CDbl(txtDepth.Text) + stepM)
+    txtDepth.Text = DepthText(CDbl(txtDepth.Text) + stepM)
 End Sub
+
+Private Function DepthText(ByVal v As Variant) As String
+    If IsEmpty(v) Or IsError(v) Then Exit Function
+    If Not IsNumeric(v) Then Exit Function
+    DepthText = CStr(Int(CDbl(v) + 0.5))
+End Function
 
 Private Sub ShowDateTime()
     m_busy = True

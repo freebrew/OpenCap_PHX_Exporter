@@ -10,6 +10,7 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Public WithEvents btn As MSForms.CommandButton
+Attribute btn.VB_VarHelpID = -1
 Public dateSerial As Long
 Public ParentForm As Object
 

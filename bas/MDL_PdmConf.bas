@@ -166,7 +166,7 @@ Public Sub PdmConf_OnDataChange(ByVal Target As Range)
     If Not confArea Is Nothing Then
         odHint = GuessMotorOdIn()
         For Each c In confArea.Cells
-            FillRevLForRow ws, c.Row, True, odHint
+            FillRevLForRow ws, c.row, True, odHint
         Next c
     End If
 
@@ -289,7 +289,7 @@ Private Function GuessMotorOdIn() As Double
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
 
-    lastR = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, 1).End(xlUp).row
     If lastR < 2 Then lastR = 40
     If lastR > 200 Then lastR = 200
 

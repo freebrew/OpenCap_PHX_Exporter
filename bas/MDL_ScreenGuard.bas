@@ -30,6 +30,25 @@ Private mHaveState As Boolean
 Private mSheetHold As Boolean
 Private mSheetPrevCalc As Long
 
+Private Type PLACE_RECT
+    Left As Long
+    Top As Long
+    Right As Long
+    Bottom As Long
+End Type
+
+Private Declare PtrSafe Function Place_GetWindowRect Lib "user32" Alias "GetWindowRect" ( _
+    ByVal hwnd As LongPtr, ByRef lpRect As PLACE_RECT) As Long
+Private Declare PtrSafe Function Place_FindWindow Lib "user32" Alias "FindWindowA" ( _
+    ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
+Private Declare PtrSafe Function Place_SetWindowPos Lib "user32" Alias "SetWindowPos" ( _
+    ByVal hwnd As LongPtr, ByVal hWndInsertAfter As LongPtr, _
+    ByVal x As Long, ByVal y As Long, ByVal cx As Long, ByVal cy As Long, _
+    ByVal uFlags As Long) As Long
+
+Private Const PLACE_NOSIZE As Long = &H1
+Private Const PLACE_NOZORDER As Long = &H4
+
 Public Sub ScreenBeginBusy(Optional ByVal statusText As String = "")
     If mDepth = 0 Then
         On Error Resume Next
@@ -177,3 +196,51 @@ Public Sub ScreenRepaint()
     w.ScrollColumn = w.ScrollColumn
     On Error GoTo 0
 End Sub
+
+' ================================================================================
+'  FORM ON THE WORKBOOK'S MONITOR
+'  A UserForm's startup position is the primary monitor. Center it on the
+'  Excel window that is open, including a second monitor (negative or
+'  past-primary coordinates).
+' ================================================================================
+
+' Call from UserForm_Initialize (point fallback) and once from Activate
+' (the form window exists then, so it can move to the other monitor).
+Public Sub PlaceFormOnExcel(ByVal frm As Object)
+    On Error GoTo Points
+    frm.StartUpPosition = 0
+    If PlaceFormByWindow(frm) Then Exit Sub
+Points:
+    On Error Resume Next
+    frm.StartUpPosition = 0
+    frm.Left = Application.Left + (Application.Width - frm.Width) / 2
+    frm.Top = Application.Top + (Application.Height - frm.Height) / 2
+    If frm.Top < Application.Top Then frm.Top = Application.Top + 12
+    If frm.Left < Application.Left Then frm.Left = Application.Left + 12
+End Sub
+
+Private Function PlaceFormByWindow(ByVal frm As Object) As Boolean
+    Dim er As PLACE_RECT
+    Dim fr As PLACE_RECT
+    Dim formHwnd As LongPtr
+    Dim fw As Long, fh As Long
+    Dim x As Long, y As Long
+
+    PlaceFormByWindow = False
+    If Application.hwnd = 0 Then Exit Function
+    If Place_GetWindowRect(Application.hwnd, er) = 0 Then Exit Function
+    formHwnd = Place_FindWindow("ThunderDFrame", CStr(frm.caption))
+    If formHwnd = 0 Then Exit Function
+    If Place_GetWindowRect(formHwnd, fr) = 0 Then Exit Function
+    fw = fr.Right - fr.Left
+    fh = fr.Bottom - fr.Top
+    If fw < 20 Or fh < 20 Then Exit Function
+    x = er.Left + ((er.Right - er.Left) - fw) \ 2
+    y = er.Top + ((er.Bottom - er.Top) - fh) \ 2
+    If x < er.Left Then x = er.Left + 12
+    If y < er.Top Then y = er.Top + 12
+    Place_SetWindowPos formHwnd, 0, x, y, 0, 0, PLACE_NOSIZE Or PLACE_NOZORDER
+    PlaceFormByWindow = True
+End Function
+
+

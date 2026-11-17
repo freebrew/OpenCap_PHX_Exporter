@@ -15,7 +15,7 @@ Private Sub CommandButton2_Click()
 '
  Dim name As String
     
-   name = ThisWorkbook.Path & "\" & Range("B5") & Range("B6") & " DATA" & ".pdf"
+   name = ThisWorkbook.path & "\" & Range("B5") & Range("B6") & " DATA" & ".pdf"
         
     Application.GoTo Reference:="Print_Area"
 
@@ -65,6 +65,10 @@ Fail:
     ScreenEndBusy
     ScreenReleaseCalcForSheet
 End Sub
+
+
+
+
 
 
 

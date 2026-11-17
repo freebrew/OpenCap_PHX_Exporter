@@ -1,6 +1,10 @@
 {
   "scripts": {
-    "render:store-assets": "powershell -ExecutionPolicy Bypass -File remotion/render-assets.ps1"
+    "render:store-assets": "powershell -ExecutionPolicy Bypass -File remotion/render-assets.ps1",
+    "dev:ext": "pnpm --filter @phx/extension dev",
+    "build:ext": "pnpm --filter @phx/extension build",
+    "parity": "pnpm --filter @phx/parity-harness start --",
+    "test": "pnpm -r --if-present test"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.468",

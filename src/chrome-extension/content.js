@@ -75,16 +75,29 @@
     return null;
   };
 
-  // FieldCap occasionally blocks workflow with a bottom-hole verification modal.
-  // Suppression is intentionally text-gated so unrelated dialogs remain visible.
+  // FieldCap blocks the job with a bottom-line verification modal. The copy
+  // ("bottom hole measurements", SD, TVD, "Remind me in 10 minutes") is
+  // server-configured and has changed. The shell that is still in the live
+  // bundle is ui-bootstrap: div.modal-backdrop plus
+  // div.modal[uib-modal-window][role=dialog], body #CustomModalContent, and
+  // a.close-button (data-ng-click="cancel()"). Match the title, then dismiss
+  // that window so the static backdrop does not stay up.
   let suppressBottomLineModal = true;
   const suppressedBottomLineEls = new WeakSet();
 
   const isBottomLineVerificationText = (text) =>
-    /bottom line verification/i.test(text) &&
-    /bottom hole measurements/i.test(text) &&
-    /\bSD\b/i.test(text) &&
-    /\bTVD\b/i.test(text);
+    /bottom\s*line\s*verif/i.test(text) ||
+    /verif\w*\s+bottom\s*line/i.test(text);
+
+  const isModalChrome = (el) =>
+    !!el && typeof el.matches === "function" && el.matches(
+      "[uib-modal-window], .modal[role='dialog'], .modal-dialog, .modal-content, #CustomModalContent, .modal-custom"
+    );
+
+  const modalShellOf = (el) => {
+    if (!el || typeof el.closest !== "function") return el;
+    return el.closest("[uib-modal-window], .modal[role='dialog']") || el;
+  };
 
   const elementArea = (el) => {
     const rect = el.getBoundingClientRect();
@@ -100,6 +113,10 @@
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return false;
 
+    // A full-width configured dialog (window class modal-fullwidth) is still
+    // the popup. Only reject a page-sized node that is not modal chrome, so
+    // the app shell is never hidden.
+    if (isModalChrome(el)) return true;
     const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
     const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
     const pageSized = rect.width >= viewportWidth * 0.96 && rect.height >= viewportHeight * 0.85;
@@ -111,21 +128,13 @@
       .filter(isSafeDialogElement)
       .sort((a, b) => elementArea(a) - elementArea(b))[0] ?? null;
 
-  const isLikelyBackdrop = (el) => {
-    const rect = el.getBoundingClientRect();
-    const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-    const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
-    const text = normalize(el.innerText ?? el.textContent);
-    return text.length < 40 && rect.width >= viewportWidth * 0.6 && rect.height >= viewportHeight * 0.6;
-  };
-
   const findBottomLineVerificationModal = () => {
     const directMatch = pickSmallestSafeDialog(document.querySelectorAll(BOTTOM_LINE_DIALOG_SELECTORS));
     if (directMatch) return directMatch;
 
     for (const heading of document.querySelectorAll("h1, h2, h3, h4, h5, strong, b")) {
       const headingText = normalize(heading.innerText ?? heading.textContent);
-      if (!/^Bottom Line Verification$/i.test(headingText)) continue;
+      if (!isBottomLineVerificationText(headingText)) continue;
 
       const candidates = [];
       let el = heading.parentElement;
@@ -134,48 +143,68 @@
         el = el.parentElement;
       }
       const ancestorMatch = pickSmallestSafeDialog(candidates);
-      if (ancestorMatch) return ancestorMatch;
+      if (ancestorMatch) return modalShellOf(ancestorMatch);
     }
 
     return null;
   };
 
   const hideBottomLineModalElement = (modal) => {
-    modal.setAttribute("data-open-cap-suppressed", "bottom-line-verification");
-    modal.setAttribute("aria-hidden", "true");
-    modal.style.setProperty("display", "none", "important");
-    modal.style.setProperty("visibility", "hidden", "important");
+    const shell = modalShellOf(modal) || modal;
+    shell.setAttribute("data-open-cap-suppressed", "bottom-line-verification");
+    shell.setAttribute("aria-hidden", "true");
+    shell.style.setProperty("display", "none", "important");
+    shell.style.setProperty("visibility", "hidden", "important");
+
+    const otherOpen = [...document.querySelectorAll("[uib-modal-window], .modal[role='dialog']")].some((el) => {
+      if (el === shell) return false;
+      if (el.getAttribute("data-open-cap-suppressed") === "bottom-line-verification") return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    if (otherOpen) return;
 
     for (const backdrop of document.querySelectorAll(".modal-backdrop, .cdk-overlay-backdrop, .k-overlay, .MuiBackdrop-root")) {
-      if (!isLikelyBackdrop(backdrop)) continue;
       backdrop.style.setProperty("display", "none", "important");
       backdrop.style.setProperty("visibility", "hidden", "important");
     }
     document.body.classList.remove("modal-open");
     document.body.style.removeProperty("overflow");
+    document.body.style.removeProperty("padding-right");
+  };
+
+  const clickWithoutNavigation = (el) => {
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
   };
 
   const dismissBottomLineVerificationModal = () => {
     if (!suppressBottomLineModal) return;
 
-    const modal = findBottomLineVerificationModal();
-    if (!modal || suppressedBottomLineEls.has(modal)) return;
-    suppressedBottomLineEls.add(modal);
-
-    const controls = [...modal.querySelectorAll("button, a, input[type='button'], input[type='submit']")];
-    const remindControl = controls.find((el) =>
-      /remind me in 10 minutes/i.test(normalize(el.innerText ?? el.value ?? el.textContent))
-    );
-
-    if (remindControl) {
-      remindControl.click();
-      setTimeout(() => {
-        if (modal.isConnected) hideBottomLineModalElement(modal);
-      }, 250);
+    const found = findBottomLineVerificationModal();
+    const modal = found ? modalShellOf(found) : null;
+    if (!modal) {
+      const stuck = document.querySelector("[data-open-cap-suppressed='bottom-line-verification']");
+      if (stuck) hideBottomLineModalElement(stuck);
       return;
     }
+    if (suppressedBottomLineEls.has(modal)) {
+      if (modal.isConnected) hideBottomLineModalElement(modal);
+      return;
+    }
+    suppressedBottomLineEls.add(modal);
 
-    hideBottomLineModalElement(modal);
+    // Current shell closes through a.close-button (cancel). Older copy used
+    // "Remind me in 10 minutes". Either click is untrusted so an <a href="">
+    // does not navigate. Force-hide afterwards in case Angular ignores it.
+    const closeControl = modal.querySelector("a.close-button, button.close");
+    const remindControl = [...modal.querySelectorAll("button, a, input[type='button'], input[type='submit']")].find((el) =>
+      /remind me|not now|skip for now/i.test(normalize(el.innerText ?? el.value ?? el.textContent))
+    );
+    const clickTarget = closeControl || remindControl;
+    if (clickTarget) clickWithoutNavigation(clickTarget);
+    setTimeout(() => {
+      if (modal.isConnected) hideBottomLineModalElement(modal);
+    }, 250);
   };
 
   try {

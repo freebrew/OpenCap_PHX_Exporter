@@ -1,18 +1,30 @@
 Option Explicit
 
 Private m_busy As Boolean
+Private m_placed As Boolean
 
 Private Sub UserForm_Initialize()
+    Me.StartUpPosition = 0
     m_busy = True
     Me.Caption = "Pipe Tally Calculator"
     lstPreview.Clear
     lstPreview.ColumnCount = 2
     lstPreview.ColumnWidths = "70;90"
     ReloadFromSheet
+    btnPaste.Caption = "Import CSV"
+    If Len(gPipeTallyNote) > 0 Then
+        lblStatus.Caption = gPipeTallyNote
+        gPipeTallyNote = ""
+    End If
     m_busy = False
+    MDL_ScreenGuard.PlaceFormOnExcel Me
 End Sub
 
 Private Sub UserForm_Activate()
+    If Not m_placed Then
+        m_placed = True
+        MDL_ScreenGuard.PlaceFormOnExcel Me
+    End If
     If Not m_busy Then
         lblStart.Caption = FormatStart(PipeTallyStartDepth())
     End If
@@ -23,19 +35,12 @@ Private Sub UserForm_Terminate()
 End Sub
 
 Private Sub btnPaste_Click()
-    Dim txt As String
-    Dim lengths As Variant
-    Dim errMsg As String
-    ' Do not read the Windows clipboard only — Excel already flushed it
-    ' when this click took focus off the grid (CutCopyMode).
-    txt = GetPipeTallyPasteText()
-    If Not ParsePipeLengthColumn(txt, lengths, errMsg) Then
-        lblStatus.Caption = errMsg
-        MsgBox errMsg, vbExclamation, "Paste pipe lengths"
-        Exit Sub
+    ImportPipeTallyCsv
+    ReloadFromSheet
+    If Len(gPipeTallyNote) > 0 Then
+        lblStatus.Caption = gPipeTallyNote
+        gPipeTallyNote = ""
     End If
-    ApplyLengths lengths
-    lblStatus.Caption = "Pasted " & CStr(UBound(lengths)) & " pipe length(s)."
 End Sub
 
 Private Sub btnClear_Click()
@@ -125,19 +130,22 @@ End Sub
 
 Private Sub PopulatePreview(ByVal lengths As Variant, ByVal depths As Variant)
     Dim i As Long, nL As Long, nD As Long, n As Long
-    Dim lenTxt As String, depTxt As String
+    Dim rows() As String
     lstPreview.Clear
     nL = 0: nD = 0
     If Not IsEmpty(lengths) Then nL = UBound(lengths)
     If Not IsEmpty(depths) Then nD = UBound(depths)
     n = nL
     If nD > n Then n = nD
-    For i = 1 To n
-        If i <= nL Then lenTxt = Format$(lengths(i), "0.00") Else lenTxt = ""
-        If i <= nD Then depTxt = Format$(depths(i), "0.00") Else depTxt = ""
-        lstPreview.AddItem lenTxt
-        lstPreview.List(lstPreview.ListCount - 1, 1) = depTxt
-    Next i
+    If n > 0 Then
+        ' One List assignment instead of an AddItem plus a cell write per row.
+        ReDim rows(0 To n - 1, 0 To 1)
+        For i = 1 To n
+            If i <= nL Then rows(i - 1, 0) = Format$(lengths(i), "0.00")
+            If i <= nD Then rows(i - 1, 1) = Format$(depths(i), "0.00")
+        Next i
+        lstPreview.List = rows
+    End If
     lblCount.Caption = CStr(nL) & " joints / " & CStr(nD) & " depths"
 End Sub
 

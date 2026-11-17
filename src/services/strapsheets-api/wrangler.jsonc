@@ -11,8 +11,9 @@
   // Non-secret config. Secrets (GOOGLE_CLIENT_SECRET, MICROSOFT_CLIENT_SECRET,
   // SHEETS_PRIVATE_KEY, TOKEN_SIGNING_KEY) are set with `wrangler secret put`.
   "vars": {
-    "APP_BASE_URL": "http://localhost:8787",
-    "MAIL_FROM": "strapsheets@example.com",
+    "APP_BASE_URL": "https://strapsheets-api.bruno-brottes.workers.dev",
+    // Must be an address on a domain onboarded for Cloudflare Email Sending. Not the apex: that domain has its own mail.
+    "MAIL_FROM": "no-reply@send.strapsheets.agent-swarm.net",
     "GOOGLE_CLIENT_ID": "",
     "MICROSOFT_CLIENT_ID": "",
     "MICROSOFT_TENANT": "common",
@@ -23,12 +24,12 @@
     {
       "binding": "DB",
       "database_name": "strapsheets",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "fa331d2d-c3db-4755-9c21-ed870e6f2af8",
       "migrations_dir": "migrations"
     }
   ],
   "kv_namespaces": [
-    { "binding": "KV", "id": "00000000000000000000000000000000" }
+    { "binding": "KV", "id": "1b5ea9172566415d95fde79bbe0e96b4" }
   ],
   "send_email": [{ "name": "EMAIL" }],
   "durable_objects": {

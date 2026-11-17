@@ -21,39 +21,43 @@ Private Const CAP_PULL As String = "Last Survey"
 Private Const SS_SHEET As String = "Slidesheet"
 Private Const SS_FIRST As Long = 13
 Private Const SS_LAST As Long = 505
+Private Const PLANSEC_SHEET As String = "_OC_PlanSec"
+Private Const TARGET_PICK_CELL As String = "P2"
 
-' Rate block I:R, left to right: MWD DLS | MWD Average | Between sensors |
-' PD DLS | PD Average. Targets S1:T4 and rates U1:V4 sit over the
-' bit-projection columns. Row-3 averages sit on the MWD (J:M) and PD (Q:R)
-' average columns. The Bit to Sensor Offsets box stays on M1:P2.
-Private Const COL_MWD_DLS As Long = 9     ' I
-Private Const COL_MWD_BURC As Long = 10   ' J
-Private Const COL_MWD_TRC As Long = 11    ' K
-Private Const COL_MWD_BURS As Long = 12   ' L
-Private Const COL_MWD_TRS As Long = 13    ' M
-Private Const COL_SENS_DLS As Long = 14   ' N  3D DLS MWD(D,E) <-> PD(G,H)
-Private Const COL_SENS_BUR As Long = 15   ' O  signed BUR, PD minus MWD
-Private Const COL_PD_DLS As Long = 16     ' P
-Private Const COL_PD_BUR As Long = 17     ' Q
-Private Const COL_PD_TR As Long = 18      ' R
-Private Const COL_HOLE As Long = 19       ' S
-Private Const COL_INC_BIT As Long = 20    ' T
-Private Const COL_AZ_BIT As Long = 21     ' U
-Private Const COL_TVD_BIT As Long = 22    ' V
-Private Const COL_ROP As Long = 23        ' W
+' Column A (the "Last MWD Survey" label) is not on the tab. Rate block H:Q,
+' left to right: MWD DLS | MWD Average | Between sensors | PD DLS | PD Average.
+' Targets R1:S4 and rates T1:U4 sit over the bit-projection columns. Row-3
+' averages sit on the MWD (I:L) and PD (P:Q) average columns. The Bit to
+' Sensor Offsets box stays on L1:O2.
+Private Const COL_MWD_DLS As Long = 8     ' H
+Private Const COL_MWD_BURC As Long = 9    ' I
+Private Const COL_MWD_TRC As Long = 10    ' J
+Private Const COL_MWD_BURS As Long = 11   ' K
+Private Const COL_MWD_TRS As Long = 12    ' L
+Private Const COL_SENS_DLS As Long = 13   ' M  3D DLS MWD(C,D) <-> PD(F,G)
+Private Const COL_SENS_BUR As Long = 14   ' N  signed BUR, PD minus MWD
+Private Const COL_PD_DLS As Long = 15     ' O
+Private Const COL_PD_BUR As Long = 16     ' P
+Private Const COL_PD_TR As Long = 17      ' Q
+Private Const COL_HOLE As Long = 18       ' R
+Private Const COL_INC_BIT As Long = 19    ' S
+Private Const COL_AZ_BIT As Long = 20     ' T
+Private Const COL_TVD_BIT As Long = 21    ' U
+Private Const COL_ROP As Long = 22        ' V
 Private Const HDR_SENS_DLS As String = "Sens DLS"
 Private Const HDR_PD_DLS As String = "PD DLS"
 
 ' Everything the user types on the tab, held in memory across a repaint.
 Private Type ContDIInputs
-    tieOn As Variant      ' B2:E2
-    pdOff As Variant      ' N2
-    diOff As Variant      ' P2
-    targets As Variant    ' T1:T4
-    bit As Variant        ' B8:B44
-    mwd As Variant        ' D8:E44
-    pD As Variant         ' G8:H44
-    rop As Variant        ' W8:W44
+    tieOn As Variant      ' A2:D2
+    pdOff As Variant      ' M2
+    diOff As Variant      ' O2
+    targetName As Variant ' P2
+    targets As Variant    ' S1:S4
+    bit As Variant        ' A8:A44
+    mwd As Variant        ' C8:D44
+    pD As Variant         ' F8:G44
+    rop As Variant        ' V8:V44
 End Type
 
 ' ================================================================================
@@ -78,7 +82,8 @@ Public Sub BuildContDITab()
     Set ws = EnsureContDISheet()
     wp = SheetUnprotectForVba(ws)
     ' Bring an old-layout tab up to date first so the snapshot reads the
-    ' right cells (ROP at W, targets at T1:T4).
+    ' right cells (ROP at V, targets at S1:S4).
+    DropLabelColumn ws
     EnsureInterSensorColumns ws
     EnsureHeaderShift ws
     snap = SnapshotInputs(ws)
@@ -88,6 +93,7 @@ Public Sub BuildContDITab()
     SeedProjectionHelpers ws
     ApplyLookupsAndRates ws
     RestoreInputs ws, snap
+    ContDI_FollowSlideTarget
     ApplyContDILock ws
     SheetReprotectAfterVba ws, True
 
@@ -101,9 +107,9 @@ ErrHandler:
     MsgBox "BuildContDITab: " & Err.Description, vbCritical
 End Sub
 
-' "New Set" button: wipe the typed readings (B/D/E/G/H/W 8:44) and re-pull the
-' newest green Slidesheet survey into B2:E2. Offsets (N2/P2) and targets
-' (T1:T4) are setup, not readings, so they stay.
+' "New Set" button: wipe the typed readings (A/C/D/F/G/V 8:44) and re-pull the
+' newest green Slidesheet survey into A2:D2. Offsets (M2/O2) stay. The yellow
+' target (S1:S4) is the slidesheet's active station, not a typed setup value.
 Public Sub ContDI_NewSet()
     Dim ws As Worksheet
     Dim wasProt As Boolean
@@ -135,8 +141,9 @@ Public Sub ContDI_NewCourse()
     ContDI_NewSet
 End Sub
 
-' Button / macro: refill "Last MWD Survey" (B2:E2) from the Slidesheet
-' without clearing the grid.
+' Button / macro: refill the tie-on survey (A2:D2) from the Slidesheet,
+' clear typed A/C/D/F/G/V from row 8 down, and keep the last entered grid
+' row as row 8.
 Public Sub ContDI_PullLastSurvey()
     Dim ws As Worksheet
     Dim wasProt As Boolean
@@ -148,6 +155,7 @@ Public Sub ContDI_PullLastSurvey()
 
     Set ws = ContDISheet()
     wasProt = SheetUnprotectForVba(ws)
+    PromoteLastGridRow ws
     WriteLastSurveyTieOn ws, True
     SheetReprotectAfterVba ws, wasProt
     Application.EnableEvents = ev
@@ -168,14 +176,105 @@ Public Sub EnsureContDIPullButton()
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(SH_CONTDI)
     If ws Is Nothing Then Exit Sub
-    If ControlsCurrent(ws) Then Exit Sub
     wasProt = SheetUnprotectForVba(ws)
-    EnsureContDIControls ws
+    If Not ControlsCurrent(ws) Then EnsureContDIControls ws
     SheetReprotectAfterVba ws, wasProt
 End Sub
 
+' The yellow target follows the slidesheet. A typed edit in that block is put
+' back onto the slidesheet's active station.
+Public Function ContDI_ApplyTargetSelection(ByVal ws As Worksheet, _
+                                             ByVal Target As Range) As Boolean
+    Dim hit As Range
+    On Error GoTo Fail
+    Set hit = Application.Intersect(Target, ws.Range("P2:Q2,S1:S4"))
+    If hit Is Nothing Then Exit Function
+    ContDI_FollowSlideTarget
+    ContDI_ApplyTargetSelection = True
+    Exit Function
+Fail:
+    ContDI_ApplyTargetSelection = False
+End Function
+
+' Target S1:S4 / P2 is the slidesheet's active target (AO) on the as-drilled
+' survey row this tab ties on to (A2), so it advances through the named
+' targets exactly as the slidesheet does. Rates U1:U4 are the same plan-point
+' arc as Slidesheet AR:AT, run from this tab's bit (ContDI_Data T1/T4/U4/V1)
+' toward S1. Writes only cells that differ.
+Public Sub ContDI_FollowSlideTarget()
+    Dim ws As Worksheet
+    Dim h As Worksheet
+    Dim wasProt As Boolean
+    Dim wasProtH As Boolean
+    Dim prevEvents As Boolean
+    Dim tgts As String
+    Dim aim As String
+    Dim aimH As String
+    Dim fX2 As String
+    Dim aimCells As Variant
+    Dim fmls As Variant
+    Dim i As Long
+    Dim dirty As Boolean
+
+    On Error GoTo Fail
+    Set ws = ThisWorkbook.Worksheets(SH_CONTDI)
+    If ws Is Nothing Then Exit Sub
+    Set h = ContDIDataSheet()
+    If h Is Nothing Then Exit Sub
+
+    tgts = "ProjTargets_MD,ProjTargets_INC,ProjTargets_AZM,ProjTargets_TVD"
+    aim = "A2,B2,C2,ContDI_Data!T1,ContDI_Data!T4,ContDI_Data!U4,ContDI_Data!V1," & tgts & ",S1"
+    aimH = "'" & SH_CONTDI & "'!A2,'" & SH_CONTDI & "'!B2,'" & SH_CONTDI & "'!C2,T1,T4,U4,V1," & _
+           tgts & ",'" & SH_CONTDI & "'!S1"
+
+    aimCells = Array("P2", "S1", "S2", "S3", "S4", "U1", "U2", "U3", "U4")
+    fmls = Array( _
+        "=IFERROR(INDEX(ProjTargets_NAME,MATCH(S1,ProjTargets_MD,0)),"""")", _
+        "=IFERROR(INDEX(Slidesheet!$AO$13:$AO$505,MATCH(A2,Slidesheet!$E$13:$E$505,0)),"""")", _
+        "=IFERROR(INDEX(ProjTargets_INC,MATCH(S1,ProjTargets_MD,0)),"""")", _
+        "=IFERROR(INDEX(ProjTargets_AZM,MATCH(S1,ProjTargets_MD,0)),"""")", _
+        "=IFERROR(INDEX(ProjTargets_TVD,MATCH(S1,ProjTargets_MD,0)),"""")", _
+        "=IF(S1="""","""",IFERROR(ROUND(ProjContDiAim(""BRR""," & aim & "),2),""""))", _
+        "=IF(S1="""","""",IFERROR(ROUND(ProjContDiAim(""TRR""," & aim & "),2),""""))", _
+        "=IF(S1="""","""",IFERROR(ROUND(ProjContDiAim(""DLR""," & aim & "),2),""""))", _
+        "=IF(S1="""","""",IFERROR(ProjContDiAim(""TF""," & aim & "),""""))")
+    fX2 = "=IF('" & SH_CONTDI & "'!S1="""","""",IFERROR(ROUND(ProjContDiAim(""TRRS""," & aimH & "),2),""""))"
+
+    dirty = (StrComp(CStr(h.Range("X2").formula), fX2, vbTextCompare) <> 0)
+    For i = 0 To UBound(aimCells)
+        If StrComp(CStr(ws.Range(aimCells(i)).formula), CStr(fmls(i)), vbTextCompare) <> 0 Then dirty = True
+    Next i
+    If Not dirty Then Exit Sub
+
+    prevEvents = Application.EnableEvents
+    Application.EnableEvents = False
+    wasProt = SheetUnprotectForVba(ws)
+    wasProtH = SheetUnprotectForVba(h)
+    ws.Range("P1").Value = "Active Target"
+    On Error Resume Next
+    ws.Range("P2").Validation.Delete
+    On Error GoTo Fail
+    For i = 0 To UBound(aimCells)
+        If StrComp(CStr(ws.Range(aimCells(i)).formula), CStr(fmls(i)), vbTextCompare) <> 0 Then
+            ws.Range(aimCells(i)).formula = fmls(i)
+        End If
+    Next i
+    ws.Range("P2").numberFormat = "General"
+    ws.Range("S1:S4").numberFormat = "0.00"
+    h.Range("X2").formula = fX2
+    SheetReprotectAfterVba h, wasProtH
+    SheetReprotectAfterVba ws, wasProt
+    Application.EnableEvents = prevEvents
+    Exit Sub
+Fail:
+    On Error Resume Next
+    If Not h Is Nothing Then SheetReprotectAfterVba h, wasProtH
+    SheetReprotectAfterVba ws, wasProt
+    Application.EnableEvents = prevEvents
+End Sub
+
 ' ================================================================================
-'  LAST MWD SURVEY (Slidesheet -> B2:E2)
+'  LAST MWD SURVEY (Slidesheet -> A2:D2)
 ' ================================================================================
 
 ' The Slidesheet survey-entry fill: light green RGB(204,255,204) (Excel
@@ -210,16 +309,23 @@ Private Function IsGoodSurveyCell(ByVal c As Range) As Boolean
     IsGoodSurveyCell = FillLooksGreen(c)
 End Function
 
-' True when Inc (F) and Azm (G) are numeric and painted survey-green.
-' Any other fill is a user projection / note and is not a survey.
+' True when survey MD (E) is a number and Inc (F) / Azm (G) are numeric and
+' painted survey-green. Any other fill is a user projection / note, and an
+' Inc/Azm with no MD is not a station (it made bit depth 0 for the target window).
+Private Function IsGoodSurveyRowCells(ByVal ss As Worksheet, ByVal r As Long) As Boolean
+    IsGoodSurveyRowCells = False
+    If Not IsNumberValue(ss.Cells(r, "E").Value2) Then Exit Function
+    IsGoodSurveyRowCells = IsGoodSurveyCell(ss.Cells(r, "F")) _
+                        And IsGoodSurveyCell(ss.Cells(r, "G"))
+End Function
+
 Public Function IsSlidesheetGoodSurveyRow(ByVal r As Long) As Boolean
     Dim ss As Worksheet
     IsSlidesheetGoodSurveyRow = False
     On Error GoTo Done
     If r < SS_FIRST Or r > SS_LAST Then Exit Function
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
-    IsSlidesheetGoodSurveyRow = IsGoodSurveyCell(ss.Cells(r, "F")) _
-                             And IsGoodSurveyCell(ss.Cells(r, "G"))
+    IsSlidesheetGoodSurveyRow = IsGoodSurveyRowCells(ss, r)
 Done:
 End Function
 
@@ -227,8 +333,7 @@ Public Function IsSlidesheetGoodSurveyRowOn(ByVal ss As Worksheet, ByVal r As Lo
     IsSlidesheetGoodSurveyRowOn = False
     If ss Is Nothing Then Exit Function
     If r < SS_FIRST Or r > SS_LAST Then Exit Function
-    IsSlidesheetGoodSurveyRowOn = IsGoodSurveyCell(ss.Cells(r, "F")) _
-                               And IsGoodSurveyCell(ss.Cells(r, "G"))
+    IsSlidesheetGoodSurveyRowOn = IsGoodSurveyRowCells(ss, r)
 End Function
 
 ' Deepest good-survey row on the Slidesheet (13:505); 0 = none.
@@ -240,7 +345,7 @@ Public Function LastSlidesheetSurveyRow() As Long
     On Error GoTo Done
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
     For r = SS_LAST To SS_FIRST Step -1
-        If IsGoodSurveyCell(ss.Cells(r, "F")) And IsGoodSurveyCell(ss.Cells(r, "G")) Then
+        If IsGoodSurveyRowCells(ss, r) Then
             LastSlidesheetSurveyRow = r
             Exit Function
         End If
@@ -248,7 +353,7 @@ Public Function LastSlidesheetSurveyRow() As Long
 Done:
 End Function
 
-' B2 = survey MD (E), C2 = Inc (F), D2 = Azm (G), E2 = TVD (H).
+' A2 = survey MD (E), B2 = Inc (F), C2 = Azm (G), D2 = TVD (H).
 ' Stand length (Slidesheet C, next survey course) is stored on ContDI_Data!X1
 ' for ProjBurr's short-MD floor - not shown on the tab.
 ' Caller owns protection / events. verbose:=True reports when nothing qualifies.
@@ -265,10 +370,10 @@ Private Sub WriteLastSurveyTieOn(ByVal ws As Worksheet, ByVal verbose As Boolean
         Exit Sub
     End If
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
-    ws.Range("B2").Value = ss.Cells(r, "E").Value2
-    ws.Range("C2").Value = ss.Cells(r, "F").Value2
-    ws.Range("D2").Value = ss.Cells(r, "G").Value2
-    ws.Range("E2").Value = ss.Cells(r, "H").Value2
+    ws.Range("A2").Value = ss.Cells(r, "E").Value2
+    ws.Range("B2").Value = ss.Cells(r, "F").Value2
+    ws.Range("C2").Value = ss.Cells(r, "G").Value2
+    ws.Range("D2").Value = ss.Cells(r, "H").Value2
 
     nextC = Empty
     If r + 1 <= SS_LAST Then
@@ -282,7 +387,7 @@ Private Sub WriteLastSurveyTieOn(ByVal ws As Worksheet, ByVal verbose As Boolean
 End Sub
 
 ' ContDI_Data W1 = Slidesheet bit MD (D), W2/W3 = Inc@Bit / Az@Bit (W/X) for
-' the tie-on row. Does not touch B2:E2. Lets BRR start from the same projected
+' the tie-on row. Does not touch A2:D2. Lets BRR start from the same projected
 ' bit as Slidesheet Y while the Cont DI grid is still empty.
 Private Sub SeedProjectionHelpers(ByVal ws As Worksheet, Optional ByVal ssRow As Long = 0)
     Dim ss As Worksheet
@@ -294,8 +399,8 @@ Private Sub SeedProjectionHelpers(ByVal ws As Worksheet, Optional ByVal ssRow As
     r = ssRow
     If r < SS_FIRST Then
         r = 0
-        If IsNumberValue(ws.Range("B2").Value2) Then
-            md = CDbl(ws.Range("B2").Value2)
+        If IsNumberValue(ws.Range("A2").Value2) Then
+            md = CDbl(ws.Range("A2").Value2)
             For i = SS_LAST To SS_FIRST Step -1
                 If IsNumberValue(ss.Cells(i, "E").Value2) Then
                     If Abs(CDbl(ss.Cells(i, "E").Value2) - md) < 0.05 Then
@@ -377,50 +482,114 @@ End Function
 
 Private Function SnapshotInputs(ByVal ws As Worksheet) As ContDIInputs
     Dim s As ContDIInputs
-    s.tieOn = ws.Range("B2:E2").Value
-    s.pdOff = ws.Range("N2").Value
-    s.diOff = ws.Range("P2").Value
-    s.targets = ws.Range("T1:T4").Value
-    s.bit = ws.Range("B8:B44").Value
-    s.mwd = ws.Range("D8:E44").Value
-    s.pD = ws.Range("G8:H44").Value
-    s.rop = ws.Range("W8:W44").Value
+    s.tieOn = ws.Range("A2:D2").Value
+    s.pdOff = ws.Range("M2").Value
+    s.diOff = ws.Range("O2").Value
+    s.targetName = ws.Range(TARGET_PICK_CELL).Value
+    s.targets = ws.Range("S1:S4").Value
+    s.bit = ws.Range("A8:A44").Value
+    s.mwd = ws.Range("C8:D44").Value
+    s.pD = ws.Range("F8:G44").Value
+    s.rop = ws.Range("V8:V44").Value
     SnapshotInputs = s
 End Function
 
 Private Sub RestoreInputs(ByVal ws As Worksheet, ByRef s As ContDIInputs)
-    ws.Range("B2:E2").Value = s.tieOn
-    If Not IsEmpty(s.pdOff) Then ws.Range("N2").Value = s.pdOff
-    If Not IsEmpty(s.diOff) Then ws.Range("P2").Value = s.diOff
-    ws.Range("T1:T4").Value = s.targets
-    ws.Range("B8:B44").Value = s.bit
-    ws.Range("D8:E44").Value = s.mwd
-    ws.Range("G8:H44").Value = s.pD
-    ws.Range("W8:W44").Value = s.rop
+    ws.Range("A2:D2").Value = s.tieOn
+    If Not IsEmpty(s.pdOff) Then ws.Range("M2").Value = s.pdOff
+    If Not IsEmpty(s.diOff) Then ws.Range("O2").Value = s.diOff
+    If Not IsEmpty(s.targetName) Then ws.Range(TARGET_PICK_CELL).Value = s.targetName
+    ws.Range("S1:S4").Value = s.targets
+    ws.Range("A8:A44").Value = s.bit
+    ws.Range("C8:D44").Value = s.mwd
+    ws.Range("F8:G44").Value = s.pD
+    ws.Range("V8:V44").Value = s.rop
 End Sub
 
 Private Sub ClearInputs(ByVal ws As Worksheet)
-    ws.Range("B8:B44").ClearContents
-    ws.Range("D8:E44").ClearContents
-    ws.Range("G8:H44").ClearContents
-    ws.Range("W8:W44").ClearContents
+    ws.Range("A8:A44").ClearContents
+    ws.Range("C8:D44").ClearContents
+    ws.Range("F8:G44").ClearContents
+    ws.Range("V8:V44").ClearContents
 End Sub
+
+' Last Survey: the bottom-most row with anything in A/C/D/F/G becomes row 8,
+' including that row's ROP. A/C/D/F/G/V are cleared from row 8 down first.
+Private Sub PromoteLastGridRow(ByVal ws As Worksheet)
+    Dim r As Long
+    Dim lastR As Long
+    Dim b As Variant
+    Dim d As Variant
+    Dim e As Variant
+    Dim g As Variant
+    Dim h As Variant
+    Dim w As Variant
+
+    lastR = 0
+    For r = LAST_DATA To FIRST_DATA Step -1
+        If GridRowHasEntry(ws, r) Then
+            lastR = r
+            Exit For
+        End If
+    Next r
+    If lastR > 0 Then
+        b = ws.Cells(lastR, "A").Value
+        d = ws.Cells(lastR, "C").Value
+        e = ws.Cells(lastR, "D").Value
+        g = ws.Cells(lastR, "F").Value
+        h = ws.Cells(lastR, "G").Value
+        w = ws.Cells(lastR, "V").Value
+    End If
+    ws.Range("A8:A44").ClearContents
+    ws.Range("C8:D44").ClearContents
+    ws.Range("F8:G44").ClearContents
+    ws.Range("V8:V44").ClearContents
+    If lastR > 0 Then
+        ws.Cells(FIRST_DATA, "A").Value = b
+        ws.Cells(FIRST_DATA, "C").Value = d
+        ws.Cells(FIRST_DATA, "D").Value = e
+        ws.Cells(FIRST_DATA, "F").Value = g
+        ws.Cells(FIRST_DATA, "G").Value = h
+        ws.Cells(FIRST_DATA, "V").Value = w
+    End If
+End Sub
+
+Private Function GridRowHasEntry(ByVal ws As Worksheet, ByVal r As Long) As Boolean
+    GridRowHasEntry = CellHasEntry(ws.Cells(r, "A")) Or CellHasEntry(ws.Cells(r, "C")) _
+                   Or CellHasEntry(ws.Cells(r, "D")) Or CellHasEntry(ws.Cells(r, "F")) _
+                   Or CellHasEntry(ws.Cells(r, "G"))
+End Function
+
+Private Function CellHasEntry(ByVal c As Range) As Boolean
+    Dim v As Variant
+    v = c.Value2
+    CellHasEntry = False
+    If isError(v) Then
+        CellHasEntry = True
+    ElseIf IsEmpty(v) Then
+        CellHasEntry = False
+    ElseIf VarType(v) = vbString Then
+        CellHasEntry = (Len(Trim$(CStr(v))) > 0)
+    Else
+        CellHasEntry = True
+    End If
+End Function
 
 ' ================================================================================
 '  LOCK / CONTROLS
 ' ================================================================================
 
-' Inputs (tie-on, offsets, targets, B/D/E/G/H/W 8:44) unlocked; all else locked.
+' Inputs (tie-on, offsets, A/C/D/F/G/V 8:44) unlocked. The target block
+' (P2 name, S1:S4) stays locked: those cells are the slidesheet aim.
 Private Sub ApplyContDILock(ByVal ws As Worksheet)
     ws.Cells.Locked = True
-    ws.Range("B2:E2").Locked = False
-    ws.Range("N2").Locked = False
-    ws.Range("P2").Locked = False
-    ws.Range("T1:T4").Locked = False
-    ws.Range("B8:B44").Locked = False
-    ws.Range("D8:E44").Locked = False
-    ws.Range("G8:H44").Locked = False
-    ws.Range("W8:W44").Locked = False
+    ws.Range("A2:D2").Locked = False
+    ws.Range("M2").Locked = False
+    ws.Range("O2").Locked = False
+    ws.Range("A8:A44").Locked = False
+    ws.Range("C8:D44").Locked = False
+    ws.Range("F8:G44").Locked = False
+    ws.Range("V8:V44").Locked = False
 End Sub
 
 Private Function HasShape(ByVal ws As Worksheet, ByVal nm As String) As Boolean
@@ -438,12 +607,10 @@ Private Function ControlsCurrent(ByVal ws As Worksheet) As Boolean
     On Error Resume Next
     If ws.Buttons(BTN_NEW).caption <> CAP_NEW Then Exit Function
     If ws.Buttons(BTN_PULL).caption <> CAP_PULL Then Exit Function
-    If Len(Trim$(CStr(ws.Range("A1").Value & ""))) > 0 Then Exit Function
     ControlsCurrent = True
 End Function
 
-' Idempotent: "New Set" at F1:H2, "Last Survey" at F3:H4, no spinner, no
-' course banner in A1 / A4.
+' Idempotent: "New Set" at E1:G2, "Last Survey" at E3:G4, no spinner.
 Private Sub EnsureContDIControls(ByVal ws As Worksheet)
     Dim btn As Button
 
@@ -454,8 +621,8 @@ Private Sub EnsureContDIControls(ByVal ws As Worksheet)
     If HasShape(ws, BTN_NEW) Then
         Set btn = ws.Buttons(BTN_NEW)
     Else
-        Set btn = ws.Buttons.Add(ws.Range("F1").Left + 3, ws.Range("F1").Top + 3, _
-                                 ws.Range("F1:H1").Width - 6, ws.Range("F1:F2").Height - 6)
+        Set btn = ws.Buttons.Add(ws.Range("E1").Left + 3, ws.Range("E1").Top + 3, _
+                                 ws.Range("E1:G1").Width - 6, ws.Range("E1:E2").Height - 6)
         btn.name = BTN_NEW
         btn.Placement = xlMoveAndSize
     End If
@@ -465,20 +632,15 @@ Private Sub EnsureContDIControls(ByVal ws As Worksheet)
 
     If HasShape(ws, BTN_PULL) Then
         Set btn = ws.Buttons(BTN_PULL)
-    Else
-        Set btn = ws.Buttons.Add(ws.Range("F3").Left + 3, ws.Range("F3").Top + 2, _
-                                 ws.Range("F3:H3").Width - 6, ws.Range("F3:F4").Height - 4)
-        btn.name = BTN_PULL
-        btn.Placement = xlMoveAndSize
+    'Else
+     '   Set btn = ws.Buttons.Add(ws.Range("E3").Left + 3, ws.Range("E3").top + 2, _
+     '                            ws.Range("E3:G3").Width - 6, ws.Range("E3:E4").Height - 4)
+     '   btn.name = BTN_PULL
+     '   btn.Placement = xlMoveAndSize
     End If
     btn.caption = CAP_PULL
     btn.Font.bold = True
     btn.OnAction = "'" & ThisWorkbook.name & "'!ContDI_PullLastSurvey"
-
-    ' Legacy "Course n of n" banner and VIEW ONLY note.
-    ws.Range("A1").ClearContents
-    ws.Range("A1").Interior.ColorIndex = xlColorIndexNone
-    ws.Range("A4").ClearContents
     Err.Clear
 End Sub
 
@@ -560,19 +722,17 @@ Private Sub PaintContDI(ByVal ws As Worksheet)
     On Error GoTo 0
 
     ' -- last survey tie-on block ---------------------------------------------------
-    ws.Range("B1").Value = "SD"
-    ws.Range("C1").Value = "Inc."
-    ws.Range("D1").Value = "Azimuth"
-    ws.Range("E1").Value = "TVD"
-    With ws.Range("B1:E1")
+    ws.Range("A1").Value = "SD"
+    ws.Range("B1").Value = "Inc."
+    ws.Range("C1").Value = "Azimuth"
+    ws.Range("D1").Value = "TVD"
+    With ws.Range("A1:D1")
         .Font.bold = True
         .HorizontalAlignment = xlCenter
         .Interior.Color = cBandLt()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("A2").Value = "Last MWD Survey"
-    ws.Range("A2").Font.bold = True
-    With ws.Range("B2:E2")
+    With ws.Range("A2:D2")
         .Interior.Color = cInput()
         .Borders.LineStyle = xlContinuous
         .HorizontalAlignment = xlCenter
@@ -580,7 +740,7 @@ Private Sub PaintContDI(ByVal ws As Worksheet)
     End With
 
     ' -- offsets block ---------------------------------------------------------------
-    With ws.Range("M1:P1")
+    With ws.Range("L1:O1")
         .Merge
         .Value = "Bit to Sensor Offsets"
         .Font.bold = True
@@ -588,40 +748,39 @@ Private Sub PaintContDI(ByVal ws As Worksheet)
         .Interior.Color = cBand()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("M2").Value = "PD Inc."
-    ws.Range("O2").Value = "D&I"
-    ws.Range("N2").Value = 2.25
-    ws.Range("P2").Value = 35
+    ws.Range("L2").Value = "PD Inc."
+    ws.Range("N2").Value = "D&I"
+    ws.Range("M2").Value = 2.25
+    ws.Range("O2").Value = 35
     PaintContDITopChrome ws
 
-    ' -- target block + required rates (over bit-projection columns S:V) ------------
-    ws.Range("S1").Value = "Target MD"
-    ws.Range("S2").Value = "Target INC"
-    ws.Range("S3").Value = "Target AZM"
-    ws.Range("S4").Value = "Target TVD"
-    ws.Range("U1").Value = "BRR"
-    ws.Range("U2").Value = "TRR"
-    ws.Range("U3").Value = "DLR"
-    ws.Range("U4").Value = "TFR"
+    ' -- target block + required rates (over bit-projection columns R:U) ------------
+    ws.Range("R1").Value = "Target MD"
+    ws.Range("R2").Value = "Target INC"
+    ws.Range("R3").Value = "Target AZM"
+    ws.Range("R4").Value = "Target TVD"
+    ws.Range("T1").Value = "BRR"
+    ws.Range("T2").Value = "TRR"
+    ws.Range("T3").Value = "DLR"
+    ws.Range("T4").Value = "TFR"
 
     PaintContDIGridHeaders ws
     HideContDIHelpers ws
 
     ' -- widths / freeze -------------------------------------------------------------
-    ws.Columns("A").ColumnWidth = 20
-    ws.Columns("B:H").ColumnWidth = 9
-    ws.Columns("I").ColumnWidth = 9.5
-    ws.Columns("J:M").ColumnWidth = 9
-    ws.Columns("N:P").ColumnWidth = 9.5
-    ws.Columns("Q:R").ColumnWidth = 9
-    ws.Columns("S").ColumnWidth = 10.5
-    ws.Columns("T:W").ColumnWidth = 9.5
-    ws.Columns("X").ColumnWidth = 9
-    ws.Columns("Y:Z").ColumnWidth = 8
-    ws.Columns("AA:AC").ColumnWidth = 8
+    ws.Columns("A:G").ColumnWidth = 9
+    ws.Columns("H").ColumnWidth = 9.5
+    ws.Columns("I:L").ColumnWidth = 9
+    ws.Columns("M:O").ColumnWidth = 9.5
+    ws.Columns("P:Q").ColumnWidth = 9
+    ws.Columns("R").ColumnWidth = 10.5
+    ws.Columns("S:V").ColumnWidth = 9.5
+    ws.Columns("W").ColumnWidth = 9
+    ws.Columns("X:Y").ColumnWidth = 8
+    ws.Columns("Z:AB").ColumnWidth = 8
     On Error Resume Next
     ws.Activate
-    ws.Range("B8").Select
+    ws.Range("A8").Select
     ActiveWindow.FreezePanes = True
     On Error GoTo 0
 
@@ -629,40 +788,100 @@ Private Sub PaintContDI(ByVal ws As Worksheet)
 End Sub
 
 ' Rows 1:3 chrome that carries no values: button backdrop behind New Set
-' (F1:H2) and Last Survey (F3:H4), no fill where the course spinner used to
-' sit (I1:J2), offsets row M2:P2 centred and boxed. Safe on a live tab.
+' (E1:G2) and Last Survey (E3:G4), no fill where the course spinner used to
+' sit (H1:I2), offsets row L2:O2 centred and boxed. Safe on a live tab.
 Private Sub PaintContDITopChrome(ByVal ws As Worksheet)
-    ws.Range("F1:H4").Interior.Color = cBandLt()
-    ws.Range("I1:J2").Interior.ColorIndex = xlColorIndexNone
-    With ws.Range("M2:P2")
+    ws.Range("E1:G4").Interior.Color = cBandLt()
+    ws.Range("H1:I2").Interior.ColorIndex = xlColorIndexNone
+    With ws.Range("L2:O2")
         .Font.bold = True
         .HorizontalAlignment = xlCenter
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("N2,P2").Interior.Color = cInput()
+    ws.Range("M2,O2").Interior.Color = cInput()
+    PaintContDITargetSelector ws
     Err.Clear
 End Sub
 
-' Insert J:K in the data band only (rows 5:44) when the tab still has the
+' P1:Q2 names the station the yellow target box is following. The name and
+' S1:S4 are formulas (ContDI_FollowSlideTarget); this only paints the chrome.
+Private Sub PaintContDITargetSelector(ByVal ws As Worksheet)
+    Dim nameFormula As String
+
+    On Error Resume Next
+    nameFormula = CStr(ws.Range(TARGET_PICK_CELL).formula & "")
+    ws.Range("P1:Q2").UnMerge
+    ws.Range("P1:Q2").ClearFormats
+    ws.Range(TARGET_PICK_CELL).Validation.Delete
+
+    With ws.Range("P1:Q1")
+        .Merge
+        .Value = "Active Target"
+        .Font.bold = True
+        .HorizontalAlignment = xlCenter
+        .Interior.Color = cBandLt()
+        .Borders.LineStyle = xlContinuous
+    End With
+    With ws.Range("P2:Q2")
+        .Merge
+        .Font.bold = True
+        .HorizontalAlignment = xlCenter
+        .Interior.Color = cTarget()
+        .Borders.LineStyle = xlContinuous
+        .numberFormat = "General"
+    End With
+    If InStr(1, nameFormula, "ProjTargets_NAME", vbTextCompare) > 0 Then
+        ws.Range(TARGET_PICK_CELL).formula = nameFormula
+    End If
+    On Error GoTo 0
+    Err.Clear
+End Sub
+
+' Column A was the "Last MWD Survey" label. Delete it once so the tie-on
+' survey starts in A and every formula on this sheet and ContDI_Data shifts
+' with it. A later refresh sees SD already in A1 and leaves the grid alone.
+Private Sub DropLabelColumn(ByVal ws As Worksheet)
+    Dim a1 As String, a2 As String, b1 As String
+    a1 = Trim$(CStr(ws.Range("A1").Value & ""))
+    a2 = Trim$(CStr(ws.Range("A2").Value & ""))
+    b1 = Trim$(CStr(ws.Range("B1").Value & ""))
+    If StrComp(a2, "Last MWD Survey", vbTextCompare) <> 0 _
+            And Not (StrComp(b1, "SD", vbTextCompare) = 0 _
+                     And StrComp(a1, "SD", vbTextCompare) <> 0) Then
+        Exit Sub
+    End If
+    On Error Resume Next
+    If Not ActiveWindow Is Nothing Then
+        If ActiveWindow.FreezePanes Then ActiveWindow.FreezePanes = False
+    End If
+    ws.Columns(1).Delete
+    ws.Activate
+    ws.Range("A8").Select
+    ActiveWindow.FreezePanes = True
+    On Error GoTo 0
+    Err.Clear
+End Sub
+
+' Insert I:J in the data band only (rows 5:44) when the tab still has the
 ' pre-sensor-DLS layout. Rows 1:4 stay put so Target / BRR / offsets do not move.
 Private Sub EnsureInterSensorColumns(ByVal ws As Worksheet)
     Dim hdr As String
-    hdr = Trim$(CStr(ws.Range("J6").Value & ""))
+    hdr = Trim$(CStr(ws.Range("I6").Value & ""))
     If StrComp(hdr, HDR_PD_DLS, vbTextCompare) <> 0 Then Exit Sub
     On Error Resume Next
     If Not ActiveWindow Is Nothing Then
         If ActiveWindow.FreezePanes Then ActiveWindow.FreezePanes = False
     End If
-    ws.Range("I4:P4").UnMerge
-    ws.Range("B5:U5").UnMerge
-    ws.Range("I6:U7").UnMerge
+    ws.Range("H4:O4").UnMerge
+    ws.Range("A5:T5").UnMerge
+    ws.Range("H6:T7").UnMerge
     On Error GoTo 0
-    ws.Range("J5:K44").Insert Shift:=xlToRight
+    ws.Range("I5:J44").Insert Shift:=xlToRight
     Err.Clear
 End Sub
 
-' Labels / bands / input fill for I:W plus the S1:V4 target block. Safe to
-' re-run; does not touch B2:E2, N2, P2, T1:T4, or typed B/D/E/G/H/W values.
+' Labels / bands / input fill for H:V plus the R1:U4 target block. Safe to
+' re-run; does not touch A2:D2, M2, O2, S1:S4, or typed A/C/D/F/G/V values.
 Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
     Dim deg As String, degRate As String
     Dim c As Range
@@ -670,59 +889,59 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
     degRate = "(" & ChrW$(176) & "/30m)"
 
     On Error Resume Next
-    ws.Range("B5:W5").UnMerge
-    ws.Range("I4:R4").UnMerge
-    ws.Range("S5:W5").UnMerge
+    ws.Range("A5:V5").UnMerge
+    ws.Range("H4:Q4").UnMerge
+    ws.Range("R5:V5").UnMerge
     On Error GoTo 0
     ' Group labels are re-placed below; clear first so a merge never has to
     ' pick between two leftover labels.
-    ws.Range("I4:R4").ClearContents
+    ws.Range("H4:Q4").ClearContents
 
-    ' Averages sit on J3:M3 (MWD Average) and Q3:R3 (PD Average), directly
-    ' over their rate columns. N3:P3 and I3 carry no average.
-    ws.Range("I3:R3").FormatConditions.Delete
-    ws.Range("I3:R3").Borders.LineStyle = xlNone
-    With ws.Range("J3:M3,Q3:R3")
+    ' Averages sit on I3:L3 (MWD Average) and P3:Q3 (PD Average), directly
+    ' over their rate columns. M3:O3 and H3 carry no average.
+    ws.Range("H3:Q3").FormatConditions.Delete
+    ws.Range("H3:Q3").Borders.LineStyle = xlNone
+    With ws.Range("I3:L3,P3:Q3")
         .Font.bold = True
         .HorizontalAlignment = xlCenter
         .Borders.LineStyle = xlContinuous
         .numberFormat = "0.00"
     End With
-    ' BUR averages pace against BRR (V1). TR averages are signed, so they pace
-    ' against the signed required turn (ContDI_Data!X2; V2 shows its size):
+    ' BUR averages pace against BRR (U1). TR averages are signed, so they pace
+    ' against the signed required turn (ContDI_Data!X2; U2 shows its size):
     ' green only when turning the way the target needs and at least as fast.
-    For Each c In ws.Range("J3,L3,Q3").Cells
-        AddPaceCF c, "$V$1"
+    For Each c In ws.Range("I3,K3,P3").Cells
+        AddPaceCF c, "$U$1"
     Next c
-    For Each c In ws.Range("K3,M3,R3").Cells
+    For Each c In ws.Range("J3,L3,Q3").Cells
         AddTurnPaceCF c, SH_CONTDI_DATA & "!$X$2"
     Next c
 
-    ' Rate-block bands (row 4): I:M MWD Average green, N:O Between blue,
-    ' P:R PD Average green. Group labels include the DLS columns.
-    With ws.Range("I4:R4")
+    ' Rate-block bands (row 4): H:L MWD Average green, M:N Between blue,
+    ' O:Q PD Average green. Group labels include the DLS columns.
+    With ws.Range("H4:Q4")
         .Font.bold = True
         .Font.Color = RGB(0, 0, 0)
         .HorizontalAlignment = xlCenter
         .Interior.Color = cMwdBlock()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("I4:M4").Interior.Color = cRateHead()
-    ws.Range("P4:R4").Interior.Color = cRateHead()
-    With ws.Range("I4:M4")
+    ws.Range("H4:L4").Interior.Color = cRateHead()
+    ws.Range("O4:Q4").Interior.Color = cRateHead()
+    With ws.Range("H4:L4")
         .Merge
         .Value = "MWD Average"
     End With
-    With ws.Range("N4:O4")
+    With ws.Range("M4:N4")
         .Merge
         .Value = "Between sensors"
     End With
-    With ws.Range("P4:R4")
+    With ws.Range("O4:Q4")
         .Merge
         .Value = "PD Average"
     End With
 
-    With ws.Range("B5:H5")
+    With ws.Range("A5:G5")
         .Merge
         .Value = "Continuous D & I"
         .Font.bold = True
@@ -730,18 +949,18 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cBand()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("I5").Value = "f/ survey"
+    ws.Range("H5").Value = "f/ survey"
+    ws.Range("I5").Value = "f/ cont."
     ws.Range("J5").Value = "f/ cont."
-    ws.Range("K5").Value = "f/ cont."
+    ws.Range("K5").Value = "f/ survey"
     ws.Range("L5").Value = "f/ survey"
-    ws.Range("M5").Value = "f/ survey"
+    ws.Range("M5").Value = "btw sens."
     ws.Range("N5").Value = "btw sens."
-    ws.Range("O5").Value = "btw sens."
-    ws.Range("P5").Value = "f/ survey"
+    ws.Range("O5").Value = "f/ survey"
+    ws.Range("P5").Value = "f/ cont."
     ws.Range("Q5").Value = "f/ cont."
-    ws.Range("R5").Value = "f/ cont."
-    With ws.Range("I5:R5")
-        .Font.Size = 9
+    With ws.Range("H5:Q5")
+        .Font.size = 9
         .Font.bold = True
         .Font.Italic = True
         .Font.Color = RGB(0, 0, 0)
@@ -749,9 +968,9 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Interior.Color = cMwdBlock()
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("I5:M5").Interior.Color = cRateHead()
-    ws.Range("P5:R5").Interior.Color = cRateHead()
-    With ws.Range("S5:W5")
+    ws.Range("H5:L5").Interior.Color = cRateHead()
+    ws.Range("O5:Q5").Interior.Color = cRateHead()
+    With ws.Range("R5:V5")
         .Merge
         .Value = "Bit Projection f/ last survey"
         .Font.bold = True
@@ -760,100 +979,100 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
         .Borders.LineStyle = xlContinuous
     End With
 
-    ws.Range("B6").Value = "Bit Depth"
-    ws.Range("C6").Value = "MWD SD"
-    ws.Range("D6").Value = "Inc."
-    ws.Range("E6").Value = "Azi."
-    ws.Range("F6").Value = "PD SD"
-    ws.Range("G6").Value = "PD Inc."
-    ws.Range("H6").Value = "PD Azm."
-    ws.Range("I6").Value = "MWD DLS"
-    ws.Range("J6").Value = "BUR"
-    ws.Range("K6").Value = "TR"
-    ws.Range("L6").Value = "BUR"
-    ws.Range("M6").Value = "TR"
-    ws.Range("N6").Value = HDR_SENS_DLS
-    ws.Range("O6").Value = "Sens BUR"
-    ws.Range("P6").Value = HDR_PD_DLS
-    ws.Range("Q6").Value = "BUR"
-    ws.Range("R6").Value = "TR"
-    ws.Range("S6").Value = "Hole Depth"
-    ws.Range("T6").Value = "Inc. @ Bit"
-    ws.Range("U6").Value = "Az. @ Bit"
-    ws.Range("V6").Value = "TVD @ Bit"
-    ws.Range("W6").Value = "ROP"
+    ws.Range("A6").Value = "Bit Depth"
+    ws.Range("B6").Value = "MWD SD"
+    ws.Range("C6").Value = "Inc."
+    ws.Range("D6").Value = "Azi."
+    ws.Range("E6").Value = "PD SD"
+    ws.Range("F6").Value = "PD Inc."
+    ws.Range("G6").Value = "PD Azm."
+    ws.Range("H6").Value = "MWD DLS"
+    ws.Range("I6").Value = "BUR"
+    ws.Range("J6").Value = "TR"
+    ws.Range("K6").Value = "BUR"
+    ws.Range("L6").Value = "TR"
+    ws.Range("M6").Value = HDR_SENS_DLS
+    ws.Range("N6").Value = "Sens BUR"
+    ws.Range("O6").Value = HDR_PD_DLS
+    ws.Range("P6").Value = "BUR"
+    ws.Range("Q6").Value = "TR"
+    ws.Range("R6").Value = "Hole Depth"
+    ws.Range("S6").Value = "Inc. @ Bit"
+    ws.Range("T6").Value = "Az. @ Bit"
+    ws.Range("U6").Value = "TVD @ Bit"
+    ws.Range("V6").Value = "ROP"
+    ws.Range("A7").Value = "(m)"
     ws.Range("B7").Value = "(m)"
-    ws.Range("C7").Value = "(m)"
+    ws.Range("C7").Value = deg
     ws.Range("D7").Value = deg
-    ws.Range("E7").Value = deg
-    ws.Range("F7").Value = "(m)"
+    ws.Range("E7").Value = "(m)"
+    ws.Range("F7").Value = deg
     ws.Range("G7").Value = deg
-    ws.Range("H7").Value = deg
-    ws.Range("I7").Value = "f/ survey"
+    ws.Range("H7").Value = "f/ survey"
+    ws.Range("I7").Value = degRate
     ws.Range("J7").Value = degRate
     ws.Range("K7").Value = degRate
     ws.Range("L7").Value = degRate
-    ws.Range("M7").Value = degRate
-    ws.Range("N7").Value = "PD-D&I"
-    ws.Range("O7").Value = degRate
-    ws.Range("P7").Value = "f/ survey"
+    ws.Range("M7").Value = "PD-D&I"
+    ws.Range("N7").Value = degRate
+    ws.Range("O7").Value = "f/ survey"
+    ws.Range("P7").Value = degRate
     ws.Range("Q7").Value = degRate
-    ws.Range("R7").Value = degRate
-    ws.Range("S7").Value = "(m)"
+    ws.Range("R7").Value = "(m)"
+    ws.Range("S7").Value = deg
     ws.Range("T7").Value = deg
-    ws.Range("U7").Value = deg
-    ws.Range("V7").Value = "(m)"
-    ws.Range("W7").Value = "(m/hr)"
-    With ws.Range("B6:W7")
+    ws.Range("U7").Value = "(m)"
+    ws.Range("V7").Value = "(m/hr)"
+    With ws.Range("A6:V7")
         .Font.bold = True
         .HorizontalAlignment = xlCenter
         .Borders.LineStyle = xlContinuous
     End With
-    ws.Range("B7:W7").Font.Size = 9
-    ws.Range("B6:H7").Interior.Color = cBandLt()
+    ws.Range("A7:V7").Font.size = 9
+    ws.Range("A6:G7").Interior.Color = cBandLt()
     ' Rate-block column heads (rows 6:7) carry the row-4 tints.
-    With ws.Range("I6:R7")
+    With ws.Range("H6:Q7")
         .Interior.Color = cMwdBlock()
         .Font.Color = RGB(0, 0, 0)
     End With
-    ws.Range("I6:M7").Interior.Color = cRateHead()
-    ws.Range("P6:R7").Interior.Color = cRateHead()
-    ws.Range("S6:W7").Interior.Color = cBandLt()
+    ws.Range("H6:L7").Interior.Color = cRateHead()
+    ws.Range("O6:Q7").Interior.Color = cRateHead()
+    ws.Range("R6:V7").Interior.Color = cBandLt()
 
-    With ws.Range("B8:W44")
+    With ws.Range("A8:V44")
         .numberFormat = "0.00"
         .HorizontalAlignment = xlCenter
         .Borders.LineStyle = xlContinuous
         .Borders.Color = cGridLine()
     End With
-    ws.Range("B8:B44,D8:E44,G8:H44,W8:W44").Interior.Color = cInput()
+    ws.Range("A8:A44,C8:D44,F8:G44,V8:V44").Interior.Color = cInput()
 
     ' Target / rate block. Labels re-seeded if a prior layout pass cleared them.
-    If Len(Trim$(CStr(ws.Range("S1").Value & ""))) = 0 Then ws.Range("S1").Value = "Target MD"
-    If Len(Trim$(CStr(ws.Range("S2").Value & ""))) = 0 Then ws.Range("S2").Value = "Target INC"
-    If Len(Trim$(CStr(ws.Range("S3").Value & ""))) = 0 Then ws.Range("S3").Value = "Target AZM"
-    If Len(Trim$(CStr(ws.Range("S4").Value & ""))) = 0 Then ws.Range("S4").Value = "Target TVD"
-    If Len(Trim$(CStr(ws.Range("U1").Value & ""))) = 0 Then ws.Range("U1").Value = "BRR"
-    If Len(Trim$(CStr(ws.Range("U2").Value & ""))) = 0 Then ws.Range("U2").Value = "TRR"
-    If Len(Trim$(CStr(ws.Range("U3").Value & ""))) = 0 Then ws.Range("U3").Value = "DLR"
-    If Len(Trim$(CStr(ws.Range("U4").Value & ""))) = 0 Then ws.Range("U4").Value = "TFR"
-    ws.Range("S1:V4").FormatConditions.Delete
-    With ws.Range("S1:S4,U1:U4")
+    If Len(Trim$(CStr(ws.Range("R1").Value & ""))) = 0 Then ws.Range("R1").Value = "Target MD"
+    If Len(Trim$(CStr(ws.Range("R2").Value & ""))) = 0 Then ws.Range("R2").Value = "Target INC"
+    If Len(Trim$(CStr(ws.Range("R3").Value & ""))) = 0 Then ws.Range("R3").Value = "Target AZM"
+    If Len(Trim$(CStr(ws.Range("R4").Value & ""))) = 0 Then ws.Range("R4").Value = "Target TVD"
+    If Len(Trim$(CStr(ws.Range("T1").Value & ""))) = 0 Then ws.Range("T1").Value = "BRR"
+    If Len(Trim$(CStr(ws.Range("T2").Value & ""))) = 0 Then ws.Range("T2").Value = "TRR"
+    If Len(Trim$(CStr(ws.Range("T3").Value & ""))) = 0 Then ws.Range("T3").Value = "DLR"
+    If Len(Trim$(CStr(ws.Range("T4").Value & ""))) = 0 Then ws.Range("T4").Value = "TFR"
+    ws.Range("R1:U4").FormatConditions.Delete
+    With ws.Range("R1:R4,T1:T4")
         .Font.bold = True
         .Interior.Color = cBandLt()
         .Borders.LineStyle = xlContinuous
         .numberFormat = "General"
     End With
-    ws.Range("S1:S4").HorizontalAlignment = xlLeft
-    ws.Range("U1:U4").HorizontalAlignment = xlCenter
-    With ws.Range("T1:T4")
+    ws.Range("R1:R4").HorizontalAlignment = xlLeft
+    ws.Range("T1:T4").HorizontalAlignment = xlCenter
+    With ws.Range("S1:S4")
         .Interior.Color = cTarget()
         .Font.bold = True
         .HorizontalAlignment = xlCenter
         .Borders.LineStyle = xlContinuous
         .numberFormat = "0.00"
     End With
-    With ws.Range("V1:V4")
+    With ws.Range("U1:U4")
         .Interior.Color = cGood()
         .Font.bold = True
         .HorizontalAlignment = xlCenter
@@ -864,90 +1083,83 @@ Private Sub PaintContDIGridHeaders(ByVal ws As Worksheet)
 End Sub
 
 ' Park every diagnostic lookup on the very-hidden ContDI_Data sheet and wipe
-' leftover on-grid helper cells (old Average Stand Length A3:C3, W1:X4 lookups,
-' Y1:Z2 dBURR, X5:AC7 projections) so only the working tab shows.
+' leftover on-grid helper cells (old Average Stand Length, V1:W4 lookups,
+' X1:Y2 dBURR, W5:AB7 projections) so only the working tab shows.
 Private Sub HideContDIHelpers(ByVal ws As Worksheet)
     On Error Resume Next
-    ws.Range("A3:C3").Clear
-    ws.Range("W1:X4").Clear
-    ws.Range("Y1:Z2").Clear
-    ws.Range("X5:AC7").Clear
-    ws.Range("AA1:AC7").Clear
-    ws.Columns("X").Hidden = True
-    ws.Columns("Y:Z").Hidden = True
-    ws.Columns("AA:AC").Hidden = True
+    ws.Range("V1:W4").Clear
+    ws.Range("X1:Y2").Clear
+    ws.Range("W5:AB7").Clear
+    ws.Range("Z1:AB7").Clear
+    ws.Columns("W").Hidden = True
+    ws.Columns("X:Y").Hidden = True
+    ws.Columns("Z:AB").Hidden = True
     On Error GoTo 0
     Err.Clear
 End Sub
 
-' One-time +2 column shift: Q1:T4 (targets + rates) -> S1:V4 so averages
-' can sit on M3:R3 over columns M:R. Idempotent once S1 is already Target MD.
+' One-time +2 column shift: P1:S4 (targets + rates) -> R1:U4 so averages
+' can sit on L3:Q3 over columns L:Q. Idempotent once R1 is already Target MD.
 Private Sub EnsureHeaderShift(ByVal ws As Worksheet)
     Dim q1 As String
-    q1 = Trim$(CStr(ws.Range("Q1").Value & ""))
+    q1 = Trim$(CStr(ws.Range("P1").Value & ""))
     If StrComp(q1, "Target MD", vbTextCompare) = 0 Then
-        ws.Range("Q1:T4").Copy Destination:=ws.Range("S1")
+        ws.Range("P1:S4").Copy Destination:=ws.Range("R1")
         Application.CutCopyMode = False
-        ws.Range("Q1:R4").Clear
+        ws.Range("P1:Q4").Clear
     End If
-    ' Old averages sat on K3:P3 (formulas already pointed at M9:R44).
+    ' Old averages sat on J3:O3 (formulas already pointed at L9:Q44).
     ' Do not Copy - relative AVERAGE refs would slide +2. Just drop leftovers.
-    If InStr(1, UCase$(CStr(ws.Range("K3").Formula)), "AVERAGE(M9", vbBinaryCompare) > 0 Then
-        ws.Range("K3:L3").Clear
+    If InStr(1, UCase$(CStr(ws.Range("J3").formula)), "AVERAGE(L9", vbBinaryCompare) > 0 Then
+        ws.Range("J3:K3").Clear
     End If
     Err.Clear
 End Sub
 
 Private Sub ApplyLookupsAndRates(ByVal ws As Worksheet)
-    ' Averages ride with their rate columns: MWD Average J:M, PD Average Q:R.
-    ' I3 and N3:P3 (MWD DLS, Between sensors, PD DLS) carry none.
+    ' Averages ride with their rate columns: MWD Average I:L, PD Average P:Q.
+    ' H3 and M3:O3 (MWD DLS, Between sensors, PD DLS) carry none.
     Dim avgCol As Variant
-    ws.Range("I3:R3").ClearContents
-    For Each avgCol In Array("J", "K", "L", "M", "Q", "R")
-        ws.Range(avgCol & "3").Formula = "=IFERROR(AVERAGE(" & avgCol & "9:" & avgCol & "44),"""")"
+    ws.Range("H3:Q3").ClearContents
+    For Each avgCol In Array("I", "J", "K", "L", "P", "Q")
+        ws.Range(avgCol & "3").formula = "=IFERROR(AVERAGE(" & avgCol & "9:" & avgCol & "44),"""")"
     Next avgCol
-    ws.Range("J3:M3,Q3:R3").numberFormat = "0.00"
+    ws.Range("I3:L3,P3:Q3").numberFormat = "0.00"
 
     ' Diagnostics live on very-hidden ContDI_Data (T:W), not on the grid.
     Dim h As Worksheet
     Dim cd As String
     Set h = ContDIDataSheet()
     cd = "'" & SH_CONTDI & "'!"
-    h.Range("T1").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "B8:B44<>"""")," & cd & "B8:B44),IF(ISNUMBER(W1),W1,IF(AND(ISNUMBER(" & cd & "B2),ISNUMBER(" & cd & "P2))," & cd & "B2+" & cd & "P2,IF(" & cd & "B2="""",""""," & cd & "B2))))"
-    h.Range("T2").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "D8:D44<>"""")," & cd & "D8:D44),IF(" & cd & "C2="""",""""," & cd & "C2))"
-    h.Range("T3").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "E8:E44<>"""")," & cd & "E8:E44),IF(" & cd & "D2="""",""""," & cd & "D2))"
-    h.Range("T4").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "T8:T44<>"""")," & cd & "T8:T44),IF(ISNUMBER(W2),W2,IF(" & cd & "C2="""",""""," & cd & "C2)))"
-    h.Range("U1").Formula = "=IFERROR(" & cd & "T1-T1,"""")"
-    h.Range("U2").Formula = "=IFERROR((" & cd & "T2-T4)/U1,"""")"
-    h.Range("U3").Formula = "=IFERROR((MOD(" & cd & "T3-U4+180,360)-180)/U1,"""")"
-    h.Range("U4").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "U8:U44<>"""")," & cd & "U8:U44),IF(ISNUMBER(W3),W3,IF(" & cd & "D2="""",""""," & cd & "D2)))"
-    h.Range("V1").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "V8:V44<>"""")," & cd & "V8:V44),IF(" & cd & "E2="""",""""," & cd & "E2))"
-    h.Range("T5").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "B8:B44<>"""")," & cd & "B8:B44),"""")"
-    h.Range("U5").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "D8:D44<>"""")," & cd & "D8:D44),"""")"
-    h.Range("V5").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "E8:E44<>"""")," & cd & "E8:E44),"""")"
-    h.Range("T6").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "G8:G44<>"""")," & cd & "G8:G44),"""")"
-    h.Range("U6").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "H8:H44<>"""")," & cd & "H8:H44),"""")"
-    h.Range("V6").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "S8:S44<>"""")," & cd & "S8:S44),"""")"
-    h.Range("T7").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "T8:T44<>"""")," & cd & "T8:T44),"""")"
-    h.Range("U7").Formula = "=IFERROR(LOOKUP(2,1/(" & cd & "U8:U44<>"""")," & cd & "U8:U44),"""")"
-    h.Range("V7").Formula = "=IFERROR(ROUND(LOOKUP(2,1/(" & cd & "V8:V44<>"""")," & cd & "V8:V44),2),"""")"
+    h.Range("T1").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "A8:A44<>"""")," & cd & "A8:A44),IF(ISNUMBER(W1),W1,IF(AND(ISNUMBER(" & cd & "A2),ISNUMBER(" & cd & "O2))," & cd & "A2+" & cd & "O2,IF(" & cd & "A2="""",""""," & cd & "A2))))"
+    h.Range("T2").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "C8:C44<>"""")," & cd & "C8:C44),IF(" & cd & "B2="""",""""," & cd & "B2))"
+    h.Range("T3").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "D8:D44<>"""")," & cd & "D8:D44),IF(" & cd & "C2="""",""""," & cd & "C2))"
+    h.Range("T4").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "S8:S44<>"""")," & cd & "S8:S44),IF(ISNUMBER(W2),W2,IF(" & cd & "B2="""",""""," & cd & "B2)))"
+    h.Range("U1").formula = "=IFERROR(" & cd & "S1-T1,"""")"
+    h.Range("U2").formula = "=IFERROR((" & cd & "S2-T4)/U1,"""")"
+    h.Range("U3").formula = "=IFERROR((MOD(" & cd & "S3-U4+180,360)-180)/U1,"""")"
+    h.Range("U4").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "T8:T44<>"""")," & cd & "T8:T44),IF(ISNUMBER(W3),W3,IF(" & cd & "C2="""",""""," & cd & "C2)))"
+    h.Range("V1").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "U8:U44<>"""")," & cd & "U8:U44),IF(" & cd & "D2="""",""""," & cd & "D2))"
+    h.Range("T5").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "A8:A44<>"""")," & cd & "A8:A44),"""")"
+    h.Range("U5").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "C8:C44<>"""")," & cd & "C8:C44),"""")"
+    h.Range("V5").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "D8:D44<>"""")," & cd & "D8:D44),"""")"
+    h.Range("T6").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "F8:F44<>"""")," & cd & "F8:F44),"""")"
+    h.Range("U6").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "G8:G44<>"""")," & cd & "G8:G44),"""")"
+    h.Range("V6").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "R8:R44<>"""")," & cd & "R8:R44),"""")"
+    h.Range("T7").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "S8:S44<>"""")," & cd & "S8:S44),"""")"
+    h.Range("U7").formula = "=IFERROR(LOOKUP(2,1/(" & cd & "T8:T44<>"""")," & cd & "T8:T44),"""")"
+    h.Range("V7").formula = "=IFERROR(ROUND(LOOKUP(2,1/(" & cd & "U8:U44<>"""")," & cd & "U8:U44),2),"""")"
 
-    ' Rates match their U labels: V1 = BRR (ProjLandingBurr: circular arc to
-    ' the landing station's TVD; fallback dINC/dMD). V3 = DLR (3D dogleg to
-    ' yellow-box INC/AZM over remaining MD). V2/V4 stay yellow-box TRR / TFR.
-    ws.Range("V1").Formula = "=IFERROR(ROUND(ProjLandingBurr(ContDI_Data!T1,ContDI_Data!T4,ContDI_Data!U4,ContDI_Data!V1,IF(ISNUMBER(ContDI_Data!X1),ContDI_Data!X1,19.2),ProjTargets_MD,ProjTargets_INC,ProjTargets_AZM,ProjTargets_TVD),2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
-    ws.Range("V2").Formula = "=IFERROR(ROUND(ABS(MOD(T3-ContDI_Data!U4+180,360)-180)/ContDI_Data!U1*30,2),"""")"
-    ' Signed twin of TRR (+ right / - left) for the turn-average colouring.
-    h.Range("X2").Formula = "=IFERROR(ROUND((MOD(" & cd & "T3-U4+180,360)-180)/U1*30,2),"""")"
-    ws.Range("V3").Formula = "=IFERROR(ROUND(ProjDoglegDeg(ContDI_Data!T4,ContDI_Data!U4,T2,T3)/ContDI_Data!U1*30,2),IFERROR(ROUND(ABS(T2-ContDI_Data!T4)/ContDI_Data!U1*30,2),""""))"
-    ws.Range("V4").Formula = "=IFERROR(ProjTfToTarget(ContDI_Data!T4,ContDI_Data!U4,T2,T3,5),"""")"
+    ' Target S1:S4 / P2, rates U1:U4 (BRR, TRR, DLR, TFR) and the signed TRR
+    ' twin (X2, turn-average colouring) are one plan-point arc.
+    ContDI_FollowSlideTarget
     HideContDIHelpers ws
 End Sub
 
 ' Re-apply every formula cell (grid rows 8:44 + header lookups / rates) on a
-' painted tab without touching inputs (B2:E2, N2, P2, T1:T4, B/D/E/G/H/W 8:44).
-' Migrates an old tab in place: inserts J:K once (PD-DLS-at-J layout), shifts
-' Q1:T4 -> S1:V4 once, drops the course spinner / banner and the stand-length row.
+' painted tab without touching inputs (A2:D2, M2, O2, S1:S4, A/C/D/F/G/V 8:44).
+' Migrates an old tab in place: inserts I:J once (PD-DLS-at-I layout), shifts
+' P1:S4 -> R1:U4 once, drops the course spinner and the stand-length row.
 Public Sub ContDI_RefreshFormulas()
     Dim ws As Worksheet
     Dim wasProt As Boolean
@@ -958,6 +1170,7 @@ Public Sub ContDI_RefreshFormulas()
     EnsureContDIData
     Set ws = ContDISheet()
     wasProt = SheetUnprotectForVba(ws)
+    DropLabelColumn ws
     EnsureInterSensorColumns ws
     Err.Clear
     EnsureHeaderShift ws
@@ -974,6 +1187,7 @@ Public Sub ContDI_RefreshFormulas()
     Err.Clear
     ApplyLookupsAndRates ws
     Err.Clear
+    ContDI_FollowSlideTarget
     ApplyContDILock ws
     SheetReprotectAfterVba ws, wasProt
     Application.EnableEvents = ev
@@ -991,37 +1205,40 @@ End Sub
 Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
     Dim r As Long
     Dim p As Long
-    ' Every rate / dogleg cell tests exactly the inputs it uses with ISNUMBER
-    ' (this row, the previous row for f/ cont., and the tie-on) so a blank or
-    ' half-typed D/E/G/H yields "" instead of #VALUE!. A missing azimuth blanks
-    ' the TR and the dogleg but not the BUR, and vice versa.
+    ' Inc still has to be typed on the row. A blank azimuth (D or G) is not
+    ' zero and not "no reading": the equation uses the last number above it
+    ' in that column, or the tie-on azimuth (C2) when the column has none yet.
     Dim tie As String, dMWD As String, dPD As String
-    Dim nD As String, nE As String, nG As String, nH As String
-    Dim pD As String, pE As String, pG As String, pH As String
+    Dim nD As String, nG As String
+    Dim pD As String, pG As String
     Dim stepMWD As String, stepPD As String
     Dim sens As String
     Dim sensBur As String, mwdBurs As String
-    tie = "ISNUMBER($B$2)"
-    sens = "ISNUMBER($P$2),ISNUMBER($N$2),$P$2<>$N$2"   ' both offsets present and distinct
+    Dim azE As String, azH As String, azEp As String, azHp As String
+    tie = "ISNUMBER($A$2)"
+    sens = "ISNUMBER($O$2),ISNUMBER($M$2),$O$2<>$M$2"   ' both offsets present and distinct
     For r = FIRST_DATA To LAST_DATA
         p = r - 1
-        nD = "ISNUMBER(D" & r & ")": nE = "ISNUMBER(E" & r & ")"
-        nG = "ISNUMBER(G" & r & ")": nH = "ISNUMBER(H" & r & ")"
-        pD = "ISNUMBER(D" & p & ")": pE = "ISNUMBER(E" & p & ")"
-        pG = "ISNUMBER(G" & p & ")": pH = "ISNUMBER(H" & p & ")"
-        dMWD = "ISNUMBER(C" & r & "),C" & r & ">$B$2"      ' MWD sensor below the survey
-        dPD = "ISNUMBER(F" & r & "),F" & r & ">$B$2"       ' PD sensor below the survey
-        stepMWD = "ISNUMBER(C" & r & "),ISNUMBER(C" & p & "),C" & r & "<>C" & p
-        stepPD = "ISNUMBER(F" & r & "),ISNUMBER(F" & p & "),F" & r & "<>F" & p
-        ws.Cells(r, 3).Formula = "=IF(ISNUMBER(B" & r & "),B" & r & "-$P$2,"""")"
-        ws.Cells(r, 6).Formula = "=IF(ISNUMBER(B" & r & "),B" & r & "-$N$2,"""")"
-        ' MWD DLS f/ survey (I) and PD DLS f/ survey (P).
-        ws.Cells(r, COL_MWD_DLS).Formula = "=IF(AND(" & tie & "," & nD & "," & nE & "," & dMWD & "),(30/(C" & r & "-$B$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($C$2))*COS(RADIANS(D" & r & "))+SIN(RADIANS($C$2))*SIN(RADIANS(D" & r & "))*COS(RADIANS(E" & r & "-$D$2)))))),"""")"
-        ws.Cells(r, COL_PD_DLS).Formula = "=IF(AND(" & tie & "," & nG & "," & nH & "," & dPD & "),(30/(F" & r & "-$B$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($C$2))*COS(RADIANS(G" & r & "))+SIN(RADIANS($C$2))*SIN(RADIANS(G" & r & "))*COS(RADIANS(H" & r & "-$D$2)))))),"""")"
-        ' Sens DLS / Sens BUR: dogleg and signed BUR between the PD sensor (G,H)
-        ' and the D&I (D,E) over P2-N2. Blank either sensor -> "".
-        ws.Cells(r, COL_SENS_DLS).Formula = "=IF(AND(" & nD & "," & nE & "," & nG & "," & nH & ",ISNUMBER($P$2),ISNUMBER($N$2),$P$2<>$N$2),ProjDoglegDeg(D" & r & ",E" & r & ",G" & r & ",H" & r & ")/ABS($P$2-$N$2)*30,"""")"
-        ws.Cells(r, COL_SENS_BUR).Formula = "=IF(AND(" & nD & "," & nG & ",ISNUMBER($P$2),ISNUMBER($N$2),$P$2<>$N$2),(G" & r & "-D" & r & ")/($P$2-$N$2)*30,"""")"
+        nD = "ISNUMBER(C" & r & ")"
+        nG = "ISNUMBER(F" & r & ")"
+        pD = "ISNUMBER(C" & p & ")"
+        pG = "ISNUMBER(F" & p & ")"
+        azE = AzHeld("D", r)
+        azH = AzHeld("G", r)
+        dMWD = "ISNUMBER(B" & r & "),B" & r & ">$A$2"      ' MWD sensor below the survey
+        dPD = "ISNUMBER(E" & r & "),E" & r & ">$A$2"       ' PD sensor below the survey
+        stepMWD = "ISNUMBER(B" & r & "),ISNUMBER(B" & p & "),B" & r & "<>B" & p
+        stepPD = "ISNUMBER(E" & r & "),ISNUMBER(E" & p & "),E" & r & "<>E" & p
+        ws.Cells(r, 2).formula = "=IF(ISNUMBER(A" & r & "),A" & r & "-$O$2,"""")"
+        ws.Cells(r, 5).formula = "=IF(ISNUMBER(A" & r & "),A" & r & "-$M$2,"""")"
+        ' MWD DLS f/ survey (H) and PD DLS f/ survey (O).
+        ws.Cells(r, COL_MWD_DLS).formula = "=IF(AND(" & tie & "," & nD & "," & dMWD & ",ISNUMBER(" & azE & ")),(30/(B" & r & "-$A$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($B$2))*COS(RADIANS(C" & r & "))+SIN(RADIANS($B$2))*SIN(RADIANS(C" & r & "))*COS(RADIANS(" & azE & "-$C$2)))))),"""")"
+        ws.Cells(r, COL_PD_DLS).formula = "=IF(AND(" & tie & "," & nG & "," & dPD & ",ISNUMBER(" & azH & ")),(30/(E" & r & "-$A$2))*DEGREES(ACOS(MIN(1,MAX(-1,COS(RADIANS($B$2))*COS(RADIANS(F" & r & "))+SIN(RADIANS($B$2))*SIN(RADIANS(F" & r & "))*COS(RADIANS(" & azH & "-$C$2)))))),"""")"
+        ' Sens DLS / Sens BUR: dogleg and signed BUR between the PD sensor (F,G)
+        ' and the D&I (C,D) over O2-M2. Blank inclination blanks the row; a blank
+        ' azimuth holds the previous one.
+        ws.Cells(r, COL_SENS_DLS).formula = "=IF(AND(" & nD & "," & nG & ",ISNUMBER(" & azE & "),ISNUMBER(" & azH & "),ISNUMBER($O$2),ISNUMBER($M$2),$O$2<>$M$2),ProjDoglegDeg(C" & r & "," & azE & ",F" & r & "," & azH & ")/ABS($O$2-$M$2)*30,"""")"
+        ws.Cells(r, COL_SENS_BUR).formula = "=IF(AND(" & nD & "," & nG & ",ISNUMBER($O$2),ISNUMBER($M$2),$O$2<>$M$2),(F" & r & "-C" & r & ")/($O$2-$M$2)*30,"""")"
         If r = FIRST_DATA Then
             ws.Cells(r, COL_PD_BUR).ClearContents
             ws.Cells(r, COL_PD_TR).ClearContents
@@ -1029,41 +1246,46 @@ Private Sub ApplyRowFormulas(ByVal ws As Worksheet)
             ws.Cells(r, COL_MWD_TRC).ClearContents
         End If
         If r >= 9 Then
-            ws.Cells(r, COL_PD_BUR).Formula = "=IF(AND(" & nG & "," & pG & "," & stepPD & "),(G" & r & "-G" & p & ")/(F" & r & "-F" & p & ")*30,"""")"
-            ws.Cells(r, COL_PD_TR).Formula = "=IF(AND(" & nH & "," & pH & "," & stepPD & "),(MOD(H" & r & "-H" & p & "+180,360)-180)/(F" & r & "-F" & p & ")*30,"""")"
-            ws.Cells(r, COL_MWD_BURC).Formula = "=IF(AND(" & nD & "," & pD & "," & stepMWD & "),(D" & r & "-D" & p & ")/(C" & r & "-C" & p & ")*30,"""")"
-            ws.Cells(r, COL_MWD_TRC).Formula = "=IF(AND(" & nE & "," & pE & "," & stepMWD & "),(MOD(E" & r & "-E" & p & "+180,360)-180)/(C" & r & "-C" & p & ")*30,"""")"
+            azEp = AzHeld("D", p)
+            azHp = AzHeld("G", p)
+            ws.Cells(r, COL_PD_BUR).formula = "=IF(AND(" & nG & "," & pG & "," & stepPD & "),(F" & r & "-F" & p & ")/(E" & r & "-E" & p & ")*30,"""")"
+            ws.Cells(r, COL_PD_TR).formula = "=IF(AND(" & stepPD & ",ISNUMBER(" & azH & "),ISNUMBER(" & azHp & ")),(MOD(" & azH & "-" & azHp & "+180,360)-180)/(E" & r & "-E" & p & ")*30,"""")"
+            ws.Cells(r, COL_MWD_BURC).formula = "=IF(AND(" & nD & "," & pD & "," & stepMWD & "),(C" & r & "-C" & p & ")/(B" & r & "-B" & p & ")*30,"""")"
+            ws.Cells(r, COL_MWD_TRC).formula = "=IF(AND(" & stepMWD & ",ISNUMBER(" & azE & "),ISNUMBER(" & azEp & ")),(MOD(" & azE & "-" & azEp & "+180,360)-180)/(B" & r & "-B" & p & ")*30,"""")"
         End If
-        ws.Cells(r, COL_MWD_BURS).Formula = "=IF(AND(" & tie & "," & nD & "," & dMWD & "),(D" & r & "-$C$2)/(C" & r & "-$B$2)*30,"""")"
+        ws.Cells(r, COL_MWD_BURS).formula = "=IF(AND(" & tie & "," & nD & "," & dMWD & "),(C" & r & "-$B$2)/(B" & r & "-$A$2)*30,"""")"
         ' Signed like the f/ cont. TR columns: + right, - left.
-        ws.Cells(r, COL_MWD_TRS).Formula = "=IF(AND(" & tie & "," & nE & "," & dMWD & "),(MOD(E" & r & "-$D$2+180,360)-180)/(C" & r & "-$B$2)*30,"""")"
-        ws.Cells(r, COL_HOLE).Formula = "=IF(ISNUMBER(B" & r & "),B" & r & ","""")"
-        ' Inc / Az @ Bit: the PD sensor is N2 (~2 m) off the bit, so walk the
-        ' PD reading over N2 at the rate seen BETWEEN the sensors (Sens BUR;
+        ws.Cells(r, COL_MWD_TRS).formula = "=IF(AND(" & tie & "," & dMWD & ",ISNUMBER(" & azE & ")),(MOD(" & azE & "-$C$2+180,360)-180)/(B" & r & "-$A$2)*30,"""")"
+        ws.Cells(r, COL_HOLE).formula = "=IF(ISNUMBER(A" & r & "),A" & r & ","""")"
+        ' Inc / Az @ Bit: the PD sensor is M2 (~2 m) off the bit, so walk the
+        ' PD reading over M2 at the rate seen BETWEEN the sensors (Sens BUR;
         ' inter-sensor walk inline). Only when there is no PD reading fall back
-        ' to carrying the MWD reading over the whole D&I offset (P2) at the
+        ' to carrying the MWD reading over the whole D&I offset (O2) at the
         ' f/ survey rate (MWD BUR f/ survey) - projecting 35 m at 6.4 deg/30m
         ' put a 36.75 PD inc at 43.7 deg @ bit.
         sensBur = ColLetter(COL_SENS_BUR) & r
         mwdBurs = ColLetter(COL_MWD_BURS) & r
-        ws.Cells(r, COL_INC_BIT).Formula = "=IF(" & nG & ",IF(ISNUMBER(" & sensBur & "),G" & r & "+(" & sensBur & "/30)*$N$2,G" & r & ")," & _
-            "IF(NOT(" & nD & "),"""",IF(ISNUMBER(" & mwdBurs & "),(" & mwdBurs & "/30)*P$2+$D" & r & ",$D" & r & ")))"
-        ws.Cells(r, COL_AZ_BIT).Formula = "=IF(" & nH & ",IF(AND(" & nE & "," & sens & "),MOD(H" & r & "+(MOD(H" & r & "-E" & r & "+180,360)-180)/($P$2-$N$2)*$N$2,360),MOD(H" & r & ",360))," & _
-            "IF(NOT(" & nE & "),"""",IF(AND(" & tie & "," & dMWD & "),MOD(((MOD(E" & r & "-$D$2+180,360)-180)/(C" & r & "-$B$2))*P$2+E" & r & ",360),MOD(E" & r & ",360))))"
+        ws.Cells(r, COL_INC_BIT).formula = "=IF(" & nG & ",IF(ISNUMBER(" & sensBur & "),F" & r & "+(" & sensBur & "/30)*$M$2,F" & r & ")," & _
+            "IF(NOT(" & nD & "),"""",IF(ISNUMBER(" & mwdBurs & "),(" & mwdBurs & "/30)*O$2+$C" & r & ",$C" & r & ")))"
+        ' Az @ Bit only on a row that has this station's inc or azimuth.
+        ' A blank D/G on that row holds the previous azimuth. An empty row stays blank.
+        ws.Cells(r, COL_AZ_BIT).formula = "=IF(OR(" & nG & ",ISNUMBER(G" & r & ")),IF(AND(" & sens & ",ISNUMBER(" & azE & ")),MOD(" & azH & "+(MOD(" & azH & "-" & azE & "+180,360)-180)/($O$2-$M$2)*$M$2,360),MOD(" & azH & ",360))," & _
+            "IF(NOT(OR(" & nD & ",ISNUMBER(D" & r & "))),"""",IF(AND(" & tie & "," & dMWD & ",ISNUMBER(" & azE & ")),MOD(((MOD(" & azE & "-$C$2+180,360)-180)/(B" & r & "-$A$2))*O$2+" & azE & ",360),IF(ISNUMBER(" & azE & "),MOD(" & azE & ",360),""""))))"
         ' TVD @ Bit: minimum curvature tie-on -> every D&I reading so far -> this
         ' row's PD reading -> bit. One average-angle course from the tie-on read
         ' 1.4 m shallow after 65 m of build.
-        ws.Cells(r, COL_TVD_BIT).Formula = "=IF(AND(ISNUMBER($S" & r & "),ISNUMBER($T" & r & "),ISNUMBER($U" & r & ")," & _
-            "ISNUMBER($B$2),ISNUMBER($C$2),ISNUMBER($D$2),ISNUMBER($E$2))," & _
-            "ContDITvdAtBit($S" & r & ",$T" & r & ",$U" & r & ",$B$2,$C$2,$D$2,$E$2,$N$2," & _
-            "$C$" & FIRST_DATA & ":$C" & r & ",$D$" & FIRST_DATA & ":$D" & r & ",$E$" & FIRST_DATA & ":$E" & r & "," & _
-            "$G" & r & ",$H" & r & "),"""")"
+        ws.Cells(r, COL_TVD_BIT).formula = "=IF(AND(ISNUMBER($R" & r & "),ISNUMBER($S" & r & "),ISNUMBER($T" & r & ")," & _
+            "ISNUMBER($A$2),ISNUMBER($B$2),ISNUMBER($C$2),ISNUMBER($D$2))," & _
+            "ContDITvdAtBit($R" & r & ",$S" & r & ",$T" & r & ",$A$2,$B$2,$C$2,$D$2,$M$2," & _
+            "$B$" & FIRST_DATA & ":$B" & r & ",$C$" & FIRST_DATA & ":$C" & r & ",$D$" & FIRST_DATA & ":$D" & r & "," & _
+            "$F" & r & "," & azH & "),"""")"
     Next r
 End Sub
 
 ' TVD @ Bit for one Cont DI row by minimum curvature through every measured
 ' station: tie-on, each D&I reading up to this row (MD = MWD SD), this row's
-' PD reading (MD = bit - PD offset), then the bit. Stations that are blank or
+' PD reading (MD = bit - PD offset), then the bit. A station with MD and
+' inclination but a blank azimuth keeps the previous azimuth. Stations that
 ' do not advance in MD are skipped.
 Public Function ContDITvdAtBit(ByVal bitMd As Double, ByVal bitInc As Double, ByVal bitAzm As Double, _
                                ByVal tieMd As Double, ByVal tieInc As Double, ByVal tieAzm As Double, _
@@ -1080,21 +1302,29 @@ Public Function ContDITvdAtBit(ByVal bitMd As Double, ByVal bitInc As Double, By
     lastMd = tieMd: lastInc = tieInc: lastAzm = tieAzm
     tvd = tieTvd
 
-    For k = 1 To diMd.Rows.Count
+    For k = 1 To diMd.rows.Count
         m = diMd.Cells(k, 1).Value2
         i = diInc.Cells(k, 1).Value2
         a = diAzm.Cells(k, 1).Value2
-        If IsNumericCell(m) And IsNumericCell(i) And IsNumericCell(a) Then
+        If IsNumericCell(m) And IsNumericCell(i) Then
             If CDbl(m) > lastMd And CDbl(m) < bitMd Then
-                AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(i), CDbl(a)
+                If IsNumericCell(a) Then
+                    AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(i), CDbl(a)
+                Else
+                    AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(i), lastAzm
+                End If
             End If
         End If
     Next k
 
-    If IsNumericCell(pdOffset) And IsNumericCell(pdInc) And IsNumericCell(pdAzm) Then
+    If IsNumericCell(pdOffset) And IsNumericCell(pdInc) Then
         m = bitMd - CDbl(pdOffset)
         If m > lastMd And m < bitMd Then
-            AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(pdInc), CDbl(pdAzm)
+            If IsNumericCell(pdAzm) Then
+                AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(pdInc), CDbl(pdAzm)
+            Else
+                AddTvdStep tvd, lastMd, lastInc, lastAzm, CDbl(m), CDbl(pdInc), lastAzm
+            End If
         End If
     End If
 
@@ -1119,10 +1349,34 @@ Private Function IsNumericCell(ByVal v As Variant) As Boolean
     IsNumericCell = IsNumeric(v)
 End Function
 
-' Column number -> letter (1..26 only; the Cont DI grid ends at W).
+' Azimuth used by the row equations. This cell when it is a number; otherwise
+' the last number above it in the same column; otherwise the tie-on azimuth
+' C2. A blank is never passed through as 0.
+Private Function AzHeld(ByVal col As String, ByVal r As Long) As String
+    Dim prev As String
+    If r > FIRST_DATA Then
+        prev = "IFERROR(LOOKUP(2,1/(" & col & "$" & FIRST_DATA & ":" & col & CStr(r - 1) & "<>"""")," & col & "$" & FIRST_DATA & ":" & col & CStr(r - 1) & "),$C$2)"
+    Else
+        prev = "$C$2"
+    End If
+    AzHeld = "IF(ISNUMBER(" & col & CStr(r) & ")," & col & CStr(r) & "," & prev & ")"
+End Function
+
+' Column number -> letter (1..26 only; the Cont DI grid ends at V).
 Private Function ColLetter(ByVal col As Long) As String
     ColLetter = Chr$(64 + col)
 End Function
+
+
+
+
+
+
+
+
+
+
+
 
 
 

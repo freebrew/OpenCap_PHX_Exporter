@@ -3,33 +3,37 @@ import { Line2NodeMaterial, WebGPURenderer } from "three/webgpu";
 import { Line2 } from "three/addons/lines/webgpu/Line2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { dragOrbit, emptyBounds, fitOrbit, includeXyz, wheelOrbit, cameraFromOrbit, type Orbit } from "../../../packages/wells-3d/src/orbit";
+import { shadowBoxOf } from "../../../packages/wells-3d/src/shadowBox";
 import { pickHover, unpackPath, type PickPath } from "../../../packages/wells-3d/src/wellPick";
 import type { OffsetPath, WellScene } from "../../../packages/wells-3d/src/wellScene";
 import type { ProbeResult, WellsBackend } from "./wellsMessages";
+import type { AnyObject } from "./wellsObject";
+import { ShadowWalls } from "./wellsWalls";
 
 const PLAN_COLOR = "#17324d";
 const DRILLED_COLOR = "#0e7490";
+const TARGET_COLOR = "#1b4d2e";
+// Screen pixels. The plan and the drilled hole are the pair being compared, so they are drawn
+// far heavier than the offset wells. A metre-sized pipe would swallow a close separation.
+const PATH_WIDTH = 16;
 const BACKGROUND = "#d5dee6";
 
 interface Drawn {
   object: AnyObject;
   kind: "plan" | "offset" | "drilled";
   concern: boolean;
+  name: string;
 }
 
-interface AnyObject {
-  visible: boolean;
-  renderOrder: number;
-  position: { set: (x: number, y: number, z: number) => void };
-  scale: { set: (x: number, y: number, z: number) => void; setScalar: (n: number) => void };
-  quaternion: { setFromUnitVectors: (a: unknown, b: unknown) => void };
-  updateMatrix: () => void;
-  matrix: unknown;
-  add: (child: AnyObject) => void;
-  remove: (child: AnyObject) => void;
-  children: AnyObject[];
-  geometry?: { type?: string; dispose?: () => void };
-  material?: { dispose?: () => void } | Array<{ dispose?: () => void }>;
+/** The polyline cut at its breaks, one piece per run. The pieces share the array. */
+function runsOf(xyz: Float32Array, breaks: number[]): Float32Array[] {
+  const out: Float32Array[] = [];
+  let from = 0;
+  for (const at of [...breaks, xyz.length / 3]) {
+    out.push(xyz.subarray(from * 3, at * 3));
+    from = at;
+  }
+  return out;
 }
 
 /** GPU picture of a well scene. Frames are drawn only when the camera, the hover or the scene changes. */
@@ -47,6 +51,7 @@ export class WellsRenderer {
   private readonly root = new THREE.Group();
   private readonly highlight: AnyObject;
   private drawn: Drawn[] = [];
+  private walls: ShadowWalls | null = null;
   private paths: PickPath[] = [];
   private orbit: Orbit = { targetX: 0, targetY: 0, targetZ: 0, theta: -Math.PI / 4, phi: Math.PI / 3, radius: 10 };
   private home: Orbit = this.orbit;
@@ -59,7 +64,8 @@ export class WellsRenderer {
   private dragButton = 0;
   private dragShift = false;
   private showDrilled = true;
-  private showAll = false;
+  /** Null until the page sends a filter: the concern wells, which is what the view opens on. */
+  private shown: Set<string> | null = null;
   private preferTubes = false;
   private dirty = true;
   private paused = false;
@@ -106,6 +112,7 @@ export class WellsRenderer {
     this.renderer?.setSize(this.width, this.height, false);
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
+    this.walls?.fitLabels(this.camera.position, this.camera.fov, this.height);
     this.dirty = true;
   }
 
@@ -158,9 +165,9 @@ export class WellsRenderer {
     this.rebuild();
   }
 
-  setOptions(drilled: boolean, allOffsets: boolean): void {
+  setOptions(drilled: boolean, shown: readonly string[]): void {
     this.showDrilled = drilled;
-    this.showAll = allOffsets;
+    this.shown = new Set(shown);
     this.applyVisibility();
     this.dirty = true;
   }
@@ -245,6 +252,7 @@ export class WellsRenderer {
     this.clearRoot();
     this.paths = [];
     this.drawn = [];
+    this.walls = null;
     const scene = this.cached;
     if (!scene) {
       this.dirty = true;
@@ -255,64 +263,70 @@ export class WellsRenderer {
     if (scene.drilled) includeXyz(bounds, scene.drilled.xyz);
     for (const offset of scene.offsets) if (offset.concern) includeXyz(bounds, offset.xyz);
     if (!Number.isFinite(bounds.minX)) includeXyz(bounds, scene.plan.xyz);
+    const box = shadowBoxOf(scene);
+    if (box) {
+      this.walls = new ShadowWalls(box, scene.plan.xyz, scene.drilled?.xyz ?? null, scene.formations, (xyz, color, width, opacity) => this.makeStroke(xyz, color, width, opacity));
+      this.root.add(this.walls.group);
+      includeXyz(bounds, [box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ]);
+    }
     this.home = fitOrbit(bounds);
     this.orbit = { ...this.home };
     this.applyCamera();
-    const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ, 1);
-    this.root.add(this.grid(span, bounds.minZ));
-    this.addPath(scene.plan.xyz, "plan", "Planned Path", PLAN_COLOR, 3, 1, true, scene.plan);
-    if (scene.drilled) this.addPath(scene.drilled.xyz, "drilled", "Drilled Path", DRILLED_COLOR, 3, 1, true, scene.drilled);
-    for (const offset of scene.offsets) this.addOffset(offset, span);
+    this.addPath(scene.plan.xyz, "plan", "Planned Path", PLAN_COLOR, PATH_WIDTH, 1, true, scene.plan);
+    if (scene.drilled) this.addPath(scene.drilled.xyz, "drilled", "Drilled Path", DRILLED_COLOR, PATH_WIDTH, 1, true, scene.drilled);
+    for (const offset of scene.offsets) this.addOffset(offset);
+    for (const target of scene.targets) this.addTarget(target);
     this.applyVisibility();
     this.dirty = true;
   }
 
-  private addPath(xyz: Float32Array, kind: Drawn["kind"], name: string, color: string, width: number, opacity: number, concern: boolean, packed: OffsetPath | WellScene["plan"]): void {
-    if (xyz.length >= 6) {
-      const object = this.makeStroke(xyz, color, width, opacity);
+  private addPath(xyz: Float32Array, kind: Drawn["kind"], name: string, color: string, width: number, opacity: number, concern: boolean, packed: OffsetPath | WellScene["plan"], breaks: number[] = []): void {
+    for (const run of runsOf(xyz, breaks)) {
+      if (run.length < 6) continue;
+      const object = this.makeStroke(run, color, width, opacity);
       object.renderOrder = kind === "plan" ? 1 : 2;
       this.root.add(object);
-      this.drawn.push({ object, kind, concern });
+      this.drawn.push({ object, kind, concern, name });
     }
-    this.paths.push({ kind, name, points: unpackPath(packed) });
+    this.paths.push({ kind, name, points: unpackPath(packed), breaks });
   }
 
-  private addOffset(offset: OffsetPath, span: number): void {
+  private addOffset(offset: OffsetPath): void {
     const width = offset.concern ? 5 : 2;
     const opacity = offset.concern ? 1 : 0.4;
-    this.addPath(offset.xyz, "offset", offset.name, offset.color, width, opacity, offset.concern, offset);
-    if (offset.marker && offset.join) {
-      const join = this.makeStroke(new Float32Array([
-        offset.marker.x, offset.marker.y, offset.marker.z,
-        offset.join.x, offset.join.y, offset.join.z,
-      ]), offset.color, 1.5, opacity);
-      this.root.add(join);
-      this.drawn.push({ object: join, kind: "offset", concern: offset.concern });
+    this.addPath(offset.xyz, "offset", offset.name, offset.color, width, opacity, offset.concern, offset, offset.breaks);
+  }
+
+  /** Two rings on the plan, square to the wellbore, at a named target. */
+  private addTarget(target: { name: string; md: number; tvd: number; x: number; y: number; z: number; outer: Float32Array; inner: Float32Array }): void {
+    for (const ring of [target.outer, target.inner]) {
+      const object = this.makeStroke(ring, TARGET_COLOR, 2, 1);
+      this.root.add(object);
+      this.drawn.push({ object, kind: "plan", concern: true, name: target.name });
     }
-    if (offset.marker) {
-      const marker = new THREE.Mesh(this.sphere, new THREE.MeshBasicMaterial({ color: offset.color, transparent: opacity < 1, opacity }));
-      const radius = Math.max(span * 0.008, 0.35);
-      marker.position.set(offset.marker.x, offset.marker.y, offset.marker.z);
-      marker.scale.setScalar(radius);
-      this.root.add(marker);
-      this.drawn.push({ object: marker, kind: "offset", concern: offset.concern });
-    }
+    this.paths.push({
+      kind: "target",
+      name: target.name,
+      points: [{ x: target.x, y: target.y, z: target.z, md: target.md, tvd: target.tvd, c2c: null, sf: null }],
+    });
   }
 
   private applyVisibility(): void {
     for (const item of this.drawn) {
       if (item.kind === "drilled") item.object.visible = this.showDrilled;
-      else if (item.kind === "offset") item.object.visible = item.concern || this.showAll;
+      else if (item.kind === "offset") item.object.visible = this.shown === null ? item.concern : this.shown.has(item.name);
       else item.object.visible = true;
     }
+    this.walls?.showDrilled(this.showDrilled);
   }
 
   private visiblePaths(): PickPath[] {
     return this.paths.filter((path) => {
       if (path.kind === "drilled") return this.showDrilled;
       if (path.kind === "offset") {
+        if (this.shown) return this.shown.has(path.name);
         const offset = this.cached?.offsets.find((item) => item.name === path.name);
-        return offset ? offset.concern || this.showAll : false;
+        return offset?.concern ?? false;
       }
       return true;
     });
@@ -323,10 +337,12 @@ export class WellsRenderer {
     try {
       const geometry = new LineGeometry();
       geometry.setPositions(xyz);
+      // Always in the transparent pass, with the walls, so render order puts every line after them
+      // and a wall never washes out a well behind it.
       const material = new Line2NodeMaterial({
         color,
         linewidth: width,
-        transparent: opacity < 1,
+        transparent: true,
         opacity,
         worldUnits: false,
       });
@@ -341,7 +357,7 @@ export class WellsRenderer {
   private tube(xyz: Float32Array, color: string, opacity: number): AnyObject {
     const count = Math.max(0, xyz.length / 3 - 1);
     const geometry = new THREE.CylinderGeometry(0.45, 0.45, 1, 5);
-    const material = new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity });
+    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, count));
     const dummy = new THREE.Object3D();
     const up = new THREE.Vector3(0, 1, 0);
@@ -371,18 +387,6 @@ export class WellsRenderer {
     return new THREE.Mesh(new THREE.BoxGeometry(1.8, height, 0.01), new THREE.MeshBasicMaterial({ color: "#ff0000" }));
   }
 
-  private grid(span: number, z: number): AnyObject {
-    const step = gridStep(span);
-    const half = Math.max(step, Math.ceil(span / 2 / step) * step);
-    const positions: number[] = [];
-    for (let value = -half; value <= half + step * 0.01; value += step) {
-      positions.push(-half, value, z, half, value, z, value, -half, z, value, half, z);
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: "#9aabba" }));
-  }
-
   private project(x: number, y: number, z: number): { x: number; y: number; behind: boolean } | null {
     const vector = new THREE.Vector3(x, y, z).project(this.camera);
     if (!Number.isFinite(vector.x) || !Number.isFinite(vector.y)) return null;
@@ -399,6 +403,8 @@ export class WellsRenderer {
     this.camera.position.set(eye.x, eye.y, eye.z);
     this.camera.up.set(0, 0, 1);
     this.camera.lookAt(this.orbit.targetX, this.orbit.targetY, this.orbit.targetZ);
+    this.walls?.follow(eye);
+    this.walls?.fitLabels(eye, this.camera.fov, this.height);
     this.camera.near = Math.max(0.05, this.orbit.radius / 500);
     this.camera.far = Math.max(100, this.orbit.radius * 40);
     this.camera.updateProjectionMatrix();
@@ -467,18 +473,17 @@ function disposeNode(node: AnyObject): void {
   const mesh = node;
   if (mesh.geometry && mesh.geometry.type !== "SphereGeometry") mesh.geometry.dispose?.();
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-  for (const material of materials) material?.dispose?.();
+  for (const material of materials) {
+    const map = (material as { map?: { dispose?: () => void; userData?: { disposed?: boolean } } } | undefined)?.map;
+    if (map && !map.userData?.disposed) {
+      map.userData = { ...(map.userData ?? {}), disposed: true };
+      map.dispose?.();
+    }
+    material?.dispose?.();
+  }
   for (const child of [...node.children]) disposeNode(child);
 }
 
 function isRed(pixel: [number, number, number]): boolean {
   return pixel[0] > 180 && pixel[1] < 80 && pixel[2] < 80;
-}
-
-function gridStep(span: number): number {
-  const raw = Math.max(span / 8, 1);
-  const power = 10 ** Math.floor(Math.log10(raw));
-  const error = raw / power;
-  const nice = error >= 5 ? 5 : error >= 2 ? 2 : 1;
-  return nice * power;
 }

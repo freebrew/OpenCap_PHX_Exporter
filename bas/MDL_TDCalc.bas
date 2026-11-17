@@ -157,12 +157,12 @@ Public Sub InstallTdActualFormulas()
     fields(3) = "NS": fields(4) = "EW"
 
     For i = 0 To 4
-        ws.Cells(TD_ROW_ACTUAL, TD_COL_FIRST + i).Formula = _
+        ws.Cells(TD_ROW_ACTUAL, TD_COL_FIRST + i).formula = _
             "=IFERROR(TdActualBit(""" & fields(i) & """," & SURVEY_BLOCK & "," & TGT_BLOCK & "),"""")"
     Next i
 
     ws.Range("J55:M55").ClearContents
-    ws.Range("I55").Formula = ACTUAL_TD_FORMULA
+    ws.Range("I55").formula = ACTUAL_TD_FORMULA
     ws.Range("I55:M55").Merge
 
     SheetReprotectAfterVba ws, wasProt
@@ -178,7 +178,7 @@ End Sub
 Public Sub RefreshTdPlannedFromPlan()
     Dim plan As Worksheet
     Dim ws As Worksheet
-    Dim cMD As Long, cInc As Long, cAzi As Long, cNS As Long, cEW As Long
+    Dim cmd As Long, cInc As Long, cAzi As Long, cNS As Long, cEW As Long
     Dim c As Long
     Dim lastR As Long
     Dim wasProt As Boolean
@@ -191,19 +191,19 @@ Public Sub RefreshTdPlannedFromPlan()
 
     For c = 1 To 20
         Select Case UCase$(Trim$(CStr(plan.Cells(2, c).Value2 & "")))
-            Case "MD":         cMD = c
+            Case "MD":         cmd = c
             Case "INC":        cInc = c
             Case "AZI", "AZM": cAzi = c
             Case "NS":         cNS = c
             Case "EW":         cEW = c
         End Select
     Next c
-    If cMD = 0 Or cInc = 0 Or cAzi = 0 Or cNS = 0 Or cEW = 0 Then Exit Sub
+    If cmd = 0 Or cInc = 0 Or cAzi = 0 Or cNS = 0 Or cEW = 0 Then Exit Sub
 
-    lastR = plan.Cells(plan.Rows.Count, cMD).End(xlUp).Row
+    lastR = plan.Cells(plan.rows.Count, cmd).End(xlUp).row
     Do While lastR >= 3
-        If IsNumeric(plan.Cells(lastR, cMD).Value2) _
-           And Len(CStr(plan.Cells(lastR, cMD).Value2 & "")) > 0 Then Exit Do
+        If IsNumeric(plan.Cells(lastR, cmd).Value2) _
+           And Len(CStr(plan.Cells(lastR, cmd).Value2 & "")) > 0 Then Exit Do
         lastR = lastR - 1
     Loop
     If lastR < 3 Then Exit Sub
@@ -218,7 +218,7 @@ Public Sub RefreshTdPlannedFromPlan()
     wasProt = SheetUnprotectForVba(ws)
     On Error GoTo PlannedDone
 
-    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 0).Value = PlanNum(plan, lastR, cMD)
+    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 0).Value = PlanNum(plan, lastR, cmd)
     ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 1).Value = PlanNum(plan, lastR, cInc)
     ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 2).Value = PlanNum(plan, lastR, cAzi)
     ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 3).Value = PlanNum(plan, lastR, cNS)
@@ -374,9 +374,9 @@ End Function
 Private Function IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     Dim fd As String, fE As String, fF As String
     On Error Resume Next
-    fd = UCase$(CStr(ws.Cells(r, SS_COL_BIT_MD).Formula & ""))
-    fE = UCase$(CStr(ws.Cells(r, SS_COL_MD).Formula & ""))
-    fF = UCase$(CStr(ws.Cells(r, SS_COL_INC).Formula & ""))
+    fd = UCase$(CStr(ws.Cells(r, SS_COL_BIT_MD).formula & ""))
+    fE = UCase$(CStr(ws.Cells(r, SS_COL_MD).formula & ""))
+    fF = UCase$(CStr(ws.Cells(r, SS_COL_INC).formula & ""))
     On Error GoTo 0
     IsSurveySummaryRow = (InStr(1, fd, "LOOKUP", vbBinaryCompare) > 0) _
                       Or (InStr(1, fE, "LOOKUP", vbBinaryCompare) > 0) _

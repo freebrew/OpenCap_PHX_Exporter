@@ -7,6 +7,7 @@ import { cors } from "hono/cors";
 import { cardFileName, DEFAULT_THREADS, ENTRY_FAMILIES, entryPayloadSchema, measuredSerials, measureRangesSchema, renderCards, type EntryPayload, type InventorySnapshot, type MeasureRange } from "../../../packages/strapsheets-core/src/index";
 import { randomToken } from "./crypto";
 import { authorizeUrl, exchangeCode, identityFromIdToken, type Vendor } from "./oidc";
+import { codeMessage, normalEmail, startEmailCode, verifyEmailCode } from "./onboard";
 import { PairingLimiter, pairingMessage, startPairing, verifyPairingCode, verifyPairingLink } from "./pairing";
 import { issueSession, readSession } from "./session";
 import { appendEntry, readFormOptions, sheetConfigured, writeRanges } from "./sheets";
@@ -96,6 +97,53 @@ app.post("/auth/pair/verify", async (c) => {
   const body = (await c.req.json()) as { email?: string; code?: string };
   const ok = await verifyPairingCode(c.env, session.userId, body.email ?? "", body.code ?? "");
   return ok ? c.json({ paired: true }) : c.json({ error: "That code is not valid." }, 400);
+});
+
+// First-run email check for the phones and the web sheet. Anonymous on purpose: the person has no
+// account yet, so the limits are per address and per caller, and a code is the only proof.
+app.post("/v1/onboard/email", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { email?: unknown };
+  const started = await startEmailCode(c.env, body.email, c.req.header("cf-connecting-ip") ?? "unknown");
+  switch (started.kind) {
+    case "invalid":
+      return c.json({ error: "Type a full email address." }, 400);
+    case "limited":
+      return c.json({ error: "Too many codes for that address. Try again in an hour." }, 429);
+    case "sent":
+      try {
+        await c.env.EMAIL.send({ to: started.to, from: c.env.MAIL_FROM, replyTo: c.env.MAIL_FROM, ...codeMessage(started.code) });
+      } catch (error) {
+        // The mail service's own message names accounts and domains. Log it; tell the person something they can act on.
+        console.error("onboard mail failed", error instanceof Error ? error.message : String(error));
+        return c.json({ error: "We could not send the code just now. Try again in a few minutes." }, 502);
+      }
+      return c.json({ sent: true });
+    default: {
+      const never: never = started;
+      return never;
+    }
+  }
+});
+
+app.post("/v1/onboard/verify", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { email?: unknown; code?: unknown };
+  const result = await verifyEmailCode(c.env, body.email, body.code);
+  switch (result) {
+    case "ok":
+      return c.json({ verified: true, email: normalEmail(body.email) });
+    case "invalid":
+      return c.json({ error: "Type the 6 digits from the email.", reason: result }, 400);
+    case "wrong":
+      return c.json({ error: "That code is not right.", reason: result }, 400);
+    case "locked":
+      return c.json({ error: "Too many wrong codes. Ask for a new one.", reason: result }, 400);
+    case "expired":
+      return c.json({ error: "That code has expired. Ask for a new one.", reason: result }, 400);
+    default: {
+      const never: never = result;
+      return never;
+    }
+  }
 });
 
 app.get("/auth/pair/verify", async (c) => {
@@ -273,6 +321,8 @@ function allowedApiOrigin(origin: string): boolean {
   try {
     const url = new URL(origin);
     if (url.protocol === "chrome-extension:" && /^[a-p]{32}$/.test(url.hostname)) return true;
+    // The web sheet is an Apps Script page, served from a hashed *.googleusercontent.com host.
+    if (url.protocol === "https:" && url.hostname.endsWith("-script.googleusercontent.com")) return true;
     const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
     return local && (url.protocol === "http:" || url.protocol === "https:");
   } catch {

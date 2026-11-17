@@ -724,7 +724,7 @@ End Function
 Private Function FindLabelValue(ByVal ws As Worksheet, ByVal labelText As String, Optional ByVal valueOffset As Long = 1) As Variant
     Dim ur As Range
     Dim c As Range
-    Dim cellText As String
+    Dim CellText As String
     Dim inlineValue As String
     
     On Error Resume Next
@@ -734,10 +734,10 @@ Private Function FindLabelValue(ByVal ws As Worksheet, ByVal labelText As String
     If ur Is Nothing Then Exit Function
     
     For Each c In ur.Cells
-        cellText = CleanText(c.text)
+        CellText = CleanText(c.text)
         
-        If IsLabelMatch(cellText, labelText) Then
-            inlineValue = InlineAfterLabel(cellText, labelText)
+        If IsLabelMatch(CellText, labelText) Then
+            inlineValue = InlineAfterLabel(CellText, labelText)
             
             If valueOffset = 1 And Len(inlineValue) > 0 Then
                 FindLabelValue = inlineValue
@@ -759,7 +759,7 @@ Private Function NthNonBlankToRight(ByVal ws As Worksheet, ByVal startCell As Ra
     lastCol = ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1
     
     For col = startCell.Column + 1 To Application.Min(lastCol, startCell.Column + 10)
-        txt = CleanText(ws.Cells(startCell.Row, col).text)
+        txt = CleanText(ws.Cells(startCell.row, col).text)
         If Len(txt) > 0 Then
             found = found + 1
             If found = n Then
@@ -770,11 +770,11 @@ Private Function NthNonBlankToRight(ByVal ws As Worksheet, ByVal startCell As Ra
     Next col
 End Function
 
-Private Function IsLabelMatch(ByVal cellText As String, ByVal labelText As String) As Boolean
+Private Function IsLabelMatch(ByVal CellText As String, ByVal labelText As String) As Boolean
     Dim a As String
     Dim b As String
     
-    a = NormalizeForMatch(cellText)
+    a = NormalizeForMatch(CellText)
     b = NormalizeForMatch(labelText)
     
     IsLabelMatch = InStr(1, a, b, vbTextCompare) > 0
@@ -788,14 +788,14 @@ Private Function NormalizeForMatch(ByVal s As String) As String
     NormalizeForMatch = s
 End Function
 
-Private Function InlineAfterLabel(ByVal cellText As String, ByVal labelText As String) As String
+Private Function InlineAfterLabel(ByVal CellText As String, ByVal labelText As String) As String
     Dim p As Long
     Dim s As String
     
-    p = InStr(1, cellText, labelText, vbTextCompare)
+    p = InStr(1, CellText, labelText, vbTextCompare)
     If p = 0 Then Exit Function
     
-    s = mid$(cellText, p + Len(labelText))
+    s = mid$(CellText, p + Len(labelText))
     s = Trim$(s)
     
     If Left$(s, 1) = ":" Then s = Trim$(mid$(s, 2))
@@ -977,7 +977,7 @@ Private Function FormatHoursValue(ByVal v As Variant) As String
     
     ' Preserve odd manually typed values like "1hr8s."
     If CountNumbers(s) > 1 Then
-        If right$(s, 1) <> "." Then s = s & "."
+        If Right$(s, 1) <> "." Then s = s & "."
         FormatHoursValue = s
         Exit Function
     End If
@@ -991,7 +991,7 @@ Private Function FormatHoursValue(ByVal v As Variant) As String
     Else
         s = Replace(s, "Hrs", "hrs", , , vbTextCompare)
         s = Replace(s, "Hr", "hr", , , vbTextCompare)
-        If right$(s, 1) <> "." Then s = s & "."
+        If Right$(s, 1) <> "." Then s = s & "."
         FormatHoursValue = s
     End If
 End Function

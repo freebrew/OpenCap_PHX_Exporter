@@ -162,7 +162,7 @@ Public Sub InitSetup()
     SetupDataSheets
     EnsureSheet SH_SETUP, True
 
-    Dim wbPath As String: wbPath = ThisWorkbook.Path
+    Dim wbPath As String: wbPath = ThisWorkbook.path
     If wbPath <> "" Then
         Dim fJob As String:   fJob = FindCsvByToken(wbPath, TOK_JOB)
         Dim fCrew As String:  fCrew = FindCsvByToken(wbPath, TOK_CREW)
@@ -211,7 +211,7 @@ Public Sub RefreshAllCsvData()
     Dim setupWasProt As Boolean
     Dim errMsg As String
 
-    Dim wbPath As String: wbPath = ThisWorkbook.Path
+    Dim wbPath As String: wbPath = ThisWorkbook.path
     If wbPath = "" Then
         mBusy = False
         MsgBox "Save the workbook to a folder first." & vbCrLf & _
@@ -282,7 +282,7 @@ Public Sub AdoptCurrentJobFromOpenCap()
 
     On Error GoTo Fail
     RememberCsvRootsFromSetup
-    wbPath = ThisWorkbook.Path
+    wbPath = ThisWorkbook.path
     If wbPath = "" Then Exit Sub
 
     SetupDataSheets
@@ -319,7 +319,7 @@ Public Sub RebuildSetup()
     If mBusy Then Exit Sub
     mBusy = True
 
-    Dim eR As Long
+    Dim er As Long
     Dim em As String
     Dim wasProt As Boolean
 
@@ -336,13 +336,13 @@ Public Sub RebuildSetup()
     Exit Sub
 
 ErrHandler:
-    eR = Err.Number
+    er = Err.Number
     em = Err.Description
     ScreenForceReset
     mBusy = False
     On Error Resume Next
     SheetReprotectAfterVba ThisWorkbook.Worksheets(SH_SETUP), wasProt
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "REBUILD ERR " & eR & ": " & em
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "REBUILD ERR " & er & ": " & em
     On Error GoTo 0
 End Sub
 
@@ -416,7 +416,7 @@ Private Sub ConfigSheet(ws As Worksheet)
         .Cells.Interior.Color = cWh()
         .Cells.Font.Color = cBlk()
         .Cells.Font.name = "Consolas"
-        .Cells.Font.Size = 9
+        .Cells.Font.size = 9
         .Tab.Color = cGrnBadge()
     End With
 
@@ -498,9 +498,9 @@ Private Sub ApplySetupSheetLayout(ws As Worksheet)
     ws.Columns(C_CRR + 2).ColumnWidth = 8
     ws.Columns(C_CRR + 3).ColumnWidth = 8
 
-    ws.Rows("1:130").rowHeight = 16
-    ws.Rows(R_HDR).rowHeight = 30
-    ws.Rows(R_DIV).rowHeight = 3
+    ws.rows("1:130").rowHeight = 16
+    ws.rows(R_HDR).rowHeight = 30
+    ws.rows(R_DIV).rowHeight = 3
 
     ' Dashed lines through the sheet are leftover print page breaks.
     ' Do not touch PageSetup here — talking to the printer can hang Excel.
@@ -521,7 +521,7 @@ Private Sub DrawHeader(ws As Worksheet)
         .Value = "  OPENCAP  |  WELL DATABASE & SETUP"
         .Interior.Color = cTeal()
         .Font.Color = cBlk()
-        .Font.Size = 14
+        .Font.size = 14
         .Font.bold = True
         .Font.name = "Consolas"
         .VerticalAlignment = xlVAlignCenter
@@ -569,7 +569,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     ' -- WELL GEOMETRY ------------------------------------------------------------
     ' Section gap height is intentional UI (do not shrink back to 7 - it gets wiped
     ' every Rebuild and has been re-applied by hand too many times).
-    ws.Rows(r).rowHeight = 20: r = r + 1
+    ws.rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  WELL GEOMETRY", cTealLt(), cBlk()
     r = r + 1
     Pair ws, r, "GROUND MSL", ValUnit(GF(j, "GroundMSL"), " m"), _
@@ -586,7 +586,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- DIRECTIONAL PARAMETERS ---------------------------------------------------
-    ws.Rows(r).rowHeight = 20: r = r + 1
+    ws.rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  DIRECTIONAL PARAMETERS", cTealLt(), cBlk()
     r = r + 1
     Pair ws, r, "MAG DECL", ValUnit(GF(j, "MagneticDeclination"), Chr(176)), _
@@ -606,7 +606,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- EQUIPMENT & RIG ----------------------------------------------------------
-    ws.Rows(r).rowHeight = 20: r = r + 1
+    ws.rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  EQUIPMENT & RIG", cTeal(), cBlk()
     r = r + 1
     Pair ws, r, "RIG TYPE", GF(j, "RigType"), _
@@ -623,7 +623,7 @@ Private Sub DrawJobAndCrewSection(ws As Worksheet, startRow As Long)
     r = r + 1
 
     ' -- CONTACTS -----------------------------------------------------------------
-    ws.Rows(r).rowHeight = 20: r = r + 1
+    ws.rows(r).rowHeight = 20: r = r + 1
     SectionBar ws, r, C_ACCENT, C_V2E, "  CONTACTS", cTeal(), cBlk()
     r = r + 1
     Pair ws, r, "COMPANY MAN", GF(j, "CompanyMan"), _
@@ -683,11 +683,11 @@ Private Sub DrawCrew(ws As Worksheet, topRow As Long, bottomRow As Long)
         crewTitle = crewTitle & "   " & CStr(nCrew)
     End If
     SectionBar ws, r, C_CRL, C_LAST, crewTitle, cTeal(), cBlk()
-    ws.Rows(r).rowHeight = 16
+    ws.rows(r).rowHeight = 16
     r = r + 1
 
     ' Sub-header: ROLE | NAME | EMAIL | PHONE
-    ws.Rows(r).rowHeight = 11
+    ws.rows(r).rowHeight = 11
     Dim hdrBg As Long: hdrBg = cBg()
     Sgl ws, r, C_CRL, "ROLE", hdrBg, cDk(), True, 7, xlHAlignLeft
     MrgCell ws, r, C_CRL + 1, C_CRL + 2, "NAME", hdrBg, cDk(), True, 7, xlHAlignLeft
@@ -754,7 +754,7 @@ Private Sub PaintCrewRow(ws As Worksheet, ByVal r As Long, ByVal slot As Long, _
         ByVal role As String, ByVal nm As String, ByVal em As String, ByVal pH As String)
     Dim bg As Long
     If slot Mod 2 = 0 Then bg = cWh() Else bg = cBg()
-    ws.Rows(r).rowHeight = 12
+    ws.rows(r).rowHeight = 12
     Sgl ws, r, C_CRL, role, bg, cDk(), True, 7, xlHAlignLeft
     MrgCell ws, r, C_CRL + 1, C_CRL + 2, nm, bg, cBlk(), (nm <> ""), 8, xlHAlignLeft
     MrgCell ws, r, C_CRL + 3, C_CRL + 5, em, bg, cDk(), False, 7, xlHAlignLeft
@@ -769,14 +769,14 @@ End Sub
 ' changes auto-trigger SortCrewByRole. Requires "Trust access to VBA project".
 Private Sub InstallCrewSortEvent(ws As Worksheet)
     On Error GoTo NoAccess
-    Dim cm As Object
+    Dim cM As Object
     Dim shName As String: shName = ws.CodeName
-    Set cm = ThisWorkbook.VBProject.VBComponents(shName).CodeModule
+    Set cM = ThisWorkbook.VBProject.VBComponents(shName).CodeModule
 
     Dim tag As String: tag = "SortCrewByRole"
     Dim i As Long
-    For i = 1 To cm.CountOfLines
-        If InStr(1, cm.lines(i, 1), tag, vbTextCompare) > 0 Then Exit Sub
+    For i = 1 To cM.CountOfLines
+        If InStr(1, cM.lines(i, 1), tag, vbTextCompare) > 0 Then Exit Sub
     Next i
 
     Dim code As String
@@ -794,7 +794,7 @@ Private Sub InstallCrewSortEvent(ws As Worksheet)
     code = code & "    MDL_Setup.SortCrewByRole" & vbCrLf
     code = code & "    Application.EnableEvents = True" & vbCrLf
     code = code & "End Sub"
-    cm.AddFromString code
+    cM.AddFromString code
     Exit Sub
 NoAccess:
     Application.StatusBar = "Crew auto-sort: enable Trust Access to VBA Project, or run SortCrewByRole manually."
@@ -810,8 +810,8 @@ Public Sub SortCrewByRole()
 
     Dim rTop As Long, rBot As Long
     On Error Resume Next
-    rTop = ws.Range("OC_CrewTop").Row
-    rBot = ws.Range("OC_CrewBot").Row
+    rTop = ws.Range("OC_CrewTop").row
+    rBot = ws.Range("OC_CrewBot").row
     On Error GoTo 0
     If rTop = 0 Or rBot = 0 Or rBot < rTop Then Exit Sub
 
@@ -839,11 +839,11 @@ Public Sub SortCrewByRole()
         Dim tN As String: tN = aName(j)
         Dim tE As String: tE = aEmail(j)
         Dim tP As String: tP = aPhone(j)
-        Dim pj As Long: pj = RolePriority(tr)
+        Dim pJ As Long: pJ = RolePriority(tr)
         k = j - 1
         Do While k >= 1
             Dim pk As Long: pk = RolePriority(aRole(k))
-            If pk > pj Or (pk = pj And LCase(aName(k)) > LCase(tN)) Then
+            If pk > pJ Or (pk = pJ And LCase(aName(k)) > LCase(tN)) Then
                 aRole(k + 1) = aRole(k)
                 aName(k + 1) = aName(k)
                 aEmail(k + 1) = aEmail(k)
@@ -869,7 +869,7 @@ Public Sub SortCrewByRole()
         With ws.Cells(ro, C_CRL)
             .Value = aRole(idx)
             .Interior.Color = bg
-            .Font.Color = cDk(): .Font.bold = True: .Font.Size = 7
+            .Font.Color = cDk(): .Font.bold = True: .Font.size = 7
             .Font.name = "Consolas"
         End With
 
@@ -886,19 +886,19 @@ Public Sub SortCrewByRole()
         Set mrg = ws.Range(ws.Cells(ro, C_CRL + 1), ws.Cells(ro, C_CRL + 2))
         mrg.Cells(1, 1).Value = aName(idx)
         mrg.Interior.Color = bg: mrg.Font.Color = cBlk()
-        mrg.Font.bold = (aName(idx) <> ""): mrg.Font.Size = 8
+        mrg.Font.bold = (aName(idx) <> ""): mrg.Font.size = 8
         mrg.Font.name = "Consolas"
 
         Set mrg = ws.Range(ws.Cells(ro, C_CRL + 3), ws.Cells(ro, C_CRL + 5))
         mrg.Cells(1, 1).Value = aEmail(idx)
         mrg.Interior.Color = bg: mrg.Font.Color = cDk()
-        mrg.Font.Size = 7: mrg.Font.name = "Consolas"
+        mrg.Font.size = 7: mrg.Font.name = "Consolas"
         ApplyMailtoLink mrg
 
         Set mrg = ws.Range(ws.Cells(ro, C_CRL + 6), ws.Cells(ro, C_LAST))
         mrg.Cells(1, 1).Value = aPhone(idx)
         mrg.Interior.Color = bg: mrg.Font.Color = cDk()
-        mrg.Font.Size = 7: mrg.Font.name = "Consolas"
+        mrg.Font.size = 7: mrg.Font.name = "Consolas"
     Next idx
     ScreenEndBusy
 End Sub
@@ -919,14 +919,14 @@ Private Sub DrawFilesPanel(ws As Worksheet, startRow As Long)
     Dim cL As Long: cL = C_CRL   ' left col  = J (10)
     Dim cR As Long: cR = C_LAST  ' right col = R (18)
     Dim r As Long: r = startRow
-    Dim wbPath As String: wbPath = ThisWorkbook.Path
+    Dim wbPath As String: wbPath = ThisWorkbook.path
 
     ' Header
     SectionBar ws, r, cL, cR, "  OPENCAP EXPORT FILES", cTeal(), cBlk()
     r = r + 1
 
     ' Column sub-headers
-    ws.Rows(r).rowHeight = 14
+    ws.rows(r).rowHeight = 14
     FHdr ws, r, cL, cL, "STATUS"
     FHdr ws, r, cL + 1, cL + 2, "FILE TYPE"
     FHdr ws, r, cL + 3, cL + 5, "FILENAME"
@@ -949,7 +949,7 @@ Private Sub DrawFilesPanel(ws As Worksheet, startRow As Long)
 
     Dim fi As Long
     For fi = 0 To 5
-        ws.Rows(r).rowHeight = 18
+        ws.rows(r).rowHeight = 18
 
         Dim fPath As String: fPath = ""
         If wbPath <> "" Then fPath = FindCsvByToken(wbPath, tokens(fi))
@@ -966,7 +966,7 @@ Private Sub DrawFilesPanel(ws As Worksheet, startRow As Long)
             If SheetExists(sheets(fi)) Then
                 On Error Resume Next
                 Dim dw As Worksheet: Set dw = Worksheets(sheets(fi))
-                rc = dw.Cells(dw.Rows.Count, 1).End(xlUp).Row - 1
+                rc = dw.Cells(dw.rows.Count, 1).End(xlUp).row - 1
                 If rc < 0 Then rc = 0
                 On Error GoTo 0
             End If
@@ -990,7 +990,7 @@ Private Sub DrawFilesPanel(ws As Worksheet, startRow As Long)
     Next fi
 
     ' Extension + repo links (sit under the file checklist; natural "where do I get CSVs?" spot)
-    ws.Rows(r).rowHeight = 16
+    ws.rows(r).rowHeight = 16
     MrgCell ws, r, cL, cL + 1, "GET DATA", cBg(), cDk(), True, 7, xlHAlignLeft
     MrgCell ws, r, cL + 2, cL + 5, "Chrome Web Store", cBg(), cLink(), False, 7, xlHAlignLeft
     ApplyHttpLink ws.Cells(r, cL + 2), URL_OC_CHROME, "Chrome Web Store"
@@ -1013,17 +1013,17 @@ Private Sub DrawNotesPanel(ws As Worksheet, startRow As Long)
     Dim r As Long: r = startRow
 
     SectionBar ws, r, cL, cR, "  EOW / JOB NOTES", cTeal(), cBlk()
-    ws.Rows(r).rowHeight = 18
+    ws.rows(r).rowHeight = 18
     r = r + 1
 
     ' Five note rows (r .. r+4) - matches the hand-tuned Field layout (J33:R37).
     Dim nr As Long
-    For nr = r To r + 4: ws.Rows(nr).rowHeight = 16: Next nr
+    For nr = r To r + 4: ws.rows(nr).rowHeight = 16: Next nr
     With ws.Range(ws.Cells(r, cL), ws.Cells(r + 4, cR))
         .Merge
         .Interior.Color = cBg()
         .Font.Color = cDk()
-        .Font.Size = 9
+        .Font.size = 9
         .Font.name = "Consolas"
         .VerticalAlignment = xlVAlignTop
         .HorizontalAlignment = xlHAlignLeft
@@ -1048,11 +1048,11 @@ Private Sub DrawImportFilesPanel(ws As Worksheet, startRow As Long)
     Dim r As Long: r = startRow
 
     SectionBar ws, r, cL, cR, "  IMPORT FILES", cTealLt(), cBlk()
-    ws.Rows(r).rowHeight = 20
+    ws.rows(r).rowHeight = 20
     r = r + 1
 
     ' Sub-header
-    ws.Rows(r).rowHeight = 12
+    ws.rows(r).rowHeight = 12
     MrgCell ws, r, cL, cBtnEnd, "FILE", cBg(), cDk(), True, 7, xlHAlignLeft
     MrgCell ws, r, cPath, cR, "SELECTED PATH", cBg(), cDk(), True, 7, xlHAlignLeft
     With ws.Range(ws.Cells(r, cL), ws.Cells(r, cR)).Borders(xlEdgeBottom)
@@ -1061,7 +1061,7 @@ Private Sub DrawImportFilesPanel(ws As Worksheet, startRow As Long)
     r = r + 1
 
     Dim planPath As String: planPath = GetImportPath(SH_SURVEY)
-    ws.Rows(r).rowHeight = 22
+    ws.rows(r).rowHeight = 22
     ' Empty merged host — Import Plan button is sized to this MergeArea exactly
     MrgCell ws, r, cL, cBtnEnd, "", cWh(), cBlk(), False, 8, xlHAlignCenter
     MrgCell ws, r, cPath, cR, planPath, cWh(), cDk(), False, 7, xlHAlignLeft
@@ -1073,7 +1073,7 @@ Private Sub DrawImportFilesPanel(ws As Worksheet, startRow As Long)
     r = r + 1
 
     Dim acPath As String: acPath = GetImportPath(SH_AC)
-    ws.Rows(r).rowHeight = 22
+    ws.rows(r).rowHeight = 22
     MrgCell ws, r, cL, cBtnEnd, "", cBg(), cBlk(), False, 8, xlHAlignCenter
     MrgCell ws, r, cPath, cR, acPath, cBg(), cDk(), False, 7, xlHAlignLeft
     On Error Resume Next: ws.names("OC_ImpAcRow").Delete: On Error GoTo 0
@@ -1148,7 +1148,7 @@ End Sub
 Private Sub StyleBtn(btn As Button, cap As String, bg As Long, brd As Long, fg As Long, bold As Boolean)
     On Error Resume Next
     btn.caption = cap
-    btn.Font.name = "Consolas": btn.Font.Size = 9: btn.Font.bold = bold: btn.Font.Color = fg
+    btn.Font.name = "Consolas": btn.Font.size = 9: btn.Font.bold = bold: btn.Font.Color = fg
     btn.ShapeRange.fill.ForeColor.RGB = bg
     btn.ShapeRange.line.ForeColor.RGB = brd
     btn.ShapeRange.line.Weight = 0.75
@@ -1159,16 +1159,16 @@ End Sub
 '  CELL / RANGE DRAWING HELPERS
 ' ================================================================================
 
-Private Sub SectionBar(ws As Worksheet, r As Long, c1 As Long, c2 As Long, _
+Private Sub SectionBar(ws As Worksheet, r As Long, C1 As Long, C2 As Long, _
                         title As String, bg As Long, fg As Long)
-    ws.Rows(r).rowHeight = 18
-    With ws.Range(ws.Cells(r, c1), ws.Cells(r, c2))
+    ws.rows(r).rowHeight = 18
+    With ws.Range(ws.Cells(r, C1), ws.Cells(r, C2))
         .Merge
         .Value = title
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = True
-        .Font.Size = 8
+        .Font.size = 8
         .Font.name = "Consolas"
         .VerticalAlignment = xlVAlignCenter
         .HorizontalAlignment = xlHAlignLeft
@@ -1178,7 +1178,7 @@ End Sub
 ' Pair row: left-panel label+value pair + right-panel label+value pair
 Private Sub Pair(ws As Worksheet, r As Long, lbl1 As String, val1 As String, _
                                               lbl2 As String, val2 As String)
-    ws.Rows(r).rowHeight = 17
+    ws.rows(r).rowHeight = 17
 
     ' Accent strip
     ws.Cells(r, C_ACCENT).Interior.Color = cAccent()
@@ -1194,7 +1194,7 @@ Private Sub Pair(ws As Worksheet, r As Long, lbl1 As String, val1 As String, _
         .Interior.Color = cWh()
         .Font.Color = cBlk()
         .Font.bold = (val1 <> "")
-        .Font.Size = 9
+        .Font.size = 9
         .Font.name = "Consolas"
         .HorizontalAlignment = xlHAlignLeft
         .VerticalAlignment = xlVAlignCenter
@@ -1214,7 +1214,7 @@ Private Sub Pair(ws As Worksheet, r As Long, lbl1 As String, val1 As String, _
 
     If InStr(1, lbl1, "EMAIL", vbTextCompare) > 0 Or LooksLikeEmail(val1) Then
         With ws.Range(ws.Cells(r, C_V1S), ws.Cells(r, C_V1E))
-            .Font.Size = 8
+            .Font.size = 8
             .Font.bold = False
         End With
         ApplyMailtoLink ws.Range(ws.Cells(r, C_V1S), ws.Cells(r, C_V1E))
@@ -1246,7 +1246,7 @@ Private Sub ApplyHttpLink(rng As Range, ByVal url As String, ByVal displayText A
     Set anchor = rng.MergeArea.Cells(1, 1)
     If Len(Trim$(displayText)) > 0 Then anchor.Value = displayText
 
-    sz = anchor.Font.Size
+    sz = anchor.Font.size
     wasBold = anchor.Font.bold
     fName = anchor.Font.name
     If sz < 6# Or sz > 10# Then sz = 7#
@@ -1259,7 +1259,7 @@ Private Sub ApplyHttpLink(rng As Range, ByVal url As String, ByVal displayText A
 
     anchor.Worksheet.Hyperlinks.Add anchor:=anchor, Address:=url, TextToDisplay:=displayText
     With anchor.Font
-        .Size = sz
+        .size = sz
         .bold = wasBold
         .name = fName
         If Len(.name) = 0 Then .name = "Consolas"
@@ -1284,7 +1284,7 @@ Private Sub ApplyMailtoLink(rng As Range)
     If Not LooksLikeEmail(em) Then Exit Sub
 
     ' Preserve size/name before Hyperlinks.Add (Excel resets font to ~11pt)
-    sz = anchor.Font.Size
+    sz = anchor.Font.size
     wasBold = anchor.Font.bold
     fName = anchor.Font.name
     If sz < 6# Or sz > 10# Then sz = 8#
@@ -1298,7 +1298,7 @@ Private Sub ApplyMailtoLink(rng As Range)
     ' Address only — keep the cell's existing display text
     anchor.Worksheet.Hyperlinks.Add anchor:=anchor, Address:="mailto:" & em
     With anchor.Font
-        .Size = sz
+        .size = sz
         .bold = wasBold
         .name = fName
         If Len(.name) = 0 Then .name = "Consolas"
@@ -1338,16 +1338,16 @@ Fail:
     SheetReprotectAfterVba ws, wasProt
 End Sub
 
-Private Sub MrgCell(ws As Worksheet, r As Long, c1 As Long, c2 As Long, _
+Private Sub MrgCell(ws As Worksheet, r As Long, C1 As Long, C2 As Long, _
                     val As String, bg As Long, fg As Long, bold As Boolean, _
                     sz As Long, align As Long)
-    With ws.Range(ws.Cells(r, c1), ws.Cells(r, c2))
+    With ws.Range(ws.Cells(r, C1), ws.Cells(r, C2))
         .Merge
         .Value = val
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = bold
-        .Font.Size = sz
+        .Font.size = sz
         .Font.name = "Consolas"
         .HorizontalAlignment = align
         .VerticalAlignment = xlVAlignCenter
@@ -1361,18 +1361,18 @@ Private Sub Sgl(ws As Worksheet, r As Long, c As Long, val As String, _
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = bold
-        .Font.Size = sz
+        .Font.size = sz
         .Font.name = "Consolas"
         .HorizontalAlignment = align
         .VerticalAlignment = xlVAlignCenter
     End With
 End Sub
 
-Private Sub FHdr(ws As Worksheet, r As Long, c1 As Long, c2 As Long, lbl As String)
-    If c1 = c2 Then
-        Sgl ws, r, c1, lbl, cBg(), cDk(), True, 7, xlHAlignLeft
+Private Sub FHdr(ws As Worksheet, r As Long, C1 As Long, C2 As Long, lbl As String)
+    If C1 = C2 Then
+        Sgl ws, r, C1, lbl, cBg(), cDk(), True, 7, xlHAlignLeft
     Else
-        MrgCell ws, r, c1, c2, lbl, cBg(), cDk(), True, 7, xlHAlignLeft
+        MrgCell ws, r, C1, C2, lbl, cBg(), cDk(), True, 7, xlHAlignLeft
     End If
 End Sub
 
@@ -1476,7 +1476,7 @@ Private Function ReadCrewRows() As String()
     If Not SheetExists(SH_CREW) Then Exit Function
 
     Dim ws As Worksheet: Set ws = Worksheets(SH_CREW)
-    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Dim lastRow As Long: lastRow = ws.Cells(ws.rows.Count, 1).End(xlUp).row
     If lastRow < 2 Then Exit Function
 
     Dim cName  As Long: cName = ColByName(ws, "Name", "FullName")
@@ -1530,19 +1530,19 @@ Private Sub LoadCsv(filePath As String, shName As String)
     Dim ws As Worksheet: Set ws = Worksheets(shName)
     ws.Cells.Clear
 
-    ' -- Phase 1: read every raw line -------------------------------------------
-    Dim fNum As Integer: fNum = FreeFile
-    Open filePath For Input As #fNum
-    Dim rawLines() As String
-    ReDim rawLines(0 To 4999)
-    Dim nLines As Long: nLines = 0
-    Do While Not EOF(fNum) And nLines < 5000
-        Line Input #fNum, rawLines(nLines)
-        nLines = nLines + 1
-    Loop
-    Close #fNum
+    ' -- Phase 1: whole file, then one record per unquoted line break ----------
+    ' Line Input cuts FieldCap driving directions (quoted newlines) into extra
+    ' rows, so Ground MSL / UWI / ClientEmail never land on the job row.
+    Dim text As String: text = CsvReadFile(filePath)
+    If Len(text) = 0 Then Exit Sub
+    Dim rawLines() As String: rawLines = CsvSplitRecords(text)
+    Dim nLines As Long
+    On Error Resume Next
+    nLines = UBound(rawLines) - LBound(rawLines) + 1
+    If Err.Number <> 0 Then nLines = 0: Err.Clear
+    On Error GoTo 0
     If nLines = 0 Then Exit Sub
-    ReDim Preserve rawLines(0 To nLines - 1)
+    If nLines > 5000 Then nLines = 5000
 
     ' -- Phase 2: parse all rows, track actual max column count ----------------
     Dim parsedRows() As String
@@ -1580,7 +1580,7 @@ End Sub
 Public Function FindOpenCapCsv(ByVal token As String) As String
     Dim wbPath As String
     FindOpenCapCsv = ""
-    wbPath = ThisWorkbook.Path
+    wbPath = ThisWorkbook.path
     If Len(wbPath) = 0 Then Exit Function
     RememberCsvRootsFromSetup
     FindOpenCapCsv = FindCsvByToken(wbPath, token)
@@ -1691,7 +1691,7 @@ Private Function GetNamedText(ByVal nm As String) As String
     rf = CStr(ThisWorkbook.names(nm).refersTo)
     On Error GoTo 0
     If Len(rf) >= 3 Then
-        If Left$(rf, 2) = "=""" And right$(rf, 1) = """" Then
+        If Left$(rf, 2) = "=""" And Right$(rf, 1) = """" Then
             GetNamedText = mid$(rf, 3, Len(rf) - 3)
         ElseIf Left$(rf, 1) = "=" Then
             GetNamedText = Replace(mid$(rf, 2), """", "")
@@ -1728,6 +1728,65 @@ Private Function FindCsvByTokenInFolder(folder As String, token As String) As St
         End If
         fn = Dir()
     Loop
+End Function
+
+Private Function CsvReadFile(ByVal filePath As String) As String
+    Dim fNum As Integer: fNum = FreeFile
+    Dim sz As Long
+    Dim buf As String
+    Open filePath For Binary Access Read Shared As #fNum
+    sz = LOF(fNum)
+    If sz <= 0 Then
+        Close #fNum
+        Exit Function
+    End If
+    buf = Space$(sz)
+    Get #fNum, 1, buf
+    Close #fNum
+    If Left$(buf, 3) = Chr$(&HEF) & Chr$(&HBB) & Chr$(&HBF) Then buf = mid$(buf, 4)
+    CsvReadFile = buf
+End Function
+
+' FieldCap job-details quotes driving directions across several physical lines.
+' Only a CR / LF outside quotes starts a new record.
+Private Function CsvSplitRecords(ByVal text As String) As String()
+    Dim buf() As String
+    ReDim buf(0 To 4999)
+    Dim n As Long
+    Dim start As Long: start = 1
+    Dim i As Long
+    Dim inQ As Boolean
+    Dim ch As String
+    For i = 1 To Len(text)
+        ch = mid$(text, i, 1)
+        If ch = Chr$(34) Then
+            inQ = Not inQ
+        ElseIf (Not inQ) And (ch = vbLf Or ch = vbCr) Then
+            If n <= 4999 Then
+                buf(n) = mid$(text, start, i - start)
+                n = n + 1
+            End If
+            If ch = vbCr And i < Len(text) Then
+                If mid$(text, i + 1, 1) = vbLf Then i = i + 1
+            End If
+            start = i + 1
+            If n > 4999 Then Exit For
+        End If
+    Next i
+    If n <= 4999 Then
+        Dim last As String: last = mid$(text, start)
+        If n = 0 Or Len(last) > 0 Then
+            buf(n) = last
+            n = n + 1
+        End If
+    End If
+    If n = 0 Then
+        Dim none() As String
+        CsvSplitRecords = none
+        Exit Function
+    End If
+    ReDim Preserve buf(0 To n - 1)
+    CsvSplitRecords = buf
 End Function
 
 Private Function CsvParseLine(ByVal line As String) As String()
@@ -1801,7 +1860,7 @@ Private Sub WriteMudMotorsFromInventory()
     If Not SheetExists(SH_DATA) Then Exit Sub
     Set wsD = ThisWorkbook.Worksheets(SH_DATA)
 
-    wbPath = ThisWorkbook.Path
+    wbPath = ThisWorkbook.path
     If wbPath <> "" Then
         fInv = FindCsvByToken(wbPath, TOK_INVENTORY)
         If fInv <> "" Then
@@ -1873,7 +1932,7 @@ Private Sub CollectMudMotorsFromInventory(ByRef sNs() As String, _
     If colName = 0 Then colName = FindHeaderCol(ws, "Description")
     colSub = FindHeaderCol(ws, "SubCategory")
     If colSn = 0 Then Exit Sub
-    lastR = ws.Cells(ws.Rows.Count, colSn).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, colSn).End(xlUp).row
     For r = 2 To lastR
         sN = Trim$(CStr(ws.Cells(r, colSn).Value2 & ""))
         itemName = ""
@@ -1899,7 +1958,7 @@ Private Sub CollectMudMotorsFromBha(ByRef sNs() As String, _
     If colSn = 0 Then colSn = FindHeaderCol(ws, "SerialNumber")
     colDesc = FindHeaderCol(ws, "Description")
     If colSn = 0 Then Exit Sub
-    lastR = ws.Cells(ws.Rows.Count, colSn).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, colSn).End(xlUp).row
     For r = 2 To lastR
         sN = Trim$(CStr(ws.Cells(r, colSn).Value2 & ""))
         desc = ""
@@ -1931,7 +1990,7 @@ Private Function MudMotorSequenceNumber(ByVal sN As String) As Double
     Dim s As String, p As Long, tok As String
     MudMotorSequenceNumber = 1E+99
     s = UCase$(Trim$(sN))
-    If right$(s, 4) <> "-PTS" Then Exit Function
+    If Right$(s, 4) <> "-PTS" Then Exit Function
     s = Left$(s, Len(s) - 4)
     p = InStrRev(s, "-")
     If p > 0 Then tok = mid$(s, p + 1) Else tok = s
@@ -2097,7 +2156,7 @@ NextPrior:
         Dim wsO As Worksheet
         Set wsO = ThisWorkbook.Worksheets(SH_COSTS)
         Dim lastO As Long
-        lastO = wsO.Cells(wsO.Rows.Count, 1).End(xlUp).Row
+        lastO = wsO.Cells(wsO.rows.Count, 1).End(xlUp).row
         Dim oc As Long
         For oc = 2 To lastO
             Dim ocDate As Long
@@ -2183,16 +2242,16 @@ NextPrior:
             If i = LBound(keyList) Or (Not consecutive) Then
                 .Value = keyList(i)
             Else
-                .Formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
+                .formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
             End If
         End With
 
         wsC.Cells(r, COSTS_COL_TOTAL).numberFormat = "$#,##0.00"
         If r = COSTS_FIRST_ROW Then
-            wsC.Cells(r, COSTS_COL_TOTAL).Formula = _
+            wsC.Cells(r, COSTS_COL_TOTAL).formula = _
                 "=IF(ISBLANK(E" & r & "),"""",E" & r & ")"
         Else
-            wsC.Cells(r, COSTS_COL_TOTAL).Formula = _
+            wsC.Cells(r, COSTS_COL_TOTAL).formula = _
                 "=IF(ISBLANK(E" & r & "),"""",SUM($E$" & COSTS_FIRST_ROW & ":E" & r & "))"
         End If
     Next i
@@ -2204,10 +2263,10 @@ NextPrior:
         If Len(Trim$(CStr(wsC.Cells(r, 2).Value & ""))) = 0 Then Exit For
         With wsC.Cells(r, COSTS_COL_DATE).MergeArea.Cells(1, 1)
             .numberFormat = "[$-F800]dddd, mmmm dd, yyyy"
-            .Formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
+            .formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
         End With
         wsC.Cells(r, COSTS_COL_TOTAL).numberFormat = "$#,##0.00"
-        wsC.Cells(r, COSTS_COL_TOTAL).Formula = _
+        wsC.Cells(r, COSTS_COL_TOTAL).formula = _
             "=IF(ISBLANK(E" & r & "),"""",SUM($E$" & COSTS_FIRST_ROW & ":E" & r & "))"
     Next r
 
@@ -2336,7 +2395,10 @@ End Sub
 
 ' Testable core (Application.Run-able without the file dialog).
 Public Sub ImportSurveyPlanFile(ByVal fPath As String)
-    Application.StatusBar = "Importing survey plan..."
+    Dim doneMsg As String
+    ' Manual calc for the whole import. Automatic mode recalculates the
+    ' workbook (all threads) on every station written to the plan sheets.
+    ScreenBeginBusy "Importing survey plan..."
     On Error GoTo ImportPlanErr
 
     If Len(Trim$(fPath & "")) = 0 Then
@@ -2350,8 +2412,8 @@ Public Sub ImportSurveyPlanFile(ByVal fPath As String)
     If ext = "pdf" Then
         ok = ImportSurveyPlanPdf(fPath)
         If Not ok Then
-            Application.StatusBar = "Plan import failed — previous plan left unchanged"
-            Exit Sub
+            doneMsg = "Plan import failed — previous plan left unchanged"
+            GoTo ImportPlanDone
         End If
     Else
         ImportSurveyPlanCsv fPath
@@ -2372,11 +2434,15 @@ Public Sub ImportSurveyPlanFile(ByVal fPath As String)
     MDL_TDCalc.RefreshTdPlannedFromPlan
     On Error GoTo ImportPlanErr
 
-    Application.StatusBar = "Plan imported from " & _
-                             mid$(fPath, InStrRev(fPath, Application.PathSeparator) + 1)
+    doneMsg = "Plan imported from " & _
+              mid$(fPath, InStrRev(fPath, Application.PathSeparator) + 1)
+ImportPlanDone:
+    ScreenEndBusy
+    If Len(doneMsg) > 0 Then Application.StatusBar = doneMsg
     Exit Sub
 ImportPlanErr:
-    Application.StatusBar = "Survey import failed: " & Err.Description
+    doneMsg = "Survey import failed: " & Err.Description
+    Resume ImportPlanDone
 End Sub
 
 Private Function EnsureHiddenSheet(ByVal shName As String) As Worksheet
@@ -2471,8 +2537,8 @@ Private Function ImportSurveyPlanPdf(ByVal fPath As String) As Boolean
     Dim aAnn() As String
     nSec = ParsePlanSections(pdfText, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn)
     If nSec < 1 Then
-        MsgBox "No Plan Sections / SECTION DETAILS / Plan Annotations table found in that PDF.", _
-               vbExclamation, "Import Plan"
+        MsgBox "No Plan Sections / SECTION DETAILS / Plan Annotations table found in that PDF." & _
+               CrystalDecodeHint(pdfText), vbExclamation, "Import Plan"
         Exit Function
     End If
 
@@ -3128,20 +3194,24 @@ Private Sub WritePlanSecSheet(ByVal fPath As String, ByVal n As Long, _
     ws.Cells(2, 10).Value = "ANNOT"
     ws.Cells(2, 11).Value = "AUTONAME"
     ws.Cells(2, 12).Value = "USERNAME"
+    If n < 1 Then Exit Sub
+    Dim arr() As Variant
     Dim i As Long
-    For i = 0 To n - 1
-        ws.Cells(i + 3, 1).Value = aMd(i)
-        ws.Cells(i + 3, 2).Value = aInc(i)
-        ws.Cells(i + 3, 3).Value = aAzm(i)
-        ws.Cells(i + 3, 4).Value = aTvd(i)
-        ws.Cells(i + 3, 5).Value = ans(i)
-        ws.Cells(i + 3, 6).Value = aEW(i)
-        ws.Cells(i + 3, 7).Value = aDls(i)
-        ws.Cells(i + 3, 8).Value = aBld(i)
-        ws.Cells(i + 3, 9).Value = aTrn(i)
-        ws.Cells(i + 3, 10).Value = aAnn(i)
-        ws.Cells(i + 3, 11).Value = aAuto(i)
+    ReDim arr(1 To n, 1 To 11)
+    For i = 1 To n
+        arr(i, 1) = aMd(i - 1)
+        arr(i, 2) = aInc(i - 1)
+        arr(i, 3) = aAzm(i - 1)
+        arr(i, 4) = aTvd(i - 1)
+        arr(i, 5) = ans(i - 1)
+        arr(i, 6) = aEW(i - 1)
+        arr(i, 7) = aDls(i - 1)
+        arr(i, 8) = aBld(i - 1)
+        arr(i, 9) = aTrn(i - 1)
+        arr(i, 10) = aAnn(i - 1)
+        arr(i, 11) = aAuto(i - 1)
     Next i
+    ws.Range(ws.Cells(3, 1), ws.Cells(n + 2, 11)).Value2 = arr
 End Sub
 
 Private Sub WriteSurveyFromSections(ByVal fPath As String, ByVal n As Long, _
@@ -3156,27 +3226,31 @@ Private Sub WriteSurveyFromSections(ByVal fPath As String, ByVal n As Long, _
     ws.Cells(2, 4).Value = "TVD"
     ws.Cells(2, 5).Value = "NS"
     ws.Cells(2, 6).Value = "EW"
+    If n < 1 Then Exit Sub
+    Dim arr() As Variant
     Dim i As Long
-    For i = 0 To n - 1
-        ws.Cells(i + 3, 1).Value = aMd(i)
-        ws.Cells(i + 3, 2).Value = aInc(i)
-        ws.Cells(i + 3, 3).Value = aAzm(i)
-        ws.Cells(i + 3, 4).Value = aTvd(i)
-        ws.Cells(i + 3, 5).Value = ans(i)
-        ws.Cells(i + 3, 6).Value = aEW(i)
+    ReDim arr(1 To n, 1 To 6)
+    For i = 1 To n
+        arr(i, 1) = aMd(i - 1)
+        arr(i, 2) = aInc(i - 1)
+        arr(i, 3) = aAzm(i - 1)
+        arr(i, 4) = aTvd(i - 1)
+        arr(i, 5) = ans(i - 1)
+        arr(i, 6) = aEW(i - 1)
     Next i
+    ws.Range(ws.Cells(3, 1), ws.Cells(n + 2, 6)).Value2 = arr
 End Sub
 
 ' CSV fallback: promote unique Comment / annotation stations into _OC_PlanSec.
 Private Sub BuildPlanSectionsFromSurveyComments()
     If Not SheetExists(SH_SURVEY) Then Exit Sub
     Dim surv As Worksheet: Set surv = Worksheets(SH_SURVEY)
-    Dim cMD As Long, cInc As Long, cAzi As Long, cTvd As Long
+    Dim cmd As Long, cInc As Long, cAzi As Long, cTvd As Long
     Dim cNS As Long, cEW As Long, cDls As Long, cCom As Long
     Dim c As Long
     For c = 1 To 20
         Select Case LCase$(Trim$(CStr(surv.Cells(2, c).Value2 & "")))
-            Case "md": cMD = c
+            Case "md": cmd = c
             Case "inc": cInc = c
             Case "azi", "azm": cAzi = c
             Case "tvd": cTvd = c
@@ -3186,9 +3260,9 @@ Private Sub BuildPlanSectionsFromSurveyComments()
             Case "comment", "annot", "annotation": cCom = c
         End Select
     Next c
-    If cMD = 0 Then Exit Sub
+    If cmd = 0 Then Exit Sub
 
-    Dim lastR As Long: lastR = surv.Cells(surv.Rows.Count, cMD).End(xlUp).Row
+    Dim lastR As Long: lastR = surv.Cells(surv.rows.Count, cmd).End(xlUp).row
     If lastR < 3 Then Exit Sub
 
     Dim aMd() As Double, aInc() As Double, aAzm() As Double
@@ -3203,7 +3277,7 @@ Private Sub BuildPlanSectionsFromSurveyComments()
     Dim n As Long: n = 0
     Dim r As Long
     For r = 3 To lastR
-        If Not IsNumeric(surv.Cells(r, cMD).Value2) Then GoTo NextCom
+        If Not IsNumeric(surv.Cells(r, cmd).Value2) Then GoTo NextCom
         Dim ann As String: ann = ""
         If cCom > 0 Then ann = Trim$(CStr(surv.Cells(r, cCom).Value2 & ""))
         Dim takeIt As Boolean
@@ -3218,7 +3292,7 @@ Private Sub BuildPlanSectionsFromSurveyComments()
         End If
         If Not takeIt Then GoTo NextCom
         If n > 80 Then Exit For
-        aMd(n) = CDbl(surv.Cells(r, cMD).Value2)
+        aMd(n) = CDbl(surv.Cells(r, cmd).Value2)
         If cInc > 0 Then aInc(n) = val(surv.Cells(r, cInc).Value2 & "")
         If cAzi > 0 Then aAzm(n) = val(surv.Cells(r, cAzi).Value2 & "")
         If cTvd > 0 Then aTvd(n) = val(surv.Cells(r, cTvd).Value2 & "")
@@ -3270,7 +3344,11 @@ Private Function cAcGreen() As Long:  cAcGreen = RGB(198, 239, 206):  End Functi
 ' quiet: suppress the informational "more wells than rows" prompt (batch runs).
 Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
         Optional ByVal maxSF As Double = 1000000#, Optional ByVal Quiet As Boolean = False)
-    Application.StatusBar = "Reading anti-collision report..."
+    Dim doneMsg As String
+    ' Same freeze as Import Plan: Data's change handler otherwise runs a
+    ' full multi-thread calc on every AC cell written.
+    ScreenBeginBusy "Reading anti-collision report..."
+    On Error GoTo AcFail
 
     Dim acWs As Worksheet
     If SheetExists(SH_AC) Then
@@ -3297,14 +3375,16 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
                "  - Adobe Acrobat (full version, not Reader)" & Chr(10) & Chr(10) & _
                "Path stored. Try again after installing.", vbExclamation, "PDF Reader Not Available"
         UpdateImportPathDisplay SH_AC
-        Exit Sub
+        doneMsg = "PDF extraction unavailable. Install Poppler or Adobe Acrobat."
+        GoTo AcDone
     End If
 
-    ' Parse Summary table rows with SF <= maxSF
+    ' Parse Summary table rows with SF <= maxSF. One row per offset well.
     Dim nHits As Long
     Dim aWell(200) As String
     Dim aRefMD(200) As Double, aBetween(200) As Double, aSF(200) As Double
     nHits = ParseAcSummary(pdfText, aWell, aRefMD, aBetween, aSF, maxSF)
+    nHits = AcCollapseHits(nHits, aWell, aRefMD, aBetween, aSF)
 
     ' Severity order (worst Separation Factor first).  The Data table is a fixed
     ' 8 rows, so this decides WHICH wells earn a slot; WriteAcConcerns then puts
@@ -3319,21 +3399,31 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
         Open Environ("TEMP") & "\oc_pdf_debug.txt" For Output As #dbgNum
         Print #dbgNum, pdfText
         Close #dbgNum
-        On Error GoTo 0
+        On Error GoTo AcFail
+        If Not Quiet And MDL_CrystalPdf.PdfTextIsGlyphNumbers(pdfText) Then
+            MsgBox "No offset wells were read from that anti-collision report." & CrystalDecodeHint(pdfText), _
+                   vbExclamation, "Import AC"
+        End If
     End If
 
-    ' Write to hidden sheet
+    ' Write to hidden sheet in one block. Cells.Clear above already dropped
+    ' the previous well's rows, so nothing from the last report remains.
     acWs.Cells(2, 1).Value = "Offset Well - Wellbore - Design"
     acWs.Cells(2, 2).Value = "Ref MD (m)"
     acWs.Cells(2, 3).Value = "Between Centres (m)"
     acWs.Cells(2, 4).Value = "Separation Factor"
     Dim i As Long
-    For i = 0 To nHits - 1
-        acWs.Cells(i + 3, 1).Value = aWell(i)
-        acWs.Cells(i + 3, 2).Value = aRefMD(i)
-        acWs.Cells(i + 3, 3).Value = aBetween(i)
-        acWs.Cells(i + 3, 4).Value = aSF(i)
-    Next i
+    If nHits > 0 Then
+        Dim acArr() As Variant
+        ReDim acArr(1 To nHits, 1 To 4)
+        For i = 1 To nHits
+            acArr(i, 1) = aWell(i - 1)
+            acArr(i, 2) = aRefMD(i - 1)
+            acArr(i, 3) = aBetween(i - 1)
+            acArr(i, 4) = aSF(i - 1)
+        Next i
+        acWs.Range(acWs.Cells(3, 1), acWs.Cells(nHits + 2, 4)).Value2 = acArr
+    End If
 
     ' Render formatted table on Setup sheet
     BuildAcTable nHits, aRefMD, aBetween, aSF
@@ -3347,8 +3437,70 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
     For i = 0 To nHits - 1
         If aSF(i) < AC_SF_YELLOW Then nConcern = nConcern + 1
     Next i
-    Application.StatusBar = "AC import complete: " & nHits & " offset well(s), " & _
-                            nConcern & " with SF < " & Format(AC_SF_YELLOW, "0.0") & "."
+    doneMsg = "AC import complete: " & nHits & " offset well(s), " & _
+              nConcern & " with SF < " & Format(AC_SF_YELLOW, "0.0") & "."
+AcDone:
+    ScreenEndBusy
+    If Len(doneMsg) > 0 Then Application.StatusBar = doneMsg
+    Exit Sub
+AcFail:
+    doneMsg = "AC import failed: " & Err.Description
+    Resume AcDone
+End Sub
+
+' Compass prints CC, then ES, then SF as separate depths for one offset.
+' Keep the later line (the separation factor). Returns the new count so the
+' caller cannot keep writing the uncollapsed list.
+Private Function AcCollapseHits(ByVal n As Long, aWell() As String, _
+        aRefMD() As Double, aBetween() As Double, aSF() As Double) As Long
+    Dim i As Long, j As Long, w As Long, dup As Long
+    w = 0
+    For i = 0 To n - 1
+        dup = -1
+        For j = 0 To w - 1
+            If StrComp(aWell(j), aWell(i), vbTextCompare) = 0 Then
+                dup = j
+                Exit For
+            End If
+        Next j
+        If dup >= 0 Then
+            aRefMD(dup) = aRefMD(i)
+            aBetween(dup) = aBetween(i)
+            aSF(dup) = aSF(i)
+        Else
+            aWell(w) = aWell(i)
+            aRefMD(w) = aRefMD(i)
+            aBetween(w) = aBetween(i)
+            aSF(w) = aSF(i)
+            w = w + 1
+        End If
+    Next i
+    AcCollapseHits = w
+End Function
+
+' One slot per well. A later hit for the same name replaces the earlier one.
+Private Sub AcStoreHit(ByRef nHits As Long, aWell() As String, _
+        aRefMD() As Double, aBetween() As Double, aSF() As Double, _
+        ByVal well As String, ByVal refMd As Double, ByVal bc As Double, _
+        ByVal sf As Double)
+    Dim k As Long
+    If sf <= 0# Or nHits < 0 Then Exit Sub
+    well = CleanWellName(well)
+    If Len(well) = 0 Then Exit Sub
+    For k = 0 To nHits - 1
+        If StrComp(aWell(k), well, vbTextCompare) = 0 Then
+            aRefMD(k) = refMd
+            aBetween(k) = bc
+            aSF(k) = sf
+            Exit Sub
+        End If
+    Next k
+    If nHits > 200 Then Exit Sub
+    aWell(nHits) = well
+    aRefMD(nHits) = refMd
+    aBetween(nHits) = bc
+    aSF(nHits) = sf
+    nHits = nHits + 1
 End Sub
 
 ' Sort the parallel AC arrays in place.  Insertion sort - nHits is capped at 200.
@@ -3441,7 +3593,7 @@ Private Sub WriteAcConcerns(nHits As Long, aWell() As String, _
     Set titleCell = ws.Range("B1:B200").Find("AC Info & Concerns", LookAt:=xlPart, LookIn:=xlValues)
     If titleCell Is Nothing Then Exit Sub
 
-    Dim firstRow As Long: firstRow = titleCell.Row + 2   ' skip title + header row
+    Dim firstRow As Long: firstRow = titleCell.row + 2   ' skip title + header row
 
     ' Bottom of the table = row above "Motors On Location" (fallback: 8 rows)
     Dim lastRow As Long: lastRow = firstRow + 7
@@ -3449,22 +3601,22 @@ Private Sub WriteAcConcerns(nHits As Long, aWell() As String, _
     Set botCell = ws.Range(ws.Cells(firstRow, 2), ws.Cells(firstRow + 40, 2)) _
                     .Find("Motors On Location", LookAt:=xlPart, LookIn:=xlValues)
     If Not botCell Is Nothing Then
-        If botCell.Row > firstRow Then lastRow = botCell.Row - 1
+        If botCell.row > firstRow Then lastRow = botCell.row - 1
     End If
 
     Dim wasProt As Boolean
     wasProt = SheetUnprotectForVba(ws)
     On Error GoTo ReprotectFail
 
-    ' Clear previous contents and status fill (values only; keep borders)
+    ' Wipe the whole block first, including column C and any row left
+    ' over from the previous well. Per-cell clears used to leave those.
     Dim r As Long
-    For r = firstRow To lastRow
-        ws.Cells(r, 2).MergeArea.ClearContents   ' B (usually merged B:C)
-        ws.Cells(r, 4).ClearContents             ' D
-        ws.Cells(r, 5).ClearContents             ' E
-        ws.Cells(r, 6).ClearContents             ' F
-        AcResetRowFill ws, r, firstRow
-    Next r
+    If lastRow >= firstRow Then
+        ws.Range(ws.Cells(firstRow, 2), ws.Cells(lastRow, 6)).ClearContents
+        For r = firstRow To lastRow
+            AcResetRowFill ws, r, firstRow
+        Next r
+    End If
 
     Dim capacity As Long: capacity = lastRow - firstRow + 1
     Dim i As Long
@@ -3517,11 +3669,11 @@ End Sub
 ' Finds pdftotext on PATH or in the per-user self-installed copy under
 ' %LOCALAPPDATA%\Poppler (pointer file written by the bootstrap).
 ' Returns "pdftotext" (PATH), a full exe path, or "" when unavailable.
-Private Function ResolvePdftotext(sH As Object) As String
+Private Function ResolvePdftotext(sh As Object) As String
     ResolvePdftotext = ""
 
     On Error Resume Next
-    If sH.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
+    If sh.Run("cmd /c where pdftotext >nul 2>nul", 0, True) = 0 Then
         ResolvePdftotext = "pdftotext"
     End If
     On Error GoTo 0
@@ -3548,7 +3700,7 @@ End Function
 ' Per-user install, no admin rights required. Asks first (never downloads silently)
 ' and asks at most once per Excel session. Returns the pdftotext path on success,
 ' "" if declined or failed - callers fall back to the built-in PowerShell parser.
-Private Function OfferPopplerBootstrap(sH As Object) As String
+Private Function OfferPopplerBootstrap(sh As Object) As String
     OfferPopplerBootstrap = ""
     If mPopplerPrompted Then Exit Function
     mPopplerPrompted = True
@@ -3575,7 +3727,7 @@ Private Function OfferPopplerBootstrap(sH As Object) As String
 
     Application.StatusBar = "Downloading Poppler (one-time, ~16 MB)..."
     On Error Resume Next
-    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
+    sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & tmpResult & """", 0, True
     On Error GoTo 0
     Application.StatusBar = False
     On Error Resume Next: Kill tmpScript: On Error GoTo 0
@@ -3653,16 +3805,16 @@ Private Function ExtractPdfText(pdfPath As String) As String
     '   admin rights). Declining falls through to Strategy 2.
     ' ----------------------------------------------------------------
     On Error Resume Next: Kill tmpOut: On Error GoTo 0
-    Dim sH As Object
-    Set sH = CreateObject("WScript.Shell")
+    Dim sh As Object
+    Set sh = CreateObject("WScript.Shell")
 
     Dim p2tPath As String
-    p2tPath = ResolvePdftotext(sH)
-    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(sH)
+    p2tPath = ResolvePdftotext(sh)
+    If p2tPath = "" Then p2tPath = OfferPopplerBootstrap(sh)
 
     If p2tPath <> "" Then
         On Error Resume Next
-        sH.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
+        sh.Run """" & p2tPath & """ -layout """ & pdfPath & """ """ & tmpOut & """", 0, True
         On Error GoTo 0
     End If
 
@@ -3672,6 +3824,22 @@ Private Function ExtractPdfText(pdfPath As String) As String
         Do While Not EOF(fNum): Line Input #fNum, Ln: content = content & Ln & Chr(10): Loop
         Close #fNum
         On Error Resume Next: Kill tmpOut: On Error GoTo 0
+    End If
+
+    ' WinAnsi / PostScript Compass already contains the section titles.
+    ' Crystal Reports embeds Arial as Identity-H with no Unicode map, so
+    ' pdftotext returns glyphs. Decode those fonts only in that case.
+    If PdfTextHasCompassTitles(content) Then
+        ExtractPdfText = content
+        Exit Function
+    End If
+    Dim crystal As String
+    crystal = MDL_CrystalPdf.CrystalPdfText(pdfPath)
+    If PdfTextHasCompassTitles(crystal) Then
+        ExtractPdfText = crystal
+        Exit Function
+    End If
+    If Len(content) > 0 Then
         ExtractPdfText = content
         Exit Function
     End If
@@ -3690,7 +3858,7 @@ Private Function ExtractPdfText(pdfPath As String) As String
     Print #fNum, BuildPdfExtractScript()
     Close #fNum
 
-    sH.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
+    sh.Run "powershell -NonInteractive -ExecutionPolicy Bypass -File """ & tmpScript & """ """ & pdfPath & """ """ & tmpOut & """", 0, True
 
     If Dir(tmpOut) <> "" Then
         fNum = FreeFile: content = ""
@@ -3730,6 +3898,31 @@ Private Function ExtractPdfText(pdfPath As String) As String
         ExtractPdfText = allText
     End If
     pdDoc.Close False
+End Function
+
+' Said under "No Plan Sections..." / "No offset wells..." when the PDF text is Crystal glyph numbers
+' that the built-in decoder (MDL_CrystalPdf) could not turn into text.
+Private Function CrystalDecodeHint(ByVal pdfText As String) As String
+    If MDL_CrystalPdf.PdfTextIsGlyphNumbers(pdfText) Then
+        CrystalDecodeHint = Chr(10) & Chr(10) & _
+            "This PDF stores its text as glyph numbers (Crystal Reports), and the built-in decoder " & _
+            "could not read it. The decoder needs Windows PowerShell and the Arial fonts in C:\Windows\Fonts."
+    End If
+End Function
+
+' PostScript Compass text contains these titles. Crystal glyph junk does not.
+Private Function PdfTextHasCompassTitles(ByVal pdfText As String) As Boolean
+    If Len(pdfText) = 0 Then Exit Function
+    If InStr(1, pdfText, "Plan Sections", vbTextCompare) > 0 _
+            Or InStr(1, pdfText, "Plan Section", vbTextCompare) > 0 Then
+        PdfTextHasCompassTitles = True
+    ElseIf InStr(1, pdfText, "Separation Factor", vbTextCompare) > 0 _
+            And InStr(1, pdfText, "Summary", vbTextCompare) > 0 Then
+        PdfTextHasCompassTitles = True
+    ElseIf InStr(1, pdfText, "Anticollision Report", vbTextCompare) > 0 _
+            And InStr(1, pdfText, "Summary", vbTextCompare) > 0 Then
+        PdfTextHasCompassTitles = True
+    End If
 End Function
 
 ' ---- Returns a self-contained PowerShell PDF text extractor ----
@@ -3843,7 +4036,7 @@ Private Function ParseAcSummary(pdfText As String, aWell() As String, _
     Dim sfNum As String: sfNum = "\d{1,3}\.\s?\d{3}"
     Dim re As Object: Set re = CreateObject("VBScript.RegExp")
     re.Global = True
-    re.Pattern = "(\d{2,3}/\S{5,30}/\d{2}\s*-\s*.{1,60}?)\s+" & _
+    re.Pattern = "(\d{2,3}/\S{5,30}/\d{1,2}\s*-\s*.{1,60}?)\s+" & _
                  "(" & num2 & ")\s+(" & num2 & ")\s+(" & num2 & ")\s+(" & num2 & ")\s+" & _
                  "(" & sfNum & ")"
 
@@ -3851,13 +4044,29 @@ Private Function ParseAcSummary(pdfText As String, aWell() As String, _
     Dim m As Object
     For Each m In ms
         Dim sfVal As Double: sfVal = CleanNum(m.SubMatches(5))
+        ' A Compass summary prints CC, ES and SF as separate depths for the
+        ' same offset. Only the separation-factor line (or a combined
+        ' "CC, ES, SF" line) is the alert. CC-only and ES-only rows are not.
+        Dim tag As String, cutAt As Long, afterPos As Long
+        afterPos = m.FirstIndex + m.Length + 1
+        If afterPos <= Len(region) Then
+            tag = mid$(region, afterPos, 24)
+        Else
+            tag = ""
+        End If
+        cutAt = InStr(tag, Chr$(10))
+        If cutAt > 0 Then tag = Left$(tag, cutAt - 1)
+        cutAt = InStr(tag, Chr$(13))
+        If cutAt > 0 Then tag = Left$(tag, cutAt - 1)
+        tag = UCase$(Trim$(tag))
+        If (Left$(tag, 2) = "CC" Or Left$(tag, 2) = "ES") _
+                And InStr(1, tag, "SF", vbTextCompare) = 0 Then
+            sfVal = 0#
+        End If
         If sfVal > 0 And sfVal <= maxSF Then
-            aWell(nHits) = CleanWellName(CStr(m.SubMatches(0)))
-            aRefMD(nHits) = CleanNum(m.SubMatches(1))
-            aBetween(nHits) = CleanNum(m.SubMatches(3))
-            aSF(nHits) = sfVal
-            nHits = nHits + 1
-            If nHits > 200 Then Exit For
+            AcStoreHit nHits, aWell, aRefMD, aBetween, aSF, _
+                CStr(m.SubMatches(0)), CleanNum(m.SubMatches(1)), _
+                CleanNum(m.SubMatches(3)), sfVal
         End If
     Next m
 
@@ -3911,11 +4120,8 @@ Private Function ParseAcSummary(pdfText As String, aWell() As String, _
             Dim tail As String
             tail = Trim(mid(afterMDs, tmObj.FirstIndex + tmObj.Length + 1))
             If Len(tail) > 60 Then tail = Left(tail, 60)
-            aWell(nHits) = CleanWellName(tail)
-            aRefMD(nHits) = refMdVal
-            aBetween(nHits) = bcVal
-            aSF(nHits) = sfVal2
-            nHits = nHits + 1
+            AcStoreHit nHits, aWell, aRefMD, aBetween, aSF, _
+                tail, refMdVal, bcVal, sfVal2
             If nHits > 200 Then Exit For
         End If
 NextAcLine:
@@ -3961,16 +4167,16 @@ End Function
 ' AC Setup table: logical col 0..4 -> physical merge on row r (J=10 .. R=18)
 '   0 # -> J ; 1 RefMD -> K:L ; 2 C2C -> M:N ; 3 SF -> O:P ; 4 Risk -> Q:R
 Private Function AcSetupCell(ws As Worksheet, ByVal r As Long, ByVal logicalCol As Long) As Range
-    Dim c0 As Long, c1 As Long
+    Dim c0 As Long, C1 As Long
     Select Case logicalCol
-        Case 0: c0 = 10: c1 = 10
-        Case 1: c0 = 11: c1 = 12
-        Case 2: c0 = 13: c1 = 14
-        Case 3: c0 = 15: c1 = 16
-        Case 4: c0 = 17: c1 = 18
-        Case Else: c0 = 10: c1 = 10
+        Case 0: c0 = 10: C1 = 10
+        Case 1: c0 = 11: C1 = 12
+        Case 2: c0 = 13: C1 = 14
+        Case 3: c0 = 15: C1 = 16
+        Case 4: c0 = 17: C1 = 18
+        Case Else: c0 = 10: C1 = 10
     End Select
-    Set AcSetupCell = ws.Range(ws.Cells(r, c0), ws.Cells(r, c1))
+    Set AcSetupCell = ws.Range(ws.Cells(r, c0), ws.Cells(r, C1))
 End Function
 
 Private Sub AcSetupMergeRow(ws As Worksheet, ByVal r As Long)
@@ -4029,7 +4235,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
     hdrs(4) = "Risk"
 
     r = BASE_ROW
-    ws.Rows(r).rowHeight = 18
+    ws.rows(r).rowHeight = 18
     AcSetupMergeRow ws, r
     For c = 0 To 4
         Set cell = AcSetupCell(ws, r, c)
@@ -4039,7 +4245,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
             .Font.Color = cBlk()
             .Font.bold = True
             .Font.name = "Consolas"
-            .Font.Size = 8
+            .Font.size = 8
             .VerticalAlignment = xlVAlignCenter
             If c = 0 Or c = 4 Then
                 .HorizontalAlignment = xlHAlignCenter
@@ -4059,20 +4265,20 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
     If nShow > AC_MAX Then nShow = AC_MAX
 
     If nShow <= 0 Then
-        ws.Rows(r).rowHeight = 20
+        ws.rows(r).rowHeight = 20
         With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + AC_COLS - 1))
             .Merge
             .Value = "  No data  --  use Import AC button to load"
             .Interior.Color = cBg()
             .Font.Color = cDk()
             .Font.name = "Consolas"
-            .Font.Size = 8
+            .Font.size = 8
             .VerticalAlignment = xlVAlignCenter
         End With
         r = r + 1
     Else
         For i = 0 To nShow - 1
-            ws.Rows(r).rowHeight = 16
+            ws.rows(r).rowHeight = 16
             sf = aSF(i)
             If (i Mod 2) = 0 Then
                 rowBg = cWh()
@@ -4107,7 +4313,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
                     End If
                     .Font.bold = (c = 4)
                     .Font.name = "Consolas"
-                    .Font.Size = 8
+                    .Font.size = 8
                     .VerticalAlignment = xlVAlignCenter
                     If c = 0 Or c = 4 Then
                         .HorizontalAlignment = xlHAlignCenter
@@ -4215,7 +4421,7 @@ Private Sub ReloadAcTableFromHidden()
         Exit Sub
     End If
     Dim ac As Worksheet: Set ac = Worksheets(SH_AC)
-    Dim lastR As Long: lastR = ac.Cells(ac.Rows.Count, 2).End(xlUp).Row
+    Dim lastR As Long: lastR = ac.Cells(ac.rows.Count, 2).End(xlUp).row
     Dim r As Long
     For r = 3 To lastR
         If Not IsNumeric(ac.Cells(r, 2).Value2) Then GoTo NextAc
@@ -4228,6 +4434,12 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
+
+
+
+
+
 
 
 

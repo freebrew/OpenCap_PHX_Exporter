@@ -12,6 +12,22 @@ export {
   type AcImportResult,
 } from "./acImport";
 export { AC_DETAIL_SHEET, parseAcDetail, readAcDetail, vbaCleanNum, wellKey, wellsMatch, type AcDetailStation } from "./acDetail";
+export {
+  clearPlanIdentity,
+  compareHeaders,
+  DATUM_SHEET,
+  parseAcHeader,
+  parseAcSites,
+  parsePlanHeader,
+  readDatum,
+  writePlanIdentity,
+  writeReportHeader,
+  type AcReportHeader,
+  type AcSiteWell,
+  type DatumRecord,
+  type HeaderCheck,
+  type PlanIdentity,
+} from "./acHeader";
 export { checkAcReport, interpPlan, type AcCheck, type AcPlanPoint } from "./acCheck";
 export { readCell, readColumn, readNumber, type SnapshotBook } from "./cells";
 export {

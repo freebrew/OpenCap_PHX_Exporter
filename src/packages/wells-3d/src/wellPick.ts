@@ -11,9 +11,11 @@ export interface PickPoint {
 }
 
 export interface PickPath {
-  kind: "plan" | "offset" | "drilled";
+  kind: "plan" | "offset" | "drilled" | "target";
   name: string;
   points: PickPoint[];
+  /** Points that start a new run. The segment into one of them is not drawn, so it cannot be hovered. */
+  breaks?: number[];
 }
 
 export interface ScreenPoint {
@@ -23,7 +25,7 @@ export interface ScreenPoint {
 }
 
 export interface HoverPick {
-  kind: "plan" | "offset" | "drilled";
+  kind: "plan" | "offset" | "drilled" | "target";
   name: string;
   refMd: number;
   tvd: number;
@@ -140,6 +142,7 @@ export function pickHover(
   for (const path of paths) {
     if (path.points.length === 0) continue;
     const screens = path.points.map((point) => project(point.x, point.y, point.z));
+    const breaks = new Set(path.breaks ?? []);
     for (let i = 0; i < path.points.length; i += 1) {
       const screen = screens[i];
       if (!screen || screen.behind) continue;
@@ -149,7 +152,7 @@ export function pickHover(
         best = { path, index: i, t: 0 };
       }
       const next = screens[i + 1];
-      if (!next || next.behind) continue;
+      if (!next || next.behind || breaks.has(i + 1)) continue;
       const along = pixelSegment(pointer.x, pointer.y, screen.x, screen.y, next.x, next.y);
       if (along.distance <= bestDist) {
         bestDist = along.distance;
@@ -169,14 +172,30 @@ export function pickHover(
   };
   const printed = t < 0.5 ? from : to;
   const measured = closestOnPath(plan, world.x, world.y, world.z);
-  const onPlan = chosen.path.kind === "plan";
+  const numbers = hoverNumbers(chosen.path.kind, printed, paths);
   return {
     kind: chosen.path.kind,
     name: chosen.path.name,
     refMd: printed.md,
     tvd: printed.tvd,
-    c2c: onPlan || chosen.path.kind === "drilled" ? null : printed.c2c,
-    sf: onPlan ? tightestSf(paths, printed.md) : (chosen.path.kind === "drilled" ? null : printed.sf),
+    c2c: numbers.c2c,
+    sf: numbers.sf,
     measuredM: measured?.distance ?? 0,
   };
+}
+
+function hoverNumbers(kind: PickPath["kind"], printed: PickPoint, paths: PickPath[]): { c2c: number | null; sf: number | null } {
+  switch (kind) {
+    case "plan":
+      return { c2c: null, sf: tightestSf(paths, printed.md) };
+    case "offset":
+      return { c2c: printed.c2c, sf: printed.sf };
+    case "drilled":
+    case "target":
+      return { c2c: null, sf: null };
+    default: {
+      const never: never = kind;
+      return never;
+    }
+  }
 }

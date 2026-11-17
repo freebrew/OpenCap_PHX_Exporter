@@ -1,11 +1,13 @@
 import { minCurveStep } from "../../dd-math/src/angles";
-import { checkAcReport, interpPlan, type AcPlanPoint } from "../../workbook-commands/src/acCheck";
+import { checkAcReport, interpPlan, stationInFrame, type AcPlanPoint } from "../../workbook-commands/src/acCheck";
 import { readAcDetail, wellsMatch, type AcDetailStation } from "../../workbook-commands/src/acDetail";
+import { compareHeaders, readDatum } from "../../workbook-commands/src/acHeader";
 import { acConcernCapacity, concernWells, readAcHits, type AcHit } from "../../workbook-commands/src/acImport";
 import { isSummaryRow } from "../../workbook-commands/src/planGauge";
 import { SURVEY_SHEET } from "../../workbook-commands/src/planImport";
-import { numeric, type SheetBook } from "../../workbook-commands/src/sheetBook";
-import { isGoodSurveyRow, SS_SHEET } from "../../workbook-commands/src/slidesheet";
+import { cellText, numeric, type SheetBook } from "../../workbook-commands/src/sheetBook";
+import { isGoodSurveyRow, loadNamedTargets, SS_SHEET } from "../../workbook-commands/src/slidesheet";
+import { loadFormations } from "../../corridor-3d/src/corridorScene";
 
 // East, North, and up, in metres from the first plan station. Up is the opposite of TVD.
 // 1:1, so a metre of hole is a metre on every axis.
@@ -27,16 +29,82 @@ export interface OffsetPath extends PathArrays {
   /** Separation factor the line is coloured by. */
   bandSf: number;
   color: string;
-  marker: { x: number; y: number; z: number } | null;
-  join: { x: number; y: number; z: number } | null;
+  /** The Summary site heading. Empty when the report gave none. */
+  site: string;
+  /** The well is listed under the report's reference site, the active well's pad. */
+  onPad: boolean;
+  /** The lowest printed centre-to-centre. 0 when the report gave none. */
+  minC2c: number;
+  /** The offset's surface, from the active well. Null when the report has no row at the surface. */
+  wellhead: Wellhead | null;
+  /**
+   * Stations that start a new run. The report only gives the offset's closest point for each
+   * reference station, so where it gives nothing for a stretch of the offset the line is not drawn
+   * across it. Sorted, never 0.
+   */
+  breaks: number[];
+}
+
+/** Metres north and east of the active well's slot, and the compass bearing of that point. */
+export interface Wellhead {
+  north: number;
+  east: number;
+  distance: number;
+  /** Degrees clockwise from north, 0 to 359. */
+  bearing: number;
+}
+
+/** The report header the view shows, and the verdict of the check against the plan. */
+export interface WellReport {
+  stored: boolean;
+  referenceWell: string;
+  design: string;
+  referenceSite: string;
+  coordinatesRelativeTo: string;
+  north: string;
+  tvdReference: string;
+  offsetTvdReference: string;
+  reportDate: string;
+  verdict: string;
+  verdictOk: boolean;
+}
+
+/** A formation top from the plan, in the same metres as the well. */
+export interface WellFormation {
+  name: string;
+  lith: string;
+  /** True vertical depth on the plan datum, metres. */
+  tvd: number;
+  /** Scene up, metres. Up is the opposite of TVD, from the first plan station. */
+  z: number;
+}
+
+/** A named plan target. The rings sit on the plan, square to the wellbore. */
+export interface WellTarget {
+  name: string;
+  md: number;
+  tvd: number;
+  x: number;
+  y: number;
+  z: number;
+  /** Outer ring radius, metres. The inner ring is 0.45 of this. */
+  radius: number;
+  outer: Float32Array;
+  inner: Float32Array;
 }
 
 export interface WellScene {
   plan: PathArrays;
   drilled: PathArrays | null;
   offsets: OffsetPath[];
+  targets: WellTarget[];
+  /** Formation tops from the plan. The walls label the ones that fall on the box. */
+  formations: WellFormation[];
   /** Concern wells the report gave no path for. */
   missing: string[];
+  /** Report rows not drawn because they do not sit where their printed C2C says. */
+  leftOut: number;
+  report: WellReport;
   badge: string;
   badgeOk: boolean;
   hash: string;
@@ -141,8 +209,8 @@ function hashText(text: string): number {
   return hash >>> 0;
 }
 
-function hashScene(plan: PathArrays, drilled: PathArrays | null, offsets: OffsetPath[], missing: string[], badge: string): string {
-  let hash = hashText(badge);
+function hashScene(plan: PathArrays, drilled: PathArrays | null, offsets: OffsetPath[], targets: WellTarget[], formations: WellFormation[], missing: string[], report: WellReport, badge: string): string {
+  let hash = hashText(`${badge}|${report.verdict}|${report.referenceWell}|${report.design}|${report.referenceSite}`);
   const mix = (path: PathArrays | null) => {
     if (!path) return;
     for (let i = 0; i < path.xyz.length; i += 1) {
@@ -153,53 +221,158 @@ function hashScene(plan: PathArrays, drilled: PathArrays | null, offsets: Offset
   mix(plan);
   mix(drilled);
   for (const offset of offsets) {
-    hash ^= hashText(`${offset.name}:${offset.concern ? "Y" : "N"}`);
+    hash ^= hashText(`${offset.name}:${offset.concern ? "Y" : "N"}:${offset.site}:${offset.minC2c}:${offset.wellhead?.bearing ?? ""}:${offset.breaks.join(",")}`);
     mix(offset);
+  }
+  for (const target of targets) {
+    hash ^= hashText(`${target.name}:${target.md}`);
+    hash = Math.imul(hash, 1_677_7619);
+  }
+  for (const formation of formations) {
+    hash ^= hashText(`${formation.name}:${formation.tvd}:${formation.lith}`);
+    hash = Math.imul(hash, 1_677_7619);
   }
   hash ^= hashText(missing.join("|"));
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function closestStation(stations: AcDetailStation[], md: number): AcDetailStation | null {
-  let best: AcDetailStation | null = null;
-  let gap = Infinity;
-  for (const station of stations) {
-    const next = Math.abs(station.refMd - md);
-    if (next < gap) {
-      gap = next;
-      best = station;
-    }
-  }
-  return best;
+/** Stations this close along the offset have the offset between them, so the line may join them. */
+const KNOWN_STEP_M = 60;
+/** A longer step is still joined when the offset runs straight over it: chord within half a percent of the depth step. */
+const STRAIGHT_RATIO = 0.995;
+function chordOf(a: AcDetailStation, b: AcDetailStation): number {
+  return Math.hypot(b.n - a.n, b.e - a.e, b.offTvd - a.offTvd);
 }
 
-function offsetPath(name: string, stations: AcDetailStation[], hit: AcHit | null, concern: boolean, origin: AcPlanPoint, plan: AcPlanPoint[]): OffsetPath {
-  const ordered = [...stations].sort((a, b) => a.refMd - b.refMd);
+function sfRank(station: AcDetailStation): number {
+  return station.sf > 0 ? station.sf : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * The offset's own points in the offset's own depth order. The report lists each reference station
+ * with the offset's closest point, and that point runs back and forth along the offset as the
+ * reference moves. Ordered by the reference, the line doubled back on itself. Where several
+ * reference stations share one offset point, the tightest separation factor comes last, which is
+ * the one a hover lands on.
+ */
+function alongOffset(stations: AcDetailStation[]): AcDetailStation[] {
+  return [...stations].sort((a, b) => {
+    if (a.offMd !== b.offMd) return a.offMd - b.offMd;
+    const left = sfRank(a);
+    const right = sfRank(b);
+    if (left === right) return a.refMd - b.refMd;
+    return left < right ? 1 : -1;
+  });
+}
+
+/** Where the report gives no path for a stretch of the offset, and the stretch is not a straight run. */
+function runBreaks(stations: AcDetailStation[]): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < stations.length; i += 1) {
+    const along = stations[i]!.offMd - stations[i - 1]!.offMd;
+    if (along <= KNOWN_STEP_M) continue;
+    if (chordOf(stations[i - 1]!, stations[i]!) >= along * STRAIGHT_RATIO - 1) continue;
+    out.push(i);
+  }
+  return out;
+}
+
+/** A row this close to the offset's surface is the wellhead. Deeper, and the report never gave the surface. */
+const SURFACE_M = 1;
+
+function squash(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function siteName(stations: AcDetailStation[]): string {
+  for (const station of stations) {
+    const site = station.site.trim();
+    if (site !== "") return site;
+  }
+  return "";
+}
+
+function lowestC2c(stations: AcDetailStation[]): number {
+  let lowest = Infinity;
+  for (const station of stations) if (station.c2c > 0 && station.c2c < lowest) lowest = station.c2c;
+  return Number.isFinite(lowest) ? lowest : 0;
+}
+
+function wellheadOf(stations: AcDetailStation[]): Wellhead | null {
+  const surface = stations.reduce<AcDetailStation | null>((best, station) => (!best || station.offMd < best.offMd ? station : best), null);
+  if (!surface || surface.offMd > SURFACE_M) return null;
+  const distance = surface.c2c > 0 ? surface.c2c : Math.hypot(surface.n, surface.e, surface.offTvd);
+  const degrees = Math.atan2(surface.e, surface.n) * 180 / Math.PI;
+  return {
+    north: surface.n,
+    east: surface.e,
+    distance,
+    bearing: Math.round((degrees % 360 + 360) % 360) % 360,
+  };
+}
+
+function offsetPath(name: string, stations: AcDetailStation[], hit: AcHit | null, concern: boolean, origin: AcPlanPoint, referenceSite: string): OffsetPath {
+  const ordered = alongOffset(stations);
   const bandSf = hit?.sf ?? ordered.reduce((lowest, station) => (station.sf > 0 && station.sf < lowest ? station.sf : lowest), Infinity);
+  const site = siteName(ordered);
   const samples: Sample[] = ordered.map((station) => ({
     md: station.refMd,
     n: station.n,
     e: station.e,
     tvd: station.offTvd,
     c2c: station.c2c,
-    sf: station.sf,
+    sf: station.sf > 0 ? station.sf : null,
   }));
-  const markAt = closestStation(ordered, hit?.refMd ?? ordered.reduce((best, station) => (station.sf > 0 && (best == null || station.sf < best.sf) ? station : best), null as AcDetailStation | null)?.refMd ?? ordered[0]!.refMd);
-  let marker: OffsetPath["marker"] = null;
-  let join: OffsetPath["join"] = null;
-  if (markAt) {
-    marker = localOf({ md: markAt.refMd, n: markAt.n, e: markAt.e, tvd: markAt.offTvd, c2c: markAt.c2c, sf: markAt.sf }, origin);
-    const onPlan = interpPlan(plan, hit?.refMd ?? markAt.refMd);
-    if (onPlan) join = localOf({ md: onPlan.md, n: onPlan.n, e: onPlan.e, tvd: onPlan.tvd, c2c: null, sf: null }, origin);
-  }
   return {
     ...pack(samples, origin),
     name,
     concern,
     bandSf: Number.isFinite(bandSf) ? bandSf : 99,
     color: bandColor(Number.isFinite(bandSf) ? bandSf : 99),
-    marker,
-    join,
+    site,
+    onPad: site !== "" && squash(site) === squash(referenceSite),
+    minC2c: lowestC2c(ordered),
+    wellhead: wellheadOf(ordered),
+    breaks: runBreaks(ordered),
+  };
+}
+
+function blankReport(verdict: string): WellReport {
+  return {
+    stored: false,
+    referenceWell: "",
+    design: "",
+    referenceSite: "",
+    coordinatesRelativeTo: "",
+    north: "",
+    tvdReference: "",
+    offsetTvdReference: "",
+    reportDate: "",
+    verdict,
+    verdictOk: true,
+  };
+}
+
+/** The stored header, and the sentence that replaces the frame badge when the report is not the plan's. */
+function reportOf(book: SheetBook): { report: WellReport; replaceBadge: string } {
+  const datum = readDatum(book);
+  if (!datum.reportStored) return { report: blankReport("Run Import AC again to store the report header"), replaceBadge: "" };
+  const check = compareHeaders(datum.report, datum.planStored ? datum.plan : null);
+  return {
+    report: {
+      stored: true,
+      referenceWell: datum.report.referenceWell,
+      design: datum.report.referenceDesign,
+      referenceSite: datum.report.referenceSite,
+      coordinatesRelativeTo: datum.report.coordinatesRelativeTo || datum.report.localCoordinateReference,
+      north: datum.report.northReference,
+      tvdReference: datum.report.tvdReference,
+      offsetTvdReference: datum.report.offsetTvdReference,
+      reportDate: datum.report.reportDate,
+      verdict: check.verdict,
+      verdictOk: check.ok,
+    },
+    replaceBadge: check.ok ? "" : check.verdict,
   };
 }
 
@@ -211,35 +384,146 @@ export function buildWellScene(book: SheetBook): WellScene | null {
   const hits = readAcHits(book);
   const shown = concernWells(hits, acConcernCapacity(book));
   const stations = readAcDetail(book);
+  // A row is drawn only when its printed C2C matches the plan. A row that does not match is a row
+  // that was read wrong, and drawn it is a straight line to nowhere.
+  const proven = stations.filter((station) => stationInFrame(plan, station));
+  const leftOut = stations.length - proven.length;
   const byWell = new Map<string, AcDetailStation[]>();
-  for (const station of stations) {
+  for (const station of proven) {
     const key = [...byWell.keys()].find((name) => wellsMatch(name, station.well));
     const name = key ?? station.well;
     const list = byWell.get(name);
     if (list) list.push(station);
     else byWell.set(name, [station]);
   }
+  const { report, replaceBadge } = reportOf(book);
   const offsets = [...byWell.entries()].map(([name, rows]) => {
     const hit = hits.find((item) => wellsMatch(item.well, name)) ?? null;
     const concern = shown.some((item) => wellsMatch(item.well, name));
-    return offsetPath(name, rows, hit, concern, origin, plan);
+    return offsetPath(name, rows, hit, concern, origin, report.referenceSite);
   });
   const missing = shown.filter((hit) => !offsets.some((offset) => wellsMatch(offset.name, hit.well))).map((hit) => hit.well);
   const drilledSamples = readDrilled(book);
   const drilled = drilledSamples.length >= 2 ? pack(drilledSamples, origin) : null;
   const check = checkAcReport(shown, stations, plan);
-  const badge = shown.length === 0
+  const leftOutNote = leftOut > 0 ? `, ${leftOut} row${leftOut === 1 ? "" : "s"} left out` : "";
+  const frameBadge = shown.length === 0
     ? (stations.length === 0 ? "No offset paths in the report" : "No concern wells")
-    : check.badge;
-  const badgeOk = shown.length === 0 ? true : check.ok;
+    : `${check.badge}${leftOutNote}`;
+  const badge = replaceBadge !== "" ? replaceBadge : frameBadge;
+  const badgeOk = replaceBadge !== "" ? false : shown.length === 0 ? true : check.ok;
   const planPath = pack(plan.map((point) => ({ ...point, c2c: null, sf: null })), origin);
+  const targets = planTargets(book, plan, origin);
+  const formations = formationsOf(book, origin);
   return {
     plan: planPath,
     drilled,
     offsets,
+    targets,
+    formations,
     missing,
+    leftOut,
+    report,
     badge,
     badgeOk,
-    hash: hashScene(planPath, drilled, offsets, missing, badge),
+    hash: hashScene(planPath, drilled, offsets, targets, formations, missing, report, badge),
   };
+}
+
+/** _OC_Formations, the same tops the email picture writes on its shaft walls. */
+function formationsOf(book: SheetBook, origin: AcPlanPoint): WellFormation[] {
+  return loadFormations(book)
+    .filter((fm) => fm.name.trim() !== "" && Number.isFinite(fm.tvd))
+    .map((fm) => ({
+      name: fm.name,
+      lith: fm.lith,
+      tvd: fm.tvd,
+      z: -(fm.tvd - origin.tvd),
+    }));
+}
+
+const WINDOW_FIRST = 2;
+const WINDOW_LAST = 5;
+const WINDOW_MD = 21;
+const WINDOW_NAME = 25;
+const RING_POINTS = 32;
+
+function namedOnPlan(book: SheetBook): Array<{ name: string; md: number }> {
+  const named = loadNamedTargets(book);
+  if (named.length > 0) return named.map((target) => ({ name: target.name, md: target.md }));
+  if (!book.hasSheet(SS_SHEET)) return [];
+  const out: Array<{ name: string; md: number }> = [];
+  for (let row = WINDOW_FIRST; row <= WINDOW_LAST; row += 1) {
+    const name = cellText(book.value(SS_SHEET, row, WINDOW_NAME));
+    const md = numeric(book.value(SS_SHEET, row, WINDOW_MD));
+    if (name === "" || md == null) continue;
+    out.push({ name, md });
+  }
+  return out;
+}
+
+function unit(vector: Local): Local {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (length < 1e-6) return { x: 0, y: 0, z: 1 };
+  return { x: vector.x / length, y: vector.y / length, z: vector.z / length };
+}
+
+function cross(a: Local, b: Local): Local {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
+/** A circle in the plane square to the wellbore, closed by repeating the first point. */
+function ringPoints(center: Local, tangent: Local, radius: number): Float32Array {
+  const along = unit(tangent);
+  const helper = Math.abs(along.z) < 0.95 ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 };
+  const across = unit(cross(along, helper));
+  const around = cross(along, across);
+  const out = new Float32Array((RING_POINTS + 1) * 3);
+  for (let i = 0; i <= RING_POINTS; i += 1) {
+    const angle = (2 * Math.PI * i) / RING_POINTS;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    out[i * 3] = center.x + radius * (cos * across.x + sin * around.x);
+    out[i * 3 + 1] = center.y + radius * (cos * across.y + sin * around.y);
+    out[i * 3 + 2] = center.z + radius * (cos * across.z + sin * around.z);
+  }
+  return out;
+}
+
+function planTargets(book: SheetBook, plan: AcPlanPoint[], origin: AcPlanPoint): WellTarget[] {
+  let reach = 1;
+  for (const point of plan) {
+    const at = localOf({ ...point, c2c: null, sf: null }, origin);
+    reach = Math.max(reach, Math.abs(at.x), Math.abs(at.y), Math.abs(at.z));
+  }
+  const radius = Math.max(8, reach * 0.035);
+  const out: WellTarget[] = [];
+  for (const target of namedOnPlan(book)) {
+    const at = interpPlan(plan, target.md);
+    if (!at) continue;
+    const before = interpPlan(plan, target.md - 6) ?? plan[0]!;
+    const after = interpPlan(plan, target.md + 6) ?? plan[plan.length - 1]!;
+    const center = localOf({ ...at, c2c: null, sf: null }, origin);
+    const tangent = {
+      x: localOf({ ...after, c2c: null, sf: null }, origin).x - localOf({ ...before, c2c: null, sf: null }, origin).x,
+      y: localOf({ ...after, c2c: null, sf: null }, origin).y - localOf({ ...before, c2c: null, sf: null }, origin).y,
+      z: localOf({ ...after, c2c: null, sf: null }, origin).z - localOf({ ...before, c2c: null, sf: null }, origin).z,
+    };
+    out.push({
+      name: target.name,
+      md: at.md,
+      tvd: at.tvd,
+      x: center.x,
+      y: center.y,
+      z: center.z,
+      radius,
+      outer: ringPoints(center, tangent, radius),
+      inner: ringPoints(center, tangent, radius * 0.45),
+    });
+  }
+  return out;
 }

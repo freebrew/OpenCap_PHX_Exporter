@@ -1,0 +1,15 @@
+packages:
+  - "src/extension"
+  - "src/packages/*"
+  - "src/services/*"
+  - "src/apps/*"
+
+minimumReleaseAgeExclude:
+  - '@vitejs/plugin-react@6.2.1'
+  - '@vitest/mocker@5.1.0'
+  - '@vitest/spy@5.1.0'
+  - vitest@5.1.0
+
+nodeLinker: hoisted
+packageImportMethod: copy
+verifyDepsBeforeRun: false

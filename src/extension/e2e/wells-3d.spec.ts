@@ -30,6 +30,7 @@ test("the worker canvas draws, and a hover reads the printed SF", async ({ page 
   expect(painted(result.sample.corner), `corner ${result.sample.corner.join(",")}`).toBe(true);
   expect(result.hover).not.toBeNull();
   expect(result.hover?.sf).toBeCloseTo(1.2, 3);
+  expect(result.hiddenSf).toBeNull();
   expect(result.bench.maxMs).toBeLessThan(50);
   expect(result.bench.mainBusyMs).toBeGreaterThan(200);
 });
@@ -40,6 +41,12 @@ test("Sheets and 3D Wells switch on the preview page", async ({ page }) => {
   await page.goto("/app.html?adapter=memory");
   await page.getByRole("button", { name: "3D Wells" }).click();
   await expect(page.getByText("Planned Path")).toBeVisible();
+  await expect(page.getByText("Shadow of the Active Well")).toBeVisible();
+  await expect(page.getByText("Formation", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Site" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Lowest SF" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Closest C2C" })).toBeVisible();
+  await expect(page.getByText("Run Import AC again to store the report header")).toBeVisible();
   await expect(page.getByText("Show All Offset Wells")).toBeVisible();
   await expect(page.getByRole("button", { name: "Reset View" })).toBeVisible();
   await expect(page.getByText("Import a well plan to draw the paths.")).toBeVisible();

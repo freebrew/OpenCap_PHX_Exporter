@@ -9,7 +9,7 @@ If CarryOn = vbYes Then
  sheets("Data").Select
  Dim name As String
     
-   name = ThisWorkbook.Path & "\" & Range("B5") & Range("B6") & " DATA" & ".pdf"
+   name = ThisWorkbook.path & "\" & Range("B5") & Range("B6") & " DATA" & ".pdf"
         
     Application.GoTo Reference:="Print_Area"
 

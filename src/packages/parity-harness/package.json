@@ -1,0 +1,26 @@
+{
+  "name": "@phx/parity-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/run.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@univerjs/core": "1.4.0",
+    "@univerjs/docs": "1.4.0",
+    "@univerjs/engine-formula": "1.4.0",
+    "@univerjs/sheets": "1.4.0",
+    "@univerjs/sheets-formula": "1.4.0",
+    "@univerjs/sheets-numfmt": "1.4.0",
+    "fflate": "0.8.3",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

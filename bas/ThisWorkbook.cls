@@ -25,9 +25,10 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
         Exit Sub
     End If
     If StrComp(Sh.name, MDL_ContDI.SH_CONTDI, vbTextCompare) = 0 Then
+        ' Button only. The target cells are references to the slidesheet,
+        ' so opening this tab does not search surveys or rebuild the aim.
         MDL_ContDI.EnsureContDIPullButton
         ScreenReleaseCalcForSheet
-        ScreenCalcOnSheetArrive
     End If
 End Sub
 
@@ -40,6 +41,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     End If
     If ScreenBusyDepth() > 0 Then Exit Sub
     If StrComp(Sh.name, MDL_ContDI.SH_CONTDI, vbTextCompare) <> 0 Then Exit Sub
+    MDL_ContDI.ContDI_ApplyTargetSelection Sh, Target
     ScreenBeginBusy
     ScreenCalcStaggered
     ScreenEndBusy

@@ -17,6 +17,7 @@ Option Explicit
 Public Const PI_SURVEY_SHEET As String = "_OC_Survey"
 Public Const PI_FORM_SHEET As String = "_OC_Formations"
 Private Const PI_LITHO_SRC As String = "AER Table of Formations 2019 / AGS WCSB Atlas"
+Private Const PI_MC As Double = 3.14159265358979
 
 Public Function ImportPlannedSurveysFromPdf(ByVal pdfText As String, ByVal fPath As String) As Long
     Dim md() As Double, inc() As Double, azm() As Double
@@ -49,7 +50,7 @@ Public Function PI_LoadFormations(ByRef md() As Double, ByRef tvd() As Double, _
     Set ws = ThisWorkbook.Worksheets(PI_FORM_SHEET)
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
-    lastR = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastR = ws.Cells(ws.rows.Count, 1).End(xlUp).row
     If lastR < 3 Then Exit Function
     ReDim md(0 To lastR): ReDim tvd(0 To lastR)
     ReDim nm(0 To lastR): ReDim lith(0 To lastR)
@@ -106,17 +107,17 @@ Private Function ParsePlannedSurveys(ByVal pdfText As String, _
             If nums(1) < -0.01 Or nums(1) > 180.01 Then GoTo NextLn
             If nums(3) < -50# Or nums(3) > 12000# Then GoTo NextLn
             If n > 800 Then Exit For
+            ' MD / Inc / Azi / TVD are the first four numbers on both PostScript
+            ' and Crystal layouts. Do not take NS/EW from the PDF: Crystal glues
+            ' Subsea (KB-TVD) onto +E/-W so nums(5)/nums(6) become 0 / -TVDSS.
             md(n) = nums(0): inc(n) = nums(1): azm(n) = nums(2): tvd(n) = nums(3)
-            If nn >= 7 Then
-                ns(n) = nums(5): ew(n) = nums(6)
-            Else
-                ns(n) = 0#: ew(n) = 0#
-            End If
+            ns(n) = 0#: ew(n) = 0#
             lastMd = nums(0)
             n = n + 1
         End If
 NextLn:
     Next i
+    RebuildPlanNE n, md, inc, azm, ns, ew
     ParsePlannedSurveys = n
 End Function
 
@@ -183,6 +184,49 @@ Private Function NameAfterTwoNums(ByVal Ln As String) As String
     NameAfterTwoNums = Trim$(s)
 End Function
 
+Private Function Deg2Rad(ByVal d As Double) As Double
+    Deg2Rad = d * PI_MC / 180#
+End Function
+
+' Minimum curvature step — same formula as MDL_PlanGauge.McStep.
+Private Sub McStep(ByVal md1 As Double, ByVal i1 As Double, ByVal a1 As Double, _
+                   ByVal md2 As Double, ByVal i2 As Double, ByVal a2 As Double, _
+                   ByRef dV As Double, ByRef dN As Double, ByRef dE As Double)
+    Dim r1 As Double, r2 As Double, b1 As Double, b2 As Double
+    Dim cosDL As Double, beta As Double, h As Double
+    r1 = Deg2Rad(i1): r2 = Deg2Rad(i2)
+    b1 = Deg2Rad(a1): b2 = Deg2Rad(a2)
+
+    cosDL = Cos(r2 - r1) - Sin(r1) * Sin(r2) * (1# - Cos(b2 - b1))
+    If cosDL > 1# Then cosDL = 1#
+    If cosDL < -1# Then cosDL = -1#
+    beta = WorksheetFunction.Acos(cosDL)
+
+    If beta > 0.0000001 Then
+        h = (md2 - md1) / 2# * (2# / beta * Tan(beta / 2#))
+    Else
+        h = (md2 - md1) / 2#
+    End If
+    dV = h * (Cos(r1) + Cos(r2))
+    dN = h * (Sin(r1) * Cos(b1) + Sin(r2) * Cos(b2))
+    dE = h * (Sin(r1) * Sin(b1) + Sin(r2) * Sin(b2))
+End Sub
+
+' Compass local N/E is wellhead-relative. Rebuild from MD/Inc/Azm so a Crystal
+' Planned Survey that stored Subsea in EW still produces a real wellpath.
+Private Sub RebuildPlanNE(ByVal n As Long, _
+        ByRef md() As Double, ByRef inc() As Double, ByRef azm() As Double, _
+        ByRef ns() As Double, ByRef ew() As Double)
+    Dim i As Long, dV As Double, dN As Double, dE As Double
+    If n < 1 Then Exit Sub
+    ns(0) = 0#: ew(0) = 0#
+    For i = 1 To n - 1
+        McStep md(i - 1), inc(i - 1), azm(i - 1), md(i), inc(i), azm(i), dV, dN, dE
+        ns(i) = ns(i - 1) + dN
+        ew(i) = ew(i - 1) + dE
+    Next i
+End Sub
+
 Private Function ExtractNums(ByVal s As String, ByRef nums() As Double) As Long
     Dim re As Object, ms As Object, m As Object
     Dim n As Long, t As String
@@ -215,14 +259,18 @@ Private Sub WriteSurveySheet(ByVal fPath As String, ByVal n As Long, _
     ws.Cells(2, 4).Value2 = "TVD"
     ws.Cells(2, 5).Value2 = "NS"
     ws.Cells(2, 6).Value2 = "EW"
-    For i = 0 To n - 1
-        ws.Cells(i + 3, 1).Value2 = md(i)
-        ws.Cells(i + 3, 2).Value2 = inc(i)
-        ws.Cells(i + 3, 3).Value2 = azm(i)
-        ws.Cells(i + 3, 4).Value2 = tvd(i)
-        ws.Cells(i + 3, 5).Value2 = ns(i)
-        ws.Cells(i + 3, 6).Value2 = ew(i)
+    If n < 1 Then Exit Sub
+    Dim arr() As Variant
+    ReDim arr(1 To n, 1 To 6)
+    For i = 1 To n
+        arr(i, 1) = md(i - 1)
+        arr(i, 2) = inc(i - 1)
+        arr(i, 3) = azm(i - 1)
+        arr(i, 4) = tvd(i - 1)
+        arr(i, 5) = ns(i - 1)
+        arr(i, 6) = ew(i - 1)
     Next i
+    ws.Range(ws.Cells(3, 1), ws.Cells(n + 2, 6)).Value2 = arr
 End Sub
 
 Private Sub WriteFormationsSheet(ByVal fPath As String, ByVal n As Long, _
@@ -236,12 +284,16 @@ Private Sub WriteFormationsSheet(ByVal fPath As String, ByVal n As Long, _
     ws.Cells(2, 2).Value2 = "TVD"
     ws.Cells(2, 3).Value2 = "Name"
     ws.Cells(2, 4).Value2 = "Lithology"
-    For i = 0 To n - 1
-        ws.Cells(i + 3, 1).Value2 = md(i)
-        ws.Cells(i + 3, 2).Value2 = tvd(i)
-        ws.Cells(i + 3, 3).Value2 = nm(i)
-        ws.Cells(i + 3, 4).Value2 = lith(i)
+    If n < 1 Then Exit Sub
+    Dim arr() As Variant
+    ReDim arr(1 To n, 1 To 4)
+    For i = 1 To n
+        arr(i, 1) = md(i - 1)
+        arr(i, 2) = tvd(i - 1)
+        arr(i, 3) = nm(i - 1)
+        arr(i, 4) = lith(i - 1)
     Next i
+    ws.Range(ws.Cells(3, 1), ws.Cells(n + 2, 4)).Value2 = arr
 End Sub
 
 Private Function EnsureHidden(ByVal shName As String) As Worksheet
@@ -277,7 +329,7 @@ Private Function NormFormName(ByVal s As String) As String
     t = Replace(t, " formation", "")
     t = Replace(t, " group", "")
     t = Replace(t, " member", "")
-    If right$(t, 3) = " fm" Then t = Left$(t, Len(t) - 3)
+    If Right$(t, 3) = " fm" Then t = Left$(t, Len(t) - 3)
     t = Trim$(t)
     If t = "garminia" Or t = "gaminie" Or t = "gramina" Then t = "graminia"
     If t = "wabamum" Then t = "wabamun"
@@ -359,6 +411,11 @@ Private Function LithologyForNorm(ByVal key As String) As String
             End If
     End Select
 End Function
+
+
+
+
+
 
 
 

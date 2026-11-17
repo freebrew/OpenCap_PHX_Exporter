@@ -1,6 +1,7 @@
 import type { SnapshotBook } from "../../../packages/workbook-commands/src/cells";
 import { SheetBook } from "../../../packages/workbook-commands/src/sheetBook";
 import { GOOD_SURVEY_FILL } from "../../../packages/workbook-commands/src/slidesheet";
+import { shownOffsets } from "../../../packages/wells-3d/src/wellFilter";
 import { buildWellScene } from "../../../packages/wells-3d/src/wellScene";
 import type { HoverPick } from "../../../packages/wells-3d/src/wellPick";
 import type { ProbeResult, WellsIn, WellsOut } from "./wellsMessages";
@@ -13,6 +14,8 @@ export interface WellsProbeResult {
   forced: ProbeResult;
   open: ReadyResult;
   hover: HoverPick | null;
+  /** The same hover after the filter hides every offset well. Its SF is then null. */
+  hiddenSf: number | null;
   sample: { center: [number, number, number]; corner: [number, number, number] };
   bench: { maxMs: number; frames: number; mainBusyMs: number };
 }
@@ -22,7 +25,7 @@ interface ProbeWindow extends Window {
 }
 
 function book(): SheetBook {
-  const sheets = ["_OC_Survey", "_OC_AC", "_OC_AC_Detail", "Data", "Slidesheet"];
+  const sheets = ["_OC_Survey", "_OC_AC", "_OC_AC_Detail", "_OC_Formations", "Data", "Slidesheet"];
   const out: Record<string, { id: string; name: string; cellData: Record<string, never> }> = {};
   sheets.forEach((name, index) => {
     out[`s${index}`] = { id: `s${index}`, name, cellData: {} };
@@ -41,6 +44,10 @@ function fixtureScene() {
   sheet.setValue("_OC_Survey", 4, 4, 400);
   sheet.setValue("_OC_Survey", 4, 5, 100);
   sheet.setValue("_OC_Survey", 4, 6, 500);
+  sheet.setValue("_OC_Formations", 3, 1, 500);
+  sheet.setValue("_OC_Formations", 3, 2, 200);
+  sheet.setValue("_OC_Formations", 3, 3, "Belly River");
+  sheet.setValue("_OC_Formations", 3, 4, "sandstone");
   sheet.setValue("Data", 10, 2, "AC Info & Concerns");
   sheet.setValue("Data", 14, 2, "Motors On Location");
   sheet.setValue("_OC_AC", 3, 1, "103/09-10-011-12W5/0 - East Offset");
@@ -66,7 +73,7 @@ function fixtureScene() {
   sheet.setValue("_OC_AC_Detail", 4, 1, "102/05-06-007-08W5/2 - South Offset");
   sheet.setValue("_OC_AC_Detail", 4, 2, 800);
   sheet.setValue("_OC_AC_Detail", 4, 3, 790);
-  sheet.setValue("_OC_AC_Detail", 4, 4, 300);
+  sheet.setValue("_OC_AC_Detail", 4, 4, 360);
   sheet.setValue("_OC_AC_Detail", 4, 5, 80);
   sheet.setValue("_OC_AC_Detail", 4, 6, 400);
   sheet.setValue("_OC_AC_Detail", 4, 7, 40);
@@ -141,7 +148,8 @@ async function run(): Promise<WellsProbeResult> {
   if (probe.type !== "probe") throw new Error(`Probe replied ${probe.type}`);
   const scene = fixtureScene();
   if (!scene) throw new Error("Fixture scene is empty");
-  forced.send({ type: "options", drilled: false, allOffsets: false });
+  const shown = shownOffsets(scene.offsets, { allOffsets: false, site: "all", maxSf: null, maxC2c: null });
+  forced.send({ type: "options", drilled: false, shown });
   forced.send({ type: "scene", scene });
   const sampleMessage = await forced.ask({ type: "sample" });
   if (sampleMessage.type !== "sample") throw new Error(`Sample replied ${sampleMessage.type}`);
@@ -149,6 +157,9 @@ async function run(): Promise<WellsProbeResult> {
   const height = glCanvas.clientHeight || glCanvas.height;
   const hoverMessage = await forced.ask({ type: "hover", x: width / 2, y: height / 2 });
   if (hoverMessage.type !== "hover") throw new Error(`Hover replied ${hoverMessage.type}`);
+  forced.send({ type: "options", drilled: false, shown: [] });
+  const hiddenMessage = await forced.ask({ type: "hover", x: width / 2, y: height / 2 });
+  if (hiddenMessage.type !== "hover") throw new Error(`Hidden hover replied ${hiddenMessage.type}`);
   const started = performance.now();
   const benchPromise = forced.ask({ type: "bench", frames: 30 });
   while (performance.now() - started < 200) {
@@ -160,6 +171,7 @@ async function run(): Promise<WellsProbeResult> {
     forced: probe,
     open: openReady,
     hover: hoverMessage.hit,
+    hiddenSf: hiddenMessage.hit?.sf ?? null,
     sample: { center: sampleMessage.center, corner: sampleMessage.corner },
     bench: { maxMs: benchMessage.maxMs, frames: benchMessage.frames, mainBusyMs: performance.now() - started },
   };

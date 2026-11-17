@@ -17,6 +17,8 @@ export interface AcDetailStation {
   c2c: number;
   sf: number;
   warn: string;
+  /** The Summary site heading this well was listed under. Empty when the report gave none. */
+  site: string;
 }
 
 const DETAIL_NUMBER = /-?\d{1,6}(?:,\s?\d{3})*\.\s?\d{2,3}/g;
@@ -105,19 +107,34 @@ function offsetDesignName(page: string): string {
   return cleanWellName(rest);
 }
 
-function stationFrom(line: string, nums: number[], columns: { n: number; e: number; bc: number; be: number; sf: number }): Pick<AcDetailStation, "n" | "e" | "c2c" | "sf"> | null {
+type Frame = Pick<AcDetailStation, "n" | "e" | "c2c" | "sf">;
+
+function sameFrame(a: Frame, b: Frame): boolean {
+  return Math.abs(a.n - b.n) < 1e-6 && Math.abs(a.e - b.e) < 1e-6 && Math.abs(a.c2c - b.c2c) < 1e-6;
+}
+
+function stationFrom(line: string, nums: number[], columns: { n: number; e: number; bc: number; be: number; sf: number }): Frame | null {
   if (nums.length >= 13) return { n: nums[7]!, e: nums[8]!, c2c: nums[9]!, sf: nums[12]! };
   if (nums.length === 12) return { n: nums[6]!, e: nums[7]!, c2c: nums[8]!, sf: nums[11]! };
+  if (nums.length < 10) return null;
+  // A row of 10 or 11 numbers is either a full left side with the last columns left blank (the
+  // Ref MD 0 row, where the ellipses touch), or a row with no toolface. Both read from the same
+  // numbers; the header columns only choose between them. The text this reads from drops the
+  // header's left padding, so a slice that matches neither layout is a misaligned slice and the
+  // full left side wins. The old rule took the slice as it came and read the offset's depth as N.
+  const leftSide: Frame = { n: nums[7]!, e: nums[8]!, c2c: nums[9]!, sf: 0 };
+  const noToolface: Frame = { n: nums[6]!, e: nums[7]!, c2c: nums[8]!, sf: 0 };
   if (columns.n > 0 && columns.e > 0 && columns.bc > 0) {
-    return {
+    const sliced: Frame = {
       n: vbaCleanNum(sliceField(line, columns.n, columns.e)),
       e: vbaCleanNum(sliceField(line, columns.e, columns.bc)),
       c2c: vbaCleanNum(sliceField(line, columns.bc, columns.be)),
       sf: vbaCleanNum(sliceField(line, columns.sf, 0)),
     };
+    if (sameFrame(sliced, noToolface)) return { ...noToolface, sf: sliced.sf };
+    if (sameFrame(sliced, leftSide)) return { ...leftSide, sf: sliced.sf };
   }
-  if (nums.length < 10) return null;
-  return { n: nums[7] ?? 0, e: nums[8] ?? 0, c2c: nums[9] ?? 0, sf: 0 };
+  return leftSide;
 }
 
 /** AcPoc_ParseDetail. One station per Offset Design data row. */
@@ -154,6 +171,7 @@ export function parseAcDetail(text: string): AcDetailStation[] {
         c2c: picked.c2c,
         sf: picked.sf,
         warn: warningOf(line),
+        site: "",
       });
       if (out.length >= MAX_STATIONS) return out;
     }
@@ -187,6 +205,7 @@ export function readAcDetail(book: SheetBook): AcDetailStation[] {
       c2c,
       sf,
       warn: cellText(book.value(AC_DETAIL_SHEET, row, 9)),
+      site: cellText(book.value(AC_DETAIL_SHEET, row, 10)).trim(),
     });
   }
   return out;

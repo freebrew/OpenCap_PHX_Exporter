@@ -22,6 +22,12 @@ package-lock.json
 __pycache__/
 *.pyc
 .env
+.dev.vars
+src/services/strapsheets-api/.wrangler/
+src/services/strapsheets-api/.certs/
+
+# StrapSheets (submodule keeps its own repo; its secrets never land here)
+src/strapsheets/secrets/
 
 # Logs
 logs/
@@ -124,3 +130,6 @@ bas/live/
 docs/corridor_ex_*.png
 docs/corridor_field_*.png
 docs/corridor_live.png
+
+# Segment pictures rendered from Field job data
+docs/corridor_segments/500m/

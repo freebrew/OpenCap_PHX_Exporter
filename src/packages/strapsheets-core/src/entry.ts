@@ -2,18 +2,22 @@
 // Form Responses 1. A serial is always stored in capitals; a decimal may be blank (skip).
 
 import { z } from "zod";
-import { choiceOptions, stepColumns, type EntryFamily, type EntryStep } from "./schema";
+import { customProblems, normalizeCustomCells } from "./custom";
+import { choiceOptions, stepColumns, type EntryFamily, type EntryStep, type RoundStep } from "./schema";
 
 /** The wire shape of one entry, before it is checked against a family. */
 export const entryPayloadSchema = z.object({
   which: z.string().min(1),
-  cells: z.record(z.string().regex(/^\d+$/), z.string()),
+  cells: z.record(z.string(), z.string()),
+  at: z.string().optional(),
 });
 
 export interface EntryPayload {
   which: string;
-  /** Column index to the text the user entered. */
-  cells: Record<number, string>;
+  /** Column index, or a Custom field name, to the text the user entered. */
+  cells: Record<string, string>;
+  /** When the entry was taken (ISO). The MWD Carrier card prints its date. Stamped when the sheets are sent. */
+  at?: string;
 }
 
 export interface EntryProblem {
@@ -33,15 +37,38 @@ export function decimalText(value: string): string | null {
   return /^\d*\.?\d+$/.test(trimmed) && trimmed !== "." ? trimmed : null;
 }
 
+/**
+ * Why a round's values cannot be saved, or null: a number that is not one, or a running total that
+ * goes back below the one before it (the sheet would store a negative sub length).
+ */
+export function roundProblem(step: RoundStep, cells: Record<string, string>): string | null {
+  if (step.decimal) {
+    const bad = step.cols.filter((sub) => decimalText(cells[sub.col] ?? "") == null).map((sub) => `${sub.letter} ${sub.short}`);
+    if (bad.length > 0) return `${step.field}: ${bad.join(", ")} must be a number or blank.`;
+  }
+  if (!step.cumulative) return null;
+  let last = 0;
+  for (const sub of step.cols) {
+    const text = decimalText(cells[sub.col] ?? "");
+    if (text == null || text === "") continue;
+    if (Number(text) < last) return `${sub.letter} ${sub.short} total (${text}) is less than the previous total (${last}).`;
+    last = Number(text);
+  }
+  return null;
+}
+
 function cellValue(step: EntryStep, raw: string): string | null {
   switch (step.kind) {
     case "text":
       return upperText(raw);
     case "decimal":
       return decimalText(raw);
+    case "round":
+      return step.decimal ? decimalText(raw) : upperText(raw);
     case "choice":
     case "boxPin":
     case "threads":
+    case "customBuilder":
       return raw.trim();
     default: {
       const never: never = step;
@@ -60,9 +87,28 @@ export function validateEntry(family: EntryFamily, payload: EntryPayload): Entry
   for (const step of family.steps) {
     const columns = stepColumns(step);
     const values = columns.map((col) => cellValue(step, payload.cells[col] ?? ""));
-    if (step.required && values.every((value) => value === "")) {
+    const requiredValues = step.kind === "text" ? values.slice(0, 1) : values;
+    if (step.required && requiredValues.every((value) => value === "")) {
       problems.push({ stepId: step.id, message: `${step.label} is required.` });
       continue;
+    }
+    if (step.kind === "text" && step.companionChoice) {
+      const companion = step.companionChoice;
+      const value = upperText(payload.cells[companion.col] ?? "");
+      if (companion.required && value === "") {
+        problems.push({
+          stepId: step.id,
+          message: `${companion.label} is required.`,
+        });
+      } else if (
+        value !== "" &&
+        !choiceOptions(family, companion).includes(value)
+      ) {
+        problems.push({
+          stepId: step.id,
+          message: `${companion.label} must be one of ${choiceOptions(family, companion).join(", ")}.`,
+        });
+      }
     }
     if (step.kind === "decimal" && values.some((value) => value == null)) {
       problems.push({ stepId: step.id, message: `${step.label} needs a number.` });
@@ -73,18 +119,24 @@ export function validateEntry(family: EntryFamily, payload: EntryPayload): Entry
         problems.push({ stepId: step.id, message: `${step.label} must be one of ${allowed.join(", ")}.` });
       }
     }
+    if (step.kind === "customBuilder") problems.push(...customProblems(payload.cells));
+    if (step.kind === "round") {
+      const problem = roundProblem(step, payload.cells);
+      if (problem) problems.push({ stepId: step.id, message: problem });
+    }
   }
   return problems;
 }
 
 /** The entry with its text columns in capitals and its blanks dropped, ready to store. */
 export function normalizeEntry(family: EntryFamily, payload: EntryPayload): EntryPayload {
-  const cells: Record<number, string> = {};
+  const cells: Record<string, string> = {};
   for (const step of family.steps) {
     for (const col of stepColumns(step)) {
       const value = cellValue(step, payload.cells[col] ?? "");
-      if (value) cells[col] = value;
+      if (value) cells[String(col)] = value;
     }
+    if (step.kind === "customBuilder") Object.assign(cells, normalizeCustomCells(payload.cells));
   }
   return { which: family.which, cells };
 }

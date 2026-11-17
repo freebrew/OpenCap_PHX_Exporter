@@ -62,6 +62,70 @@ describe("sign-in", () => {
 
 });
 
+describe("first-run email check", () => {
+  const sent: { to: string; from: string; subject: string; text: string }[] = [];
+  const mailer = { send: async (message: { to: string; from: string; subject: string; text: string }) => { sent.push(message); return { messageId: "m1" }; } };
+  const ask = async (path: string, body: unknown, ip: string): Promise<Response> =>
+    await worker.fetch(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify(body) }), { ...env, EMAIL: mailer });
+  const lastCode = (): string => /\b(\d{6})\b/.exec(sent[sent.length - 1]?.text ?? "")?.[1] ?? "";
+
+  it("tells the person to try again, not the mail service's own words, when the mail cannot be sent", async () => {
+    const broken = { send: async () => { throw new Error("could not find account config of sending domain"); } };
+    const response = await worker.fetch(new Request("http://localhost/v1/onboard/email", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "10.0.0.9" }, body: JSON.stringify({ email: "down@example.com" }) }), { ...env, EMAIL: broken });
+    expect(response.status).toBe(502);
+    const reply = (await response.json()) as { error: string };
+    expect(reply.error).toBe("We could not send the code just now. Try again in a few minutes.");
+    expect(JSON.stringify(reply)).not.toContain("sending domain");
+  });
+
+  it("mails a code to the address and accepts it once, with no account", async () => {
+    const started = await ask("/v1/onboard/email", { email: " Crew@Example.com " }, "10.0.0.1");
+    expect(started.status).toBe(200);
+    expect(sent.at(-1)?.to).toBe("crew@example.com");
+    expect(lastCode()).toMatch(/^\d{6}$/);
+    const wrong = await ask("/v1/onboard/verify", { email: "crew@example.com", code: lastCode() === "000000" ? "111111" : "000000" }, "10.0.0.1");
+    expect(wrong.status).toBe(400);
+    const right = await ask("/v1/onboard/verify", { email: "CREW@example.com", code: ` ${lastCode()} ` }, "10.0.0.1");
+    expect(await right.json()).toEqual({ verified: true, email: "crew@example.com" });
+    const again = await ask("/v1/onboard/verify", { email: "crew@example.com", code: lastCode() }, "10.0.0.1");
+    expect(((await again.json()) as { reason: string }).reason).toBe("expired");
+  });
+
+  it("refuses something that is not an address and a code that is not six digits", async () => {
+    expect((await ask("/v1/onboard/email", { email: "not an address" }, "10.0.0.2")).status).toBe(400);
+    expect((await ask("/v1/onboard/email", { email: "a@b.co, c@d.co" }, "10.0.0.2")).status).toBe(400);
+    expect((await ask("/v1/onboard/verify", { email: "crew@example.com", code: "12ab56" }, "10.0.0.2")).status).toBe(400);
+  });
+
+  it("burns the code after five wrong tries, even for the right digits", async () => {
+    await ask("/v1/onboard/email", { email: "burn@example.com" }, "10.0.0.3");
+    const real = lastCode();
+    const wrong = real === "123456" ? "654321" : "123456";
+    for (let i = 0; i < 5; i += 1) await ask("/v1/onboard/verify", { email: "burn@example.com", code: wrong }, "10.0.0.3");
+    const late = await ask("/v1/onboard/verify", { email: "burn@example.com", code: real }, "10.0.0.3");
+    expect(((await late.json()) as { reason: string }).reason).toBe("locked");
+  });
+
+  it("stops after five codes an hour for one address", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i += 1) statuses.push((await ask("/v1/onboard/email", { email: "flood@example.com" }, `10.1.0.${i}`)).status);
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+  });
+
+  it("stops one caller who tries many addresses", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i += 1) statuses.push((await ask("/v1/onboard/email", { email: `person${i}@example.com` }, "10.9.9.9")).status);
+    expect(statuses.slice(0, 20).every((status) => status === 200)).toBe(true);
+    expect(statuses[20]).toBe(429);
+  });
+
+  it("lets the web sheet's page read the answer", async () => {
+    const origin = "https://n-abc123-0lu-script.googleusercontent.com";
+    const response = await worker.fetch(new Request("http://localhost/v1/onboard/verify", { method: "OPTIONS", headers: { origin, "access-control-request-method": "POST" } }), { ...env, EMAIL: mailer });
+    expect(response.headers.get("access-control-allow-origin")).toBe(origin);
+  });
+});
+
 describe("inventory", () => {
   it("reports no items for a job that has never been published", async () => {
     const response = await signedIn("/v1/jobs/35783/inventory");

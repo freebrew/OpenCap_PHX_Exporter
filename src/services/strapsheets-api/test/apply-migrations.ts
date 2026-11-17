@@ -39,6 +39,7 @@ const statements = [
   "CREATE TABLE allow_list (email TEXT PRIMARY KEY)",
   "CREATE TABLE send_log (id INTEGER PRIMARY KEY AUTOINCREMENT, sent_at INTEGER NOT NULL)",
   "CREATE TABLE ranges (family TEXT NOT NULL, step_id TEXT NOT NULL, min REAL, max REAL, PRIMARY KEY (family, step_id))",
+  "CREATE TABLE email_codes (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0)",
 ];
 
 await env.DB.batch(statements.map((statement) => env.DB.prepare(statement)));

@@ -7,7 +7,7 @@
 **Field workbook overview:** [docs/PHX_OpenCap_Field_Workbook_Overview.md](docs/PHX_OpenCap_Field_Workbook_Overview.md)  
 **Data Hub prospect notes:** [docs/FieldCap_Data_Hub_Prospect_Report.md](docs/FieldCap_Data_Hub_Prospect_Report.md)
 
-**Current Chrome extension revision:** `v3.2.5`
+**Current Chrome extension revision:** `v3.2.15`
 
 ---
 
@@ -30,7 +30,7 @@ Two workbooks share **one VBA codebase**:
 | Role | File | GitHub | Data |
 |------|------|--------|------|
 | **Primary (Demo)** | `Slide Sheet - Demo.xlsm` | Yes (mock / sanitized) | Fictional personnel & well data |
-| **Field mirror** | `Slide Sheet - 35781.xlsm` | **Never** | Real job data for field test |
+| **Field mirror** | `Slide Sheet - 35784.xlsm` | **Never** | Real job data for field test |
 
 **Rules**
 
@@ -47,7 +47,7 @@ powershell -NoProfile -File bas/_dual_diff_vba.ps1
 
 `Module11` mail headers (`.To` / `.CC` / `.Subject`) may differ (Demo mock vs Field real) until they are sheet-driven.
 
-When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Bind by full path if the open book is not the repo copy (e.g. `-FieldWorkbook "D:\Slide Sheet - 35781.xlsm"`). Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
+When a **live Field workbook** is the newest code source of truth, run `bas/_adopt_field_source_of_truth.ps1` (skill `adopt-field-workbook`): VBA only into Demo + `bas/`. Bind by full path if the open book is not the repo copy (e.g. `-FieldWorkbook "D:\Slide Sheet - 35784.xlsm"`). Field job data is not written. Do not run `_dual_export_caches.ps1` while Field is open (it kills Excel).
 
 **Setup sheet warning:** `RebuildSetup` / `InitSetup` clear and redraw the entire Setup tab from `MDL_Setup.bas`. Hand-tuned layout must be encoded in that module or it will be wiped.
 
@@ -123,6 +123,10 @@ BURR is what the **next aim demands**, even if the motor cannot deliver it this 
 AS = min( |BURR| / Q × C , C )
 ```
 
+`Q` (motor output) is the dogleg delivered per 30 m of **slid** hole, `C × DLS / metres seen`. The rate used here (hidden `AI`) is the **last 3 stands' `Q`, weighted by metres seen** — i.e. the dogleg the motor actually delivered per slid metre recently. It is not a longer average: when the DD changes toolface (e.g. 30–45L turn-and-build stands at `Q`≈11–12, then high side at `Q`≈3–6) a five-stand mean kept the old regime and cut the proposed metres roughly in half.
+
+**Catch-up floor (look-ahead).** BURR is the larger of (a) the waypoint arc above and (b) the dogleg that puts the **projected bit** (W / X / V) back on the plan **one course ahead**, read from the 30 m plan stations in `_OC_Survey`. (b) uses the plan INC / AZM at bit + C, plus the bit's TVD error to the plan at the bit MD spread over 3 stands (added to the target INC, capped at ±3°). It only applies while the plan is curving (> 1°/30 m over the stand) and the plan INC ahead is < 80°; tangent holds and the lateral keep the waypoint aim. AT steers to the same attitude when (b) governs. This is why the proposal now calls a full bar when the hole is behind the plan, instead of one stand after the surveys show it.
+
 AS is along-motor. A toolface off highside delivers less build per metre of hole. The **comment** metres are:
 
 ```
@@ -190,7 +194,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Slide Sheet - Demo.xlsm  (GitHub)  │  Slide Sheet - 35781.xlsm │
+│  Slide Sheet - Demo.xlsm  (GitHub)  │  Slide Sheet - 35784.xlsm │
 │  mock data · same VBA               │  real data · local only   │
 │  Setup · Slidesheet · gauges · corridor · daily report PNG      │
 └─────────────────────────────────────────────────────────────────┘
@@ -228,7 +232,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
 3. **Load unpacked** → `src/chrome-extension/`.
 4. Log into FieldCap, open the extension popup, enter Job ID, **Fetch & Build CSVs**.
 
-**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.4.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
+**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.15.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
 
 ---
 
@@ -238,7 +242,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
 PHX_FieldCap/
 ├── README.md
 ├── Slide Sheet - Demo.xlsm          ← GitHub workbook (sanitized)
-├── Slide Sheet - 35781.xlsm         ← local Field only (gitignored)
+├── Slide Sheet - 35784.xlsm         ← local Field only (gitignored)
 ├── index.html                       ← GitHub Pages showcase
 ├── bas/                             ← staged VBA + dual-sync scripts
 │   ├── MDL_*.bas / Module*.bas
@@ -250,7 +254,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.2.4
+    ├── chrome-extension/            ← Manifest V3, v3.2.15
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -258,6 +262,38 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### v3.2.15 — Spreadsheet popup theme
+
+- Popup uses the Slide Sheet colours: white page, green bands, yellow input cells, dark text. The dark background is gone so job details and status cards stay readable.
+
+### v3.2.14 — Privacy policy link
+
+- Store listing privacy URL is the policy page itself: `https://freebrew.github.io/OpenCap_PHX_Exporter/privacy.html`. The popup links there too. The project homepage is not a privacy policy.
+
+### v3.2.13 — Edge fork in the Chrome package
+
+- The same package detects Edge. On Edge, OData (including ticket costs) runs inside the open FieldCap tab so the request carries the login cookies. Chrome still fetches from the extension itself. Edge file fallback saves a flat name into Downloads, and Check for update talks to Edge Add-ons.
+
+### v3.2.12 — Ticket costs from Edge
+
+- The ticket register is kept only when a row has a date and an amount. Edge no longer stops on the first Ticket list that returns rows (attachments and comments), which was writing a header-only cost CSV.
+
+### v3.2.11 — Toolbar icon pulses for an update
+
+- While a Web Store update is waiting, the toolbar icon grows a green ring that pulses and shows an UP badge. Installing the update restores the normal icon.
+
+### v3.2.10 — Update button flashes green
+
+- When a Web Store update is ready, **Install update** in the popup footer flashes green until you install it.
+
+### v3.2.9 — Update from the popup
+
+- **Check for update** asks Chrome to query the Web Store. When a newer version is downloaded, **Install update** restarts the extension on that version. A folder-loaded copy cannot be replaced this way; the store install can.
+
+### v3.2.8 — Bottom Line Verification popup
+
+- FieldCap still opens that nag as a ui-bootstrap window (`uib-modal-window`, `#CustomModalContent`, `a.close-button`). The old suppressor required the previous body copy (bottom hole measurements, SD, TVD, and "Remind me in 10 minutes") and hid the inner box while leaving the dimmed backdrop. It now matches the title, cancels the window, and clears the backdrop.
 
 ### v3.2.4 — Chrome Web Store / Edge Chromium package
 
@@ -288,7 +324,7 @@ PHX_FieldCap/
 
 - **Daily EMAIL PNG** — EMAIL attaches a visible `daily_report.png` (plain attachment) and inlines a second CID copy under the Data table. Outlook hides CID-referenced images from the paperclip list, so the visible file is required. No daily report PDF is generated or attached. User-pinned slots (Data `I29:I33`) still attach as before.
 - **Vertical / build 3D shadow-box** — whole-well 3D plot in the style of the classic wall/floor-shadow well-path chart: full plan, all surveys from surface, dashed minimum-curvature projection to the next T2:Y5 target, target ring marker, TVD/N/E grids, wall/floor shadows, GN arrow. Replaces the traveling-cylinder bullseye, which only showed a slice around the target. Lateral keeps the geo/AA14 room. Paper theme for print.
-- **Adopt live Field** — `_adopt_field_source_of_truth.ps1` accepts a rooted path so `D:\Slide Sheet - 35781.xlsm` can be code SOT without touching job cells.
+- **Adopt live Field** — `_adopt_field_source_of_truth.ps1` accepts a rooted path so `D:\Slide Sheet - 35782.xlsm` can be code SOT without touching job cells.
 
 ### Slide Sheet — 2026-08-28
 
@@ -344,6 +380,28 @@ See git history for v3.1.4–v2.5 (popup layout, BLV suppression, inventory expo
 - Web spreadsheet / office integration and real-time sync
 - Template engine for daily / BHA / tool reports
 - Field → office pipeline and equipment lifecycle tracking
+- StrapSheets merge: shared TypeScript core, Cloudflare Workers API, Capacitor Android app (iOS-ready), Google / Microsoft / email-pairing sign-in, FieldCap inventory relayed by the Chrome extension (FieldCap optional — manual entry stays as deployed). Tracked in `todo.md`.
+
+### Play Store release provision — Gmail restricted scope
+
+"Send from my Google account" in StrapSheets uses the Gmail API `gmail.send` scope, which Google classes as **restricted**. Development, internal and test use (up to 100 test users, behind Google's "unverified app" screen) need no review. A **public Play Store listing** that offers this option to all Google users requires Google OAuth app verification plus the third-party security assessment (CASA) before Google lifts the test-user cap. Until that review passes, the app offers Google users the service mailbox (sent from a verified StrapSheets address with `Reply-To` the user) and the device mail app (share sheet). Microsoft Graph `Mail.Send` needs no review. This is a release task tracked in `todo.md`, not a code dependency.
+
+---
+
+## Browser Workbook
+
+The Chrome preview imports the sanitized Demo `.xlsm` into a Univer sheet, recalculates supported Excel formulas, and stores a versioned `.phx.json` snapshot in a job folder you pick. Directional functions (toolface, minimum curvature, slide length, motor yield, target aim, and the TD block) calculate in the formula worker. Well tools draw the day's corridor picture and proximity gauge, clear slide ranges, write a target or DL tracker row, clip a day's slide metres, build a morning report and `.eml`, export an `.xlsx` of values, and poll FieldCap read-only when that site is open.
+
+The Excel workbook stays the editable authority until you check every item under "Make this snapshot the job record." That switch does not modify the `.xlsm`. The FieldCap exporter in `src/chrome-extension/` is still there.
+
+Load the unpacked preview from `src/extension/dist` after `pnpm build:ext`:
+
+1. Open `chrome://extensions`.
+2. Turn on Developer mode.
+3. Choose Load unpacked and select `src/extension/dist`.
+4. Click the toolbar icon. Add a job folder, then continue the import only when the summary looks right.
+
+`.phx.json` files from this phase are disposable evaluation snapshots. Do not treat them as the well record. The existing FieldCap exporter in `src/chrome-extension/` is unchanged.
 
 ---
 

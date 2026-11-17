@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARD_ART } from "../src/art.gen";
 import { PRINT_CARDS } from "../src/cards.gen";
-import { ENTRY_FAMILIES, renderCards, stepColumns, type EntryPayload } from "../src/index";
+import { ENTRY_FAMILIES, renderCards, serialStep, stepColumns, type EntryPayload } from "../src/index";
 import { textWidth, wrapText } from "../src/helvetica";
 
 const MOTOR: EntryPayload = {
@@ -10,6 +10,7 @@ const MOTOR: EntryPayload = {
     2: "PHX-725047", 3: "Steel", 4: "BOX", 5: "PIN", 6: "4 1/2 IF [NC 50]", 7: "4 1/2 REG",
     8: "0.23", 9: "0.56", 10: "0.71", 11: "1.37", 12: "2.03", 13: "2.02", 14: "9.4",
     15: "10.17", 16: "172", 17: "184", 18: "205", 19: "184", 20: "178", 21: "169", 22: "168", 23: "1.83",
+    186: "177", bendHousing: "ADJ",
   },
 };
 
@@ -26,10 +27,10 @@ const images = (pdf: Uint8Array) => text(pdf).split("/Subtype /Image").length - 
 describe("the strap card layout", () => {
   it("draws the Sheets card: serial, connections and the lettered measures with the family title", () => {
     const drawn = strings(renderCards([MOTOR]));
-    for (const label of ["Serial", "Material", "TOP", "BTM", "A", "B", "C", "D", "E", "F", "G", "BEND", "H LEN", "I OD", "J OD", "K OD", "L OD", "M OD", "N OD", "O OD"]) {
+    for (const label of ["Serial", "Material", "TOP", "BTM", "A", "B", "C", "D", "E", "F", "G", "BEND", "H LEN", "I OD", "J OD", "K OD", "L OD", "M OD", "N OD", "O OD", "P OD"]) {
       expect(drawn, label).toContain(label);
     }
-    for (const value of ["PHX-725047", "Steel", "0.23", "9.4", "1.83", "10.17", "172", "168"]) expect(drawn, value).toContain(value);
+    for (const value of ["PHX-725047", "Steel", "0.23", "9.4", "1.83", "10.17", "172", "177", "168"]) expect(drawn, value).toContain(value);
     expect(drawn).toContain("MOTORS");
   });
 
@@ -94,18 +95,21 @@ describe("the strap card layout", () => {
     expect(drawn.filter((line) => line === "RING")).toHaveLength(2);
   });
 
-  it("starts a new page when the cards run past the bottom, keeping the title for the last", () => {
+  it("starts a new page when the cards run past the bottom and prints the family title at the bottom border of each sheet", () => {
     const many = Array.from({ length: 30 }, (_, index) => ({ ...MOTOR, cells: { ...MOTOR.cells, 2: `PHX-${index}` } }));
     const pdf = renderCards(many);
     expect(pageCount(pdf)).toBeGreaterThan(1);
-    expect(strings(pdf).filter((line) => line === "MOTORS")).toHaveLength(1);
+    expect(strings(pdf).filter((line) => line === "MOTORS")).toHaveLength(pageCount(pdf));
+    const ys = [...text(pdf).matchAll(/(\d+(?:\.\d+)?) (\d+(?:\.\d+)?) Td \(MOTORS\) Tj/g)].map((m) => Number(m[2]));
+    expect(ys.length).toBe(pageCount(pdf));
+    for (const y of ys) expect(y).toBeLessThan(40);
     for (let index = 0; index < 30; index++) expect(strings(pdf)).toContain(`PHX-${index}`);
   });
 
   it("renders every family of the wizard and ends it with that family's title", () => {
     for (const family of ENTRY_FAMILIES) {
-      const serial = family.steps[0];
-      if (serial?.kind !== "text") throw new Error("a family opens with its serial");
+      const serial = serialStep(family);
+      if (serial?.kind !== "text") throw new Error("a family has its serial");
       const entry: EntryPayload = { which: family.which, cells: { [serial.col]: "SER-1" } };
       for (const step of family.steps) if (step.kind === "choice" && step.optionsKey === "subTypeOptions") entry.cells[step.col] = "Float";
       const pdf = renderCards([entry]);
@@ -130,11 +134,30 @@ describe("the strap card layout", () => {
     const odd = renderCards([{ which: "Mystery Tool", cells: { 2: "ODD-1" } }]);
     expect(strings(odd)).toContain("ODD-1");
   });
+
+  it("uses a larger font size for all fields except Serial and TOP/BTM threads", () => {
+    const floatSub: EntryPayload = {
+      which: "Subs",
+      cells: { 90: "SUB-1", 91: "Steel", 92: "BOX", 93: "PIN", 94: "4 1/2 IF [NC 50]", 95: "4 1/2 REG", 96: "Float", 97: "0.82", 98: "6.50", 99: "6.25", 100: "2.25", 101: "0.15" },
+    };
+    const source = text(renderCards([floatSub]));
+    const sizeOf = (val: string) => Number(new RegExp(`/F2 (\\d+(?:\\.\\d+)?) Tf [^\\n]*\\(${val.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\) Tj`).exec(source)?.[1]);
+    expect(sizeOf("0.82")).toBeGreaterThan(sizeOf("SUB-1"));
+    expect(sizeOf("Steel")).toBe(sizeOf("0.82"));
+    expect(sizeOf("Float")).toBe(sizeOf("0.82"));
+    expect(sizeOf("6.50")).toBe(sizeOf("0.82"));
+    expect(sizeOf("6.25")).toBe(sizeOf("0.82"));
+    expect(sizeOf("2.25")).toBe(sizeOf("0.82"));
+    expect(sizeOf("0.15")).toBe(sizeOf("0.82"));
+    expect(sizeOf("BOX 4 1/2")).toBe(sizeOf("SUB-1"));
+    expect(sizeOf("PIN 4 1/2")).toBe(sizeOf("SUB-1"));
+  });
 });
 
 describe("the generated card tables", () => {
   it("print every wizard family and have a drawing for each", () => {
     for (const family of ENTRY_FAMILIES) {
+      if (family.which === "Custom") continue;
       expect(PRINT_CARDS.some((card) => card.which === family.which), family.which).toBe(true);
       expect(CARD_ART[family.which], family.which).toBeDefined();
     }
@@ -144,6 +167,8 @@ describe("the generated card tables", () => {
     for (const card of PRINT_CARDS) {
       const family = ENTRY_FAMILIES.find((candidate) => candidate.which === card.which);
       expect(family, card.name).toBeDefined();
+      // The MWD card reads the sheet's row, which mwdCardEntry builds from the named cells (mwd.test.ts).
+      if (card.which === "MWD Carrier") continue;
       const written = new Set(family?.steps.flatMap(stepColumns));
       for (const field of card.fields) {
         for (const column of field.slice(2)) expect(written.has(column), `${card.name} column ${column}`).toBe(true);

@@ -8,14 +8,14 @@ const CODE_MINUTES = 15;
 const MAX_CODES_PER_HOUR = 5;
 
 /**
- * One limiter per email address. It counts how many codes that address has been sent in the last
- * hour, so a script cannot flood an inbox.
+ * One limiter per name (an email address, or a caller's address for the first-run check). It
+ * counts how many codes that name has been sent in the hour, so a script cannot flood an inbox.
  */
 export class PairingLimiter extends DurableObject<Env> {
-  async allow(): Promise<boolean> {
+  async allow(cap: number = MAX_CODES_PER_HOUR): Promise<boolean> {
     const hour = Math.floor(Date.now() / 3_600_000);
     const count = (await this.ctx.storage.get<number>(`h${hour}`)) ?? 0;
-    if (count >= MAX_CODES_PER_HOUR) return false;
+    if (count >= cap) return false;
     await this.ctx.storage.put(`h${hour}`, count + 1);
     return true;
   }
@@ -73,7 +73,7 @@ async function confirmPairing(env: Env, userId: string, email: string): Promise<
   ]);
 }
 
-async function hashCode(code: string): Promise<string> {
+export async function hashCode(code: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
