@@ -33,7 +33,7 @@ export const BULGE: Partial<Record<MarkKind, BulgeSpec>> = {
   bitBox: { w: 86, half: BODY_HALF, taper: 16 },
   bentHousing: { w: 104, half: 22, taper: 10 },
 };
-/** The bent housing kinks by this many degrees at its middle joint. */
+/** The bent housing kinks by this many degrees at its middle joint: none, the bend shows as the stepped lower housing. */
 export const BEND_DEG = 0;
 export const PIN_W = 28;
 export const PIN_TIP = 8;
@@ -173,6 +173,31 @@ export function bulgePolygon(x: number, spec: BulgeSpec): [number, number][] {
   ];
 }
 
+/** Where the bent housing's joints sit from its centre: upper housing, sleeve, lower housing. */
+export const BENT_JOINTS = [-16, 0, 16] as const;
+
+/**
+ * The bent housing after the Motor drawing: the top ramps up to the pad as any wider section does,
+ * but the bottom keeps the tube's own edge as far as the middle joint, then steps down to the pad
+ * along the lower housing and ramps back at its toe.
+ */
+export function bentHousingPolygon(x: number): [number, number][] {
+  const spec = BULGE.bentHousing as BulgeSpec;
+  const left = x - spec.w / 2;
+  const right = x + spec.w / 2;
+  return [
+    [left, TUBE_CY - BODY_HALF],
+    [left + spec.taper, TUBE_CY - spec.half],
+    [right - spec.taper, TUBE_CY - spec.half],
+    [right, TUBE_CY - BODY_HALF],
+    [right, TUBE_CY + BODY_HALF],
+    [right - spec.taper, TUBE_CY + spec.half],
+    [x, TUBE_CY + spec.half],
+    [x, TUBE_CY + BODY_HALF],
+    [left, TUBE_CY + BODY_HALF],
+  ];
+}
+
 /** Where the bit box sits: against the lower (left) end of the body. */
 export function bitBoxX(marks: Mark[]): number {
   const layout = tubeLayout(marks);
@@ -195,6 +220,20 @@ export function featureHalfAt(xn: number, marks: Mark[]): number {
     const bulge = BULGE[mark.kind];
     if (!bulge) continue;
     half = Math.max(half, bulgeHalfAt((xn - mark.x) * layout.bodyW, bulge));
+  }
+  return half;
+}
+
+/** The outer radius below the centre line. It differs from featureHalfAt only on a bent housing's upper housing. */
+export function featureLowerHalfAt(xn: number, marks: Mark[]): number {
+  const layout = tubeLayout(marks);
+  let half = bodyHalfAt(xn, marks);
+  for (const mark of marks) {
+    const bulge = BULGE[mark.kind];
+    if (!bulge) continue;
+    const offset = (xn - mark.x) * layout.bodyW;
+    if (mark.kind === "bentHousing" && offset < 0) continue;
+    half = Math.max(half, bulgeHalfAt(offset, bulge));
   }
   return half;
 }
@@ -433,7 +472,7 @@ export function stationTop(mark: Mark, marks: Mark[]): number {
 }
 
 export function stationBottom(mark: Mark, marks: Mark[]): number {
-  return TUBE_CY + featureHalfAt(mark.x, marks) + STATION_GAP;
+  return TUBE_CY + featureLowerHalfAt(mark.x, marks) + STATION_GAP;
 }
 
 /**
@@ -450,7 +489,7 @@ export function pickMark(px: number, py: number, marks: Mark[]): string {
     const flagDistance = Math.hypot(px - flag.x, py - flag.y);
     let score = flagDistance <= reach ? flagDistance : Infinity;
     const across = Math.abs(px - stem);
-    if (mark.kind === "length" && across <= 14 && py >= LENGTH_KNEE_Y && py <= TUBE_CY + featureHalfAt(mark.x, marks)) score = Math.min(score, reach + across);
+    if (mark.kind === "length" && across <= 14 && py >= LENGTH_KNEE_Y && py <= TUBE_CY + featureLowerHalfAt(mark.x, marks)) score = Math.min(score, reach + across);
     if (mark.kind === "od" && across <= 14 && py >= stationBottom(mark, marks) - STATION_GAP && py <= OD_KNEE_Y) score = Math.min(score, reach + across);
     const body = Math.hypot(px - stem, py - TUBE_CY);
     if (mark.kind !== "length" && mark.kind !== "od" && across <= 24 && Math.abs(py - TUBE_CY) <= 30) score = Math.min(score, 2 * reach + body);
