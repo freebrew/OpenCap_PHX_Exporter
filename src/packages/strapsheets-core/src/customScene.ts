@@ -4,6 +4,7 @@
 import type { VectorItem, VectorOp } from "./cardSpec";
 import type { EndConfig, Mark } from "./custom";
 import {
+  BENT_JOINTS,
   BODY_HALF,
   BUILDER_W,
   BULGE,
@@ -19,10 +20,12 @@ import {
   SEAM_W,
   SPIRAL_HALF,
   TUBE_CY,
+  bentHousingPolygon,
   bodyHalfAt,
   borePolygon,
   bulgePolygon,
   featureHalfAt,
+  featureLowerHalfAt,
   flagPoint,
   flagRadius,
   flagRow,
@@ -39,8 +42,6 @@ import {
 export const INK = "#243038";
 export const NAVY = "#1f3b5b";
 export const BLUE = "#1a73e8";
-/** Neutral grey for a spiral's hatch: the tool's own drawing carries no colour. */
-export const HATCH = "#555555";
 /** The tube's fill. The phone paints a steel gradient; the PDF uses this flat tone. */
 export const STEEL = "steel";
 export const STEEL_FLAT = "#d5e0ec";
@@ -119,12 +120,12 @@ function pinThreads(mark: Mark, marks: Mark[], ink = INK): Prim[] {
   return prims;
 }
 
-/** A spiral: wider than the tube and tapering to the tube's own diameter at both ends. Plain neutral hatch, no colour. */
-function spiral(x: number): Prim[] {
+/** A spiral: wider than the tube and tapering to the tube's own diameter at both ends. The tube's steel, hatched in the tube's ink. */
+function spiral(x: number, ink: string): Prim[] {
   const outline = spiralPolygon(x);
-  const prims: Prim[] = [{ t: "poly", pts: outline, fill: "#ffffff", stroke: "none", w: 0 }];
-  for (const line of hatchLines(outline, 18)) prims.push({ t: "line", ...line, stroke: HATCH, w: 1.4 });
-  prims.push({ t: "poly", pts: outline, fill: "none", stroke: INK, w: 1.8 });
+  const prims: Prim[] = [{ t: "poly", pts: outline, fill: STEEL, stroke: "none", w: 0 }];
+  for (const line of hatchLines(outline, 18)) prims.push({ t: "line", ...line, stroke: ink, w: 1.4 });
+  prims.push({ t: "poly", pts: outline, fill: "none", stroke: ink, w: 1.8 });
   return prims;
 }
 /** Seam section: two seam lines across the tube, the outer diameter unchanged. */
@@ -162,22 +163,24 @@ function bitBox(x: number): Prim[] {
   return prims;
 }
 
+/** Alignment ticks of the bent housing, from the centre line: high on the upper housing, low on the sleeve. */
+export const BENT_UPPER_TICKS = [-9, -4.5, 0, 4.5] as const;
+export const BENT_LOWER_TICKS = [5, 9.5, 14, 18.5] as const;
+
 /**
- * Adjustable bent housing, drawn straight (the bend is the set angle, not a kink in the picture):
- * upper and lower housing meeting at the joint, a scribe line running across it, and two staggered
- * ladders of alignment ticks either side, as stamped on the housing and orientation sleeve.
+ * Adjustable bent housing after the Motor drawing: three joints across the tube, a ladder of
+ * alignment ticks high between the first two and another low between the last two, and the lower
+ * housing stepped down below the tube from the middle joint on.
  */
-function bentHousing(x: number): Prim[] {
+function bentHousing(x: number, ink: string): Prim[] {
   const spec = BULGE.bentHousing as NonNullable<(typeof BULGE)["bentHousing"]>;
-  const outline = bulgePolygon(x, spec);
   const cy = TUBE_CY;
-  const prims: Prim[] = [
-    { t: "poly", pts: outline, fill: STEEL, stroke: INK, w: 1.8 },
-    { t: "line", x1: x, y1: cy - spec.half, x2: x, y2: cy + spec.half, stroke: INK, w: 1.6 },
-  ];
-  for (const dy of [-16, -8, 8, 16]) prims.push({ t: "line", x1: x - 3 - 16, y1: cy + dy, x2: x - 3, y2: cy + dy, stroke: INK, w: 1.2 });
-  for (const dy of [-12, -4, 4, 12]) prims.push({ t: "line", x1: x + 3, y1: cy + dy, x2: x + 3 + 16, y2: cy + dy, stroke: INK, w: 1.2 });
-  prims.push({ t: "line", x1: x - 38, y1: cy, x2: x + 38, y2: cy, stroke: INK, w: 1.8 });
+  const [first, middle, last] = BENT_JOINTS;
+  const prims: Prim[] = [{ t: "poly", pts: bentHousingPolygon(x), fill: STEEL, stroke: ink, w: 1.8 }];
+  prims.push({ t: "line", x1: x + first, y1: cy - spec.half, x2: x + first, y2: cy + BODY_HALF, stroke: ink, w: 1.6 });
+  for (const joint of [middle, last]) prims.push({ t: "line", x1: x + joint, y1: cy - spec.half, x2: x + joint, y2: cy + spec.half, stroke: ink, w: 1.6 });
+  for (const dy of BENT_UPPER_TICKS) prims.push({ t: "line", x1: x + first, y1: cy + dy, x2: x + middle, y2: cy + dy, stroke: ink, w: 1.2 });
+  for (const dy of BENT_LOWER_TICKS) prims.push({ t: "line", x1: x + middle, y1: cy + dy, x2: x + last, y2: cy + dy, stroke: ink, w: 1.2 });
   return prims;
 }
 function panels(x: number, half: number, color: string): Prim[] {
@@ -194,12 +197,13 @@ function panels(x: number, half: number, color: string): Prim[] {
  */
 function lengthStation(x: number, mark: Mark, marks: Mark[], color: string, touch: boolean): Prim[] {
   const half = featureHalfAt(mark.x, marks);
+  const lower = featureLowerHalfAt(mark.x, marks);
   const top = stationTop(mark, marks);
   const flagX = flagPoint(mark, marks, touch).x;
   return [
-    { t: "line", x1: x, y1: TUBE_CY - half, x2: x, y2: TUBE_CY + half, stroke: color, w: 2.4 },
+    { t: "line", x1: x, y1: TUBE_CY - half, x2: x, y2: TUBE_CY + lower, stroke: color, w: 2.4 },
     { t: "line", x1: x - 7, y1: TUBE_CY - half, x2: x + 7, y2: TUBE_CY - half, stroke: color, w: 2.4 },
-    { t: "line", x1: x - 7, y1: TUBE_CY + half, x2: x + 7, y2: TUBE_CY + half, stroke: color, w: 2.4 },
+    { t: "line", x1: x - 7, y1: TUBE_CY + lower, x2: x + 7, y2: TUBE_CY + lower, stroke: color, w: 2.4 },
     { t: "line", x1: x, y1: top, x2: x, y2: LENGTH_KNEE_Y, stroke: color, w: 2.4 },
     { t: "line", x1: x, y1: LENGTH_KNEE_Y, x2: flagX, y2: lengthFlagY(touch) + flagRadius(mark.kind, touch), stroke: color, w: 2.4 },
   ];
@@ -310,11 +314,11 @@ export function customScene(marks: Mark[], selected = "", touch = false, ends?: 
   for (const mark of drawn) {
     const x = stemPx(mark, shaped);
     const color = mark.letter === selected ? palette.select : palette.navy;
-    if (mark.kind === "spiral") prims.push(...spiral(x));
+    if (mark.kind === "spiral") prims.push(...spiral(x, palette.ink));
     else if (mark.kind === "panels") prims.push(...panels(x, bodyHalfAt(mark.x, drawn), color));
     else if (mark.kind === "seam") prims.push(...seam(x, bodyHalfAt(mark.x, drawn), color));
     else if (mark.kind === "bitBox") prims.push(...bitBox(x));
-    else if (mark.kind === "bentHousing") prims.push(...bentHousing(x));
+    else if (mark.kind === "bentHousing") prims.push(...bentHousing(x, palette.ink));
   }
   for (const mark of drawn) {
     const x = stemPx(mark, shaped);

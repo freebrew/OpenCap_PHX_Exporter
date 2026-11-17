@@ -24,8 +24,9 @@ import {
   setMarkLength,
   type Mark,
 } from "../src/custom";
-import { BIT_HEAD, BLUE, HATCH, INK, NAVY, customScene, sceneBounds } from "../src/customScene";
+import { BENT_LOWER_TICKS, BENT_UPPER_TICKS, BIT_HEAD, BLUE, INK, LIGHT_PALETTE, NAVY, customScene, sceneBounds } from "../src/customScene";
 import {
+  BENT_JOINTS,
   BODY_HALF,
   BUILDER_H,
   BUILDER_W,
@@ -44,8 +45,10 @@ import {
   TUBE_CY,
   TUBE_W,
   TUBE_X,
+  bentHousingPolygon,
   dragX,
   featureHalfAt,
+  featureLowerHalfAt,
   flagPoint,
   lengthFlagY,
   lengthSpots,
@@ -209,8 +212,13 @@ describe("custom marks", () => {
     const centre = stemPx(spiral[0] as Mark, spiral);
     expect(Math.min(...toes.map((point) => point[0]))).toBeCloseTo(centre - SPIRAL_W / 2, 9);
     expect(Math.min(...shoulders.map((point) => point[0]))).toBeCloseTo(centre - SPIRAL_W / 2 + SPIRAL_TAPER, 9);
-    const hatch = scene.filter((prim) => prim.t === "line" && prim.stroke === HATCH);
+    expect(scene.some((prim) => prim.t === "poly" && prim.fill === "steel" && prim.pts.length === 8)).toBe(true);
+    const hatch = scene.filter((prim) => prim.t === "line" && prim.stroke === INK && prim.w === 1.4);
     expect(hatch.length).toBeGreaterThan(4);
+    const dark = { ...LIGHT_PALETTE, ink: "var(--dg-ink)" };
+    const themed = customScene(spiral, "", false, undefined, dark).filter((prim) => prim.t === "line" && prim.w === 1.4);
+    expect(themed.length).toBe(hatch.length);
+    expect(themed.every((prim) => prim.t === "line" && prim.stroke === "var(--dg-ink)")).toBe(true);
     for (const prim of hatch) {
       if (prim.t !== "line") continue;
       for (const [x, y] of [[prim.x1, prim.y1], [prim.x2, prim.y2]] as const) {
@@ -480,4 +488,41 @@ describe("custom marks", () => {
     expect(captions.every((prim) => prim.t === "text" && prim.y < 40)).toBe(true);
     expect(scene.filter((prim) => prim.t === "poly" && prim.pts.length === 3).length).toBeGreaterThanOrEqual(2);
     expect(sceneBounds([], ends).y).toBe(0);
-  });});
+  });
+
+  it("draws the Bent Housing after the Motor drawing: three joints, staggered ladders, the lower housing stepped down", () => {
+    const marks: Mark[] = [{ letter: "A", kind: "bentHousing", x: 0.5, value: "" }];
+    const x = stemPx(marks[0] as Mark, marks);
+    const outline = bentHousingPolygon(x);
+    const bottomAt = (px: number) => Math.max(...outline.filter(([ox]) => Math.abs(ox - px) < 0.01).map(([, oy]) => oy));
+    expect(Math.min(...outline.map(([, oy]) => oy))).toBe(TUBE_CY - 22);
+    expect(bottomAt(x - 52)).toBe(TUBE_CY + BODY_HALF);
+    expect(bottomAt(x)).toBe(TUBE_CY + 22);
+    const lines = customScene(marks).filter((prim) => prim.t === "line");
+    const joints = lines.filter((prim) => prim.t === "line" && prim.x1 === prim.x2).map((prim) => prim.t === "line" && [prim.x1 - x, prim.y2 - TUBE_CY]);
+    expect(joints).toEqual([[BENT_JOINTS[0], BODY_HALF], [BENT_JOINTS[1], 22], [BENT_JOINTS[2], 22]]);
+    const ticks = lines.filter((prim) => prim.t === "line" && prim.y1 === prim.y2);
+    const upper = ticks.filter((prim) => prim.t === "line" && prim.x1 === x + BENT_JOINTS[0]).map((prim) => prim.t === "line" && prim.y1 - TUBE_CY);
+    const lower = ticks.filter((prim) => prim.t === "line" && prim.x1 === x + BENT_JOINTS[1]).map((prim) => prim.t === "line" && prim.y1 - TUBE_CY);
+    expect(upper).toEqual([...BENT_UPPER_TICKS]);
+    expect(lower).toEqual([...BENT_LOWER_TICKS]);
+    expect(Math.max(...lower.map(Number))).toBeLessThan(22);
+    expect(Math.min(...lower.map(Number))).toBeGreaterThan(Math.min(...upper.map(Number)));
+    expect(lines.every((prim) => prim.t === "line" && prim.stroke === INK)).toBe(true);
+    const themed = customScene(marks, "", false, undefined, { ...LIGHT_PALETTE, ink: "var(--dg-ink)" }).filter((prim) => prim.t === "line");
+    expect(themed.every((prim) => prim.t === "line" && prim.stroke === "var(--dg-ink)")).toBe(true);
+  });
+
+  it("stops a Length line and an OD arrow from below on the Bent Housing's stepped edge", () => {
+    const housing: Mark = { letter: "A", kind: "bentHousing", x: 0.5, value: "" };
+    const bodyW = tubeLayout([housing]).bodyW;
+    const upperHousing = 0.5 - 30 / bodyW;
+    const lowerHousing = 0.5 + 30 / bodyW;
+    expect(featureHalfAt(upperHousing, [housing])).toBe(22);
+    expect(featureLowerHalfAt(upperHousing, [housing])).toBe(BODY_HALF);
+    expect(featureLowerHalfAt(lowerHousing, [housing])).toBe(22);
+    const od: Mark = { letter: "B", kind: "od", x: upperHousing, value: "" };
+    const arrow = customScene([housing, od]).find((prim) => prim.t === "poly" && prim.pts.length === 3 && (prim.pts[0] as [number, number])[1] > TUBE_CY);
+    expect(arrow && arrow.t === "poly" && (arrow.pts[0] as [number, number])[1]).toBe(TUBE_CY + BODY_HALF + STATION_GAP);
+  });
+});
