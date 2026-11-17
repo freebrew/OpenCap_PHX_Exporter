@@ -133,3 +133,30 @@ docs/corridor_live.png
 
 # Segment pictures rendered from Field job data
 docs/corridor_segments/500m/
+docs/corridor_segments/
+docs/corridor_frame_fix_check.png
+
+# Real job files dropped in the root (well plans, AC reports, surveys, tallies, job sheets).
+# This repo is public: they stay local.
+TEL HZ *.pdf
+* Slide Sheet.xlsx
+Slide Sheet - *.xlsm
+!Slide Sheet - Demo.xlsm
+Daily Surveys Update.xlsx
+PIPETALLY_EXPORT*.csv
+Well Seeker Report*.txt
+Continuous DI BHA*.xls
+todo.md
+
+# Third-party program kept for reference, not ours to publish
+SharpShooter Gold demo/
+
+# Scratch probes that read real job files from the Desktop or the root
+src/packages/dd-math/test/tmp*.test.ts
+src/packages/dd-math/test/crystal-browser-*
+src/extension/e2e/tmp-*.spec.ts
+src/extension/e2e/crystal-import.spec.ts
+
+# Older packaged extension zips (keep latest only in git)
+dist/OpenCap_DataExporter_v3.2.[89].zip
+dist/OpenCap_DataExporter_v3.2.1[0-4].zip

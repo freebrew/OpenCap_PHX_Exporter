@@ -1626,6 +1626,32 @@ const buildSlideRotateMetresByDayCsvFromActivities = (rows, jobId) => {
   return buildCsvString(SLIDE_DAY_COLUMNS, outRows);
 };
 
+// Later layers replace a day only for the Date + BHA they actually carry. The
+// page scrape holds just the day on screen, so letting it replace the whole
+// file dropped every earlier day.
+const mergeSlideByDayCsvs = (layers) => {
+  const byKey = new Map();
+  let header = "";
+  for (const { source, csv } of layers) {
+    const lines = String(csv ?? "").split("\r\n").filter((ln) => ln.length > 0);
+    if (lines.length < 2) continue;
+    header = header || lines[0];
+    for (const line of lines.slice(1)) {
+      const cols = line.split(",");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cols[1] ?? "")) continue;
+      byKey.set(`${cols[1]}|${cols[2]}`, { source, line });
+    }
+  }
+  const keys = [...byKey.keys()].sort((a, b) => {
+    const [da, ba] = a.split("|");
+    const [db, bb] = b.split("|");
+    return da.localeCompare(db) || ba.localeCompare(bb, undefined, { numeric: true });
+  });
+  const winners = new Map(keys.map((k) => [k, byKey.get(k).source]));
+  const csv = keys.length ? [header, ...keys.map((k) => byKey.get(k).line)].join("\r\n") : "";
+  return { csv, rowCount: keys.length, winners };
+};
+
 const ACTIVITY_LOG_DETAIL_COLUMNS = [
   "Job ID", "Source", "Builds By-Day File", "Date", "BHA #", "Start", "End",
   "Elapsed Hours", "Counted Hours", "Counted As", "Activity Type", "Activity / Code",
@@ -1660,7 +1686,7 @@ const activityRowDetail = (source, row) => {
 
 // One row per FieldCap activity the exporter saw, and how it was counted, so a
 // day whose slide hours look wrong can be traced to the entry that caused it.
-const buildActivityLogDetailCsv = (jobId, logDetail, odataRows, scrapeRows, byDaySource) => {
+const buildActivityLogDetailCsv = (jobId, logDetail, odataRows, scrapeRows, dayWinners) => {
   const rows = [
     ...(logDetail ?? []),
     ...(odataRows ?? []).map((r) => activityRowDetail("JobActivities", r)),
@@ -1670,7 +1696,7 @@ const buildActivityLogDetailCsv = (jobId, logDetail, odataRows, scrapeRows, byDa
   const out = rows.map((r) => ({
     "Job ID": jobId,
     "Source": r.source,
-    "Builds By-Day File": r.source === byDaySource ? "yes" : "",
+    "Builds By-Day File": dayWinners.get(`${r.day}|${r.bha}`) === r.source ? "yes" : "",
     "Date": r.day,
     "BHA #": r.bha,
     "Start": r.start,
@@ -2919,21 +2945,16 @@ const fetchAll = async (
     } catch (_) {
       activityLogMap = {};
     }
-    let byDaySource = slideByDayRowCount > 0 ? "ActivityLogs" : "";
-    const odataDayCsv = buildSlideRotateMetresByDayCsvFromActivities(odataActivityRows, jobId);
-    const scrapeDayCsv = buildSlideRotateMetresByDayCsvFromActivities(liveActivityRows, jobId);
-    const odataDayLines = odataDayCsv.split("\r\n").filter((ln) => ln.length > 0);
-    const scrapeDayLines = scrapeDayCsv.split("\r\n").filter((ln) => ln.length > 0);
-    if (odataDayLines.length > 1) {
-      slideByDayCsv = odataDayCsv;
-      slideByDayRowCount = odataDayLines.length - 1;
-      byDaySource = "JobActivities";
-    } else if (scrapeDayLines.length > 1) {
-      slideByDayCsv = scrapeDayCsv;
-      slideByDayRowCount = scrapeDayLines.length - 1;
-      byDaySource = "Page scrape";
+    const merged = mergeSlideByDayCsvs([
+      { source: "ActivityLogs", csv: slideByDayCsv },
+      { source: "JobActivities", csv: buildSlideRotateMetresByDayCsvFromActivities(odataActivityRows, jobId) },
+      { source: "Page scrape", csv: buildSlideRotateMetresByDayCsvFromActivities(liveActivityRows, jobId) },
+    ]);
+    if (merged.rowCount > 0) {
+      slideByDayCsv = merged.csv;
+      slideByDayRowCount = merged.rowCount;
     }
-    results.activityLogCsv = buildActivityLogDetailCsv(jobId, logDetail, odataActivityRows, liveActivityRows, byDaySource);
+    results.activityLogCsv = buildActivityLogDetailCsv(jobId, logDetail, odataActivityRows, liveActivityRows, merged.winners);
     const interceptedMap = stored[KEY_INTERCEPT] ?? {};
     const bhaGridRowsByJob = stored[KEY_BHA_GRID] ?? {};
     const cachedBhaGridMap = bhaGridRowsByJob[String(jobId)] ?? {};

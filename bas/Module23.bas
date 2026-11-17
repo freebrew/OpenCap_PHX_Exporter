@@ -96,10 +96,16 @@ Public Sub RefreshData()
         Exit Sub
     End If
 
+    ' The active sheet can be a chart, or in another workbook; only a sheet of
+    ' this workbook is returned to afterwards.
     Dim prevSheet As Worksheet
     Dim prevCellAddr As String
-    Set prevSheet = ActiveSheet
-    prevCellAddr = ActiveCell.Address(False, False)
+    If TypeOf ActiveSheet Is Worksheet Then
+        If ActiveSheet.Parent Is ThisWorkbook Then
+            Set prevSheet = ActiveSheet
+            prevCellAddr = ActiveCell.Address(False, False)
+        End If
+    End If
 
     ' Freeze the screen for the WHOLE refresh.  The nested routines below use the
     ' same reference-counted guard, so none of them can thaw the screen early
@@ -172,8 +178,10 @@ Public Sub RefreshData()
     On Error GoTo ErrHandler
 
     On Error Resume Next
-    prevSheet.Activate
-    prevSheet.Range(prevCellAddr).Select
+    If Not prevSheet Is Nothing Then
+        prevSheet.Activate
+        prevSheet.Range(prevCellAddr).Select
+    End If
     On Error GoTo 0
 
     ScreenEndBusy
@@ -207,10 +215,16 @@ Public Sub RebuildDashboard()
         Exit Sub
     End If
 
+    ' The active sheet can be a chart, or in another workbook; only a sheet of
+    ' this workbook is returned to afterwards.
     Dim prevSheet As Worksheet
     Dim prevCellAddr As String
-    Set prevSheet = ActiveSheet
-    prevCellAddr = ActiveCell.Address(False, False)
+    If TypeOf ActiveSheet Is Worksheet Then
+        If ActiveSheet.Parent Is ThisWorkbook Then
+            Set prevSheet = ActiveSheet
+            prevCellAddr = ActiveCell.Address(False, False)
+        End If
+    End If
 
     ScreenBeginBusy "DD Tools: rebuilding..."
 
@@ -218,8 +232,10 @@ Public Sub RebuildDashboard()
     BuildUI
 
     On Error Resume Next
-    prevSheet.Activate
-    prevSheet.Range(prevCellAddr).Select
+    If Not prevSheet Is Nothing Then
+        prevSheet.Activate
+        prevSheet.Range(prevCellAddr).Select
+    End If
     On Error GoTo 0
 
     ScreenEndBusy

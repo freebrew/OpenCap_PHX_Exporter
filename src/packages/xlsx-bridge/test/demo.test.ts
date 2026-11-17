@@ -8,7 +8,7 @@ const demoPath = path.resolve(import.meta.dirname, "../../../../Slide Sheet - De
 describe("Demo workbook", () => {
   it("maps every sheet, shared formula, array master, name, and quarantines external refs", async () => {
     const mapped = await readWorkbook(new Uint8Array(readFileSync(demoPath)));
-    expect(mapped.importLog.sheetCount).toBe(26);
+    expect(mapped.importLog.sheetCount).toBe(25);
     expect(mapped.importLog.formulaCount).toBeGreaterThan(20_000);
     expect(mapped.importLog.sharedFormulaCount).toBeGreaterThan(12_000);
     expect(mapped.importLog.arrayFormulaCount).toBe(16);

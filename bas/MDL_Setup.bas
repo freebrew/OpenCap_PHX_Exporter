@@ -446,17 +446,20 @@ Private Sub ResetSetupWindow(ws As Worksheet)
     On Error Resume Next
     If Application.ActiveWorkbook Is Nothing Then Exit Sub
     ws.Activate
+    ' View, Zoom and page breaks make Excel ask the printer for page layout.
+    ' With the network printer away that is "Waiting for printer connection"
+    ' on every REFRESH, so they are only set when they differ.
     With ActiveWindow
-        .view = xlNormalView
+        If .view <> xlNormalView Then .view = xlNormalView
         .DisplayGridlines = False
         .DisplayHeadings = False
-        .DisplayPageBreaks = False
         .FreezePanes = False
         .Split = False
         .ScrollColumn = 1
         .ScrollRow = 1
-        .Zoom = 100
+        If .Zoom <> 100 Then .Zoom = 100
     End With
+    If ws.DisplayPageBreaks Then ws.DisplayPageBreaks = False
     ws.Cells(R_BODY, 1).Select
     ActiveWindow.FreezePanes = True
     ws.Cells(1, 1).Select
@@ -468,10 +471,9 @@ Private Sub ApplySetupSheetLayout(ws As Worksheet)
     Dim owh As Object: Set owh = ActiveWindow
     If Not owh Is Nothing Then
         If StrComp(ActiveSheet.name, ws.name, vbTextCompare) = 0 Then
-            owh.view = xlNormalView
+            If owh.view <> xlNormalView Then owh.view = xlNormalView
             owh.DisplayGridlines = False
             owh.DisplayHeadings = False
-            owh.DisplayPageBreaks = False
         End If
     End If
     On Error GoTo 0
@@ -502,11 +504,10 @@ Private Sub ApplySetupSheetLayout(ws As Worksheet)
     ws.rows(R_HDR).rowHeight = 30
     ws.rows(R_DIV).rowHeight = 3
 
-    ' Dashed lines through the sheet are leftover print page breaks.
-    ' Do not touch PageSetup here — talking to the printer can hang Excel.
+    ' Dashed lines through the sheet are print page breaks. Hiding them is
+    ' enough: ResetAllPageBreaks and PageSetup make Excel wait on the printer.
     On Error Resume Next
-    ws.ResetAllPageBreaks
-    ws.DisplayPageBreaks = False
+    If ws.DisplayPageBreaks Then ws.DisplayPageBreaks = False
     On Error GoTo 0
 End Sub
 

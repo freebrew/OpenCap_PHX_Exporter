@@ -341,6 +341,12 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long, _
         wrote = True
     End If
 
+    ' The depth share and the BHA delta know nothing of this row's bit
+    ' hours, and slide time past them prints negative rotating time.
+    Dim rowBit As Double
+    rowBit = GetNum(ws.Cells(r, COL_BIT))
+    If rowBit > 0 And deltaH > rowBit Then deltaH = rowBit
+
     ' A source with no slide hours (stale or partial _OC_Slide) must not
     ' replace hours the DD typed with 0:00.
     Dim hrsBlank As Boolean

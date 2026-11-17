@@ -361,6 +361,9 @@ function fillSlideMetrics(t: DayTable, row: number, overwrite: boolean): boolean
     if (!day) deltaH = depth.hours;
     force = true;
   }
+  // The depth share and the BHA delta know nothing of this row's bit hours.
+  const rowBit = num(t.value(`P${row}`));
+  if (rowBit > 0 && deltaH > rowBit) deltaH = rowBit;
   let wrote = false;
   if (row > DAY_FIRST && blank(t.value(`I${row}`))) {
     const previousEnd = t.value(`J${row - 1}`);
