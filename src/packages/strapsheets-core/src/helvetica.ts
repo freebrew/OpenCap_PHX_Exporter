@@ -1,6 +1,7 @@
 // Widths of the PDF standard fonts Helvetica and Helvetica-Bold (Adobe AFM, 1000 units to the
 // em), so the card can centre, clip and wrap text without embedding a font. ASCII only: a
-// character outside it is drawn as "?" (see pdfString), and measured as one.
+// character outside it is drawn as "?" and measured as one, unless the card was given a
+// TextImager (pdfWriter.ts), which draws such a line as a picture instead.
 
 // Characters 32..126, in order.
 const REGULAR = [
@@ -43,38 +44,51 @@ export function textWidth(text: string, bold: boolean, size: number): number {
  * "[NC 50]" is one unit so it never splits across two lines.
  */
 function units(text: string): string[] {
-  return plainText(text).match(/(?:\[[^\]]*\]|\S)+/g) ?? [];
+  return text.match(/(?:\[[^\]]*\]|\S)+/g) ?? [];
 }
 
 /**
  * Break text into lines no wider than `width`. Lines break at spaces; a unit wider than a line
  * on its own is cut where it runs out, as the sheet does for a long serial in a narrow cell.
+ * `measure` replaces Helvetica's widths for text drawn as a picture; that text is kept as it is
+ * (not turned to "?") and cut between whole characters.
  */
-export function wrapText(text: string, bold: boolean, size: number, width: number): string[] {
+export function wrapText(text: string, bold: boolean, size: number, width: number, measure?: (line: string) => number): string[] {
+  const widthOf = measure ?? ((line: string) => textWidth(line, bold, size));
   const lines: string[] = [];
   let line = "";
+  const cutBefore = (rest: string): string => {
+    if (!measure) {
+      let cut = rest.length - 1;
+      while (cut > 1 && widthOf(rest.slice(0, cut)) > width) cut -= 1;
+      return rest.slice(0, cut);
+    }
+    const characters = Array.from(rest);
+    let cut = characters.length - 1;
+    while (cut > 1 && widthOf(characters.slice(0, cut).join("")) > width) cut -= 1;
+    return characters.slice(0, cut).join("");
+  };
   const place = (unit: string): void => {
     const joined = line === "" ? unit : `${line} ${unit}`;
-    if (textWidth(joined, bold, size) <= width) {
+    if (widthOf(joined) <= width) {
       line = joined;
       return;
     }
     if (line !== "") lines.push(line);
     line = "";
-    if (unit.includes(" ") && textWidth(unit, bold, size) > width) {
+    if (unit.includes(" ") && widthOf(unit) > width) {
       for (const word of unit.split(" ")) place(word);
       return;
     }
     let rest = unit;
-    while (textWidth(rest, bold, size) > width && rest.length > 1) {
-      let cut = rest.length - 1;
-      while (cut > 1 && textWidth(rest.slice(0, cut), bold, size) > width) cut -= 1;
-      lines.push(rest.slice(0, cut));
-      rest = rest.slice(cut);
+    while (widthOf(rest) > width && Array.from(rest).length > 1) {
+      const head = cutBefore(rest);
+      lines.push(head);
+      rest = rest.slice(head.length);
     }
     line = rest;
   };
-  for (const unit of units(text)) place(unit);
+  for (const unit of units(measure ? text : plainText(text))) place(unit);
   if (line !== "") lines.push(line);
   return lines;
 }

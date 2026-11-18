@@ -7,6 +7,7 @@ export { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS } from "./families.gen";
 export { DEFAULT_THREADS, threadParts } from "./threads";
 export { looksLikeSerial, motorLike, normSerial, otherToolsFamily, skippedToolKind, strapCandidate, thirdPartySeed } from "./toolKinds";
 export { cardFileName, renderCards } from "./pdf";
+export type { CardOptions, TextImage, TextImager } from "./pdfWriter";
 export {
   BUILDER_SIZE,
   CUSTOM_LETTERS,

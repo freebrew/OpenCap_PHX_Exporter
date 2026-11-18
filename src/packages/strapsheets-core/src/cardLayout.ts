@@ -8,7 +8,6 @@ import { layoutCustomCards } from "./customCard";
 import type { CardArt, PrintCard } from "./cardSpec";
 import { PRINT_CARDS } from "./cards.gen";
 import type { EntryPayload } from "./entry";
-import { textWidth, wrapText } from "./helvetica";
 import { ENTRY_FAMILIES } from "./families.gen";
 import { MWD_WHICH, mwdCardEntry } from "./mwd";
 import { PageCanvas, type PdfWriter, type Rgb } from "./pdfWriter";
@@ -52,6 +51,8 @@ const DRAWING_GAP = 14;
 const METRIC_LABEL = /^[A-Z] (LEN|OD|ID)$/;
 /** Only Serial (and MWD sub serials) and TOP / BTM thread boxes stay at legacy VALUE_SIZE; all other value boxes use LARGE_VALUE_SIZE. */
 const LEGACY_VALUE_LABEL = /^(Serial|Carrier|.* SN|TOP|BTM)$/;
+/** Values printed exactly as typed in any language: serials and the date. */
+const AS_TYPED_LABEL = /^(Serial|Carrier|.* SN|Date)$/;
 
 /** The layout a Subs entry with no known sub type falls back to, so the entry is never dropped. */
 const SUBS_FALLBACK: PrintCard | null = (() => {
@@ -145,7 +146,7 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
   const bandHeight = card.rowHeights.reduce((sum, height) => sum + height, 0);
   const art = CARD_ART[card.which];
 
-  const start = () => new PageCanvas({ left: (PAGE_WIDTH - tableWidth * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT });
+  const start = () => new PageCanvas({ left: (PAGE_WIDTH - tableWidth * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT }, writer.ink);
   let canvas = start();
   let y = 0;
   const turn = () => {
@@ -205,10 +206,11 @@ function drawDrawing(canvas: PageCanvas, writer: PdfWriter, art: CardArt, tableW
   return height;
 }
 
-function drawTitle(canvas: PageCanvas, title: string, tableWidth: number, top: number): void {
+function drawTitle(canvas: PageCanvas, english: string, tableWidth: number, top: number): void {
+  const title = canvas.word(english);
   let size = TITLE_SIZE;
-  while (size > MIN_SIZE && textWidth(title, true, size) > tableWidth - 20) size -= 1;
-  const width = textWidth(title, true, size);
+  while (size > MIN_SIZE && canvas.measure(title, true, size) > tableWidth - 20) size -= 1;
+  const width = canvas.measure(title, true, size);
   canvas.text(title, (tableWidth - width) / 2, top + TITLE_ROW - 2 - 0.21 * size, size, true, BLACK);
 }
 
@@ -257,14 +259,19 @@ function drawCard(canvas: PageCanvas, card: PrintCard, xs: number[], top: number
       const block = cell(labelRow, metricStart);
       canvas.strokeRect(block.x, head.y, left + width - block.x, height, THICK);
     }
-    for (const [, column, text] of labels) drawCell(canvas, cell(labelRow, column), text, LABEL_SIZE, "center");
+    for (const [, column, text] of labels) drawCell(canvas, cell(labelRow, column), canvas.label(text), LABEL_SIZE, "center");
   }
 
   for (const [row, column, from, also] of card.fields) {
-    const text = [from, also].map((source) => (source == null ? "" : (entry.cells[source] ?? "").trim())).filter(Boolean).join(" ");
-    if (text === "") continue;
     const isSerial = row === serialRow && column === serialColumn;
     const headerLabel = card.statics.find(([r, c]) => r === row - 1 && c === column)?.[2] ?? "";
+    const asTyped = isSerial || AS_TYPED_LABEL.test(headerLabel);
+    const text = [from, also]
+      .map((source) => (source == null ? "" : (entry.cells[source] ?? "").trim()))
+      .filter(Boolean)
+      .map((value) => canvas.value(value, asTyped))
+      .join(" ");
+    if (text === "") continue;
     const valueSize = isSerial || LEGACY_VALUE_LABEL.test(headerLabel) ? VALUE_SIZE : LARGE_VALUE_SIZE;
     drawCell(canvas, cell(row, column), text, valueSize, isSerial ? "left" : "center");
   }
@@ -278,10 +285,10 @@ function drawCell(canvas: PageCanvas, area: Cell, text: string, size: number, al
   const room = area.w - 2 * CELL_PADDING;
   const maxLinesFor = (s: number) => (align === "left" ? 1 : Math.max(1, Math.floor(area.h / (s * 1.2))));
   let fitted = size;
-  let lines = wrapText(text, true, fitted, room);
+  let lines = canvas.wrap(text, true, fitted, room);
   while (fitted > MIN_SIZE && lines.length > maxLinesFor(fitted)) {
     fitted -= 0.5;
-    lines = wrapText(text, true, fitted, room);
+    lines = canvas.wrap(text, true, fitted, room);
   }
   const maxLines = maxLinesFor(fitted);
   if (maxLines === 1 && lines.length > 1) lines = [lines.join("")];
@@ -290,7 +297,7 @@ function drawCell(canvas: PageCanvas, area: Cell, text: string, size: number, al
   const blockTop = area.y + (area.h - lines.length * lineHeight) / 2;
   canvas.clipped(area.x, area.y, area.w, area.h, () => {
     lines.forEach((line, index) => {
-      const x = align === "left" ? area.x + CELL_PADDING : area.x + (area.w - textWidth(line, true, fitted)) / 2;
+      const x = align === "left" ? area.x + CELL_PADDING : area.x + (area.w - canvas.measure(line, true, fitted)) / 2;
       canvas.text(line, x, blockTop + index * lineHeight + lineHeight / 2 + 0.36 * fitted, fitted, true, BLACK);
     });
   });
@@ -298,21 +305,21 @@ function drawCell(canvas: PageCanvas, area: Cell, text: string, size: number, al
 
 /** An entry whose family the card tables do not know: its columns as a plain list, so nothing is lost. */
 function layoutPlain(entry: EntryPayload, writer: PdfWriter): void {
-  const canvas = new PageCanvas({ left: MARGIN_X, top: MARGIN_Y, scale: POINTS_PER_PIXEL, height: PAGE_HEIGHT });
-  canvas.text(entry.which, 0, 28, 28, true, BLACK);
+  const canvas = new PageCanvas({ left: MARGIN_X, top: MARGIN_Y, scale: POINTS_PER_PIXEL, height: PAGE_HEIGHT }, writer.ink);
+  canvas.text(canvas.word(entry.which), 0, 28, 28, true, BLACK);
   Object.keys(entry.cells)
     .map(Number)
     .sort((a, b) => a - b)
     .forEach((column, index) => {
       const y = 60 + index * 24;
-      canvas.text(`Column ${column}`, 0, y, 14, false, [0.35, 0.35, 0.35]);
-      canvas.text(entry.cells[column] ?? "", 200, y, 16, true, BLACK);
+      canvas.text(canvas.word("Column {n}").replace("{n}", String(column)), 0, y, 14, false, [0.35, 0.35, 0.35]);
+      canvas.text(canvas.value(entry.cells[column] ?? "", false), 200, y, 16, true, BLACK);
     });
   writer.addPage(canvas);
 }
 
 function layoutNotice(text: string, writer: PdfWriter): void {
-  const canvas = new PageCanvas({ left: MARGIN_X, top: MARGIN_Y, scale: POINTS_PER_PIXEL, height: PAGE_HEIGHT });
-  canvas.text(text, 0, 28, 20, true, BLACK);
+  const canvas = new PageCanvas({ left: MARGIN_X, top: MARGIN_Y, scale: POINTS_PER_PIXEL, height: PAGE_HEIGHT }, writer.ink);
+  canvas.text(canvas.word(text), 0, 28, 20, true, BLACK);
   writer.addPage(canvas);
 }

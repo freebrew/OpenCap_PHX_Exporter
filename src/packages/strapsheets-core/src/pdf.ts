@@ -6,12 +6,12 @@
 import { layoutCards } from "./cardLayout";
 import type { EntryPayload } from "./entry";
 import { ENTRY_FAMILIES } from "./families.gen";
-import { PdfWriter } from "./pdfWriter";
+import { PdfWriter, type CardOptions } from "./pdfWriter";
 import { entryLines, findFamily } from "./wizard";
 
-/** One PDF holding a card for every entry. */
-export function renderCards(entries: EntryPayload[]): Uint8Array {
-  const writer = new PdfWriter();
+/** One PDF holding a card for every entry, in English unless `options` give the card's words. */
+export function renderCards(entries: EntryPayload[], options?: CardOptions): Uint8Array {
+  const writer = new PdfWriter(options);
   layoutCards(entries, writer);
   return writer.build();
 }

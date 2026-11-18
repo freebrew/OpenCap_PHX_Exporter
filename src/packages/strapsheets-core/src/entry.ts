@@ -38,21 +38,13 @@ export function decimalText(value: string): string | null {
 }
 
 /**
- * Why a round's values cannot be saved, or null: a number that is not one, or a running total that
- * goes back below the one before it (the sheet would store a negative sub length).
+ * Why a round's values cannot be saved, or null: a number that is not one. A running total that is
+ * lower than the one before it is not a problem; it is kept as typed and never questioned.
  */
 export function roundProblem(step: RoundStep, cells: Record<string, string>): string | null {
   if (step.decimal) {
     const bad = step.cols.filter((sub) => decimalText(cells[sub.col] ?? "") == null).map((sub) => `${sub.letter} ${sub.short}`);
     if (bad.length > 0) return `${step.field}: ${bad.join(", ")} must be a number or blank.`;
-  }
-  if (!step.cumulative) return null;
-  let last = 0;
-  for (const sub of step.cols) {
-    const text = decimalText(cells[sub.col] ?? "");
-    if (text == null || text === "") continue;
-    if (Number(text) < last) return `${sub.letter} ${sub.short} total (${text}) is less than the previous total (${last}).`;
-    last = Number(text);
   }
   return null;
 }
