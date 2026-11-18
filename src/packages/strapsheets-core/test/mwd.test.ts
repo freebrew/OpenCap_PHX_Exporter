@@ -73,12 +73,11 @@ describe("the MWD Carrier on the phone", () => {
     expect(liveValue(round("length"), "1,2.5.3x")).toBe("12.53");
   });
 
-  it("lets a blank round through but stops a bad number or a total that goes backwards", () => {
+  it("lets a blank round through, stops a bad number, and never questions a total that goes backwards", () => {
     expect(stepProblem(round("length"), {})).toBeNull();
     expect(stepProblem(round("od"), { xoverOd: "abc" })).toMatch(/A X-Over must be a number/);
-    expect(stepProblem(round("length"), { xoverLength: "2", groundingLength: "1.5" })).toBe(
-      "B Grounding total (1.5) is less than the previous total (2).",
-    );
+    expect(stepProblem(round("length"), { xoverLength: "2", groundingLength: "1.5" })).toBeNull();
+    expect(stepProblem(round("length"), { xoverLength: ".84", groundingLength: "1.03", centralizerLength: "2.55", gapLength: "1.14" })).toBeNull();
     expect(stepProblem(round("length"), { xoverLength: "2", centralizerLength: "2.5" })).toBeNull();
     expect(stepProblem(round("length"), { xoverLength: "2", groundingLength: "2" })).toBeNull();
   });
@@ -86,6 +85,8 @@ describe("the MWD Carrier on the phone", () => {
   it("stores each sub's own length and works out the total and largest OD as the sheet does", () => {
     expect(mwdSubLengths(["1.2", "3.5", "6", "7.8"])).toEqual(["1.2", "2.3", "2.5", "1.8"]);
     expect(mwdSubLengths(["1.2", "", "6", ""])).toEqual(["1.2", "", "4.8", ""]);
+    // A lower total is kept as typed, so the stored length is the difference and no one is told off.
+    expect(mwdSubLengths([".84", "1.03", "2.55", "1.14"])).toEqual(["0.84", "0.19", "1.52", "-1.41"]);
     expect(mwdSummary(family(), typed())).toEqual({ subLengths: ["1.2", "2.3", "2.5", "1.8"], total: "7.8", maxOd: "121" });
     expect(mwdSummary(family(), {})).toEqual({ subLengths: ["", "", "", ""], total: "", maxOd: "" });
   });
@@ -98,7 +99,7 @@ describe("the MWD Carrier on the phone", () => {
     const empty = validateEntry(family(), normalizeEntry(family(), { which: "MWD Carrier", cells: {} }));
     expect(empty.map((problem) => problem.stepId)).toEqual(["serial", "boxPin", "threads"]);
     const backwards = validateEntry(family(), { which: "MWD Carrier", cells: { ...typed(), groundingLength: "0.5" } });
-    expect(backwards.some((problem) => problem.stepId === "length")).toBe(true);
+    expect(backwards).toEqual([]);
     expect(entryLines(family(), typed()).map((line) => line.label)).toContain("B Grounding Length");
   });
 
