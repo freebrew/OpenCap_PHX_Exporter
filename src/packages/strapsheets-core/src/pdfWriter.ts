@@ -2,11 +2,124 @@
 // fonts, and PNG-predictor images. Bytes are assembled as bytes, so an image stream survives.
 
 import type { CardArt, ImageArt, VectorItem, VectorOp } from "./cardSpec";
-import { plainText } from "./helvetica";
+import { zlibDeflate } from "./deflate";
+import { plainText, textWidth, wrapText } from "./helvetica";
 
 export type Rgb = readonly [number, number, number];
 
+/**
+ * A line of text as a picture, for writing Helvetica cannot draw (accents, Cyrillic, Arabic,
+ * Chinese). The picture covers `widthPt` x `heightPt` page points: its left edge is where the text
+ * starts and the baseline is `baselinePt` below its top. `widthPt` is what the card measures the
+ * text by, so include any side padding in it evenly. `alpha` is one byte of ink cover per pixel
+ * (0 blank, 255 solid), `pixelWidth` x `pixelHeight`, rows from the top.
+ */
+export interface TextImage {
+  widthPt: number;
+  heightPt: number;
+  baselinePt: number;
+  pixelWidth: number;
+  pixelHeight: number;
+  alpha: Uint8Array;
+}
+
+export type TextImager = (text: string, sizePt: number, bold: boolean, rtl: boolean) => TextImage;
+
+/** How a card speaks another language. Left out, the card prints as it always has, in English. */
+export interface CardOptions {
+  /** The words for an English label, title or saved name; whatever it does not know comes back as it is. */
+  word?: (english: string) => string;
+  /** Draws a line Helvetica cannot. Without it, such characters print as "?". */
+  textImage?: TextImager;
+  /** The card's language reads right to left. */
+  rtl?: boolean;
+}
+
+interface TextPicture {
+  name: string;
+  image: TextImage;
+  fill: Rgb;
+}
+
+/** The card's words and the text pictures of one document, shared by its pages. */
+export class CardInk {
+  readonly word: (english: string) => string;
+  private readonly imager: TextImager | undefined;
+  private readonly rtl: boolean;
+  private readonly measured = new Map<string, TextImage>();
+  private readonly pictures = new Map<string, TextPicture>();
+
+  constructor(options: CardOptions = {}) {
+    this.word = options.word ?? ((english) => english);
+    this.imager = options.textImage;
+    this.rtl = options.rtl ?? false;
+  }
+
+  /** A saved value as the card prints it: a name in the card's language; a number, or anything `asTyped` (serials, dates), as typed. */
+  value(saved: string, asTyped: boolean): string {
+    const shown = asTyped || NUMBER_VALUE.test(saved) ? saved : this.word(saved);
+    const isolate = this.rtl && this.imager != null && shown === saved && saved.trim() !== "";
+    return isolate ? `${LTR_OPEN}${saved}${LTR_CLOSE}` : shown;
+  }
+
+  /**
+   * A label in the card's language. A lettered label ("H LEN") that has no words of its own takes
+   * the words for its measure ("LEN"), so one entry serves every letter.
+   */
+  label(english: string): string {
+    const whole = this.word(english);
+    if (whole !== english) return whole;
+    const lettered = /^([A-Z]) (.+)$/.exec(english);
+    return lettered ? `${lettered[1]} ${this.word(lettered[2] ?? "")}` : english;
+  }
+
+  /** Whether this text is drawn as a picture rather than in Helvetica. */
+  pictured(text: string): boolean {
+    return this.imager != null && /[^\x20-\x7e]/.test(text);
+  }
+
+  image(text: string, sizePt: number, bold: boolean): TextImage {
+    const key = `${bold ? "b" : "r"}|${sizePt}|${text}`;
+    let image = this.measured.get(key);
+    if (!image) {
+      if (!this.imager) throw new Error("no text imager");
+      image = this.imager(text, sizePt, bold, this.rtl);
+      this.measured.set(key, image);
+    }
+    return image;
+  }
+
+  /** The resource name of a text picture in a colour, registering it the first time it is drawn. */
+  picture(text: string, sizePt: number, bold: boolean, fill: Rgb): TextPicture {
+    const key = `${bold ? "b" : "r"}|${sizePt}|${color(fill)}|${text}`;
+    let known = this.pictures.get(key);
+    if (!known) {
+      known = { name: `Tx${this.pictures.size}`, image: this.image(text, sizePt, bold), fill };
+      this.pictures.set(key, known);
+    }
+    return known;
+  }
+
+  drawn(): TextPicture[] {
+    return [...this.pictures.values()];
+  }
+}
+
 const encoder = new TextEncoder();
+
+/** A measure or count, which has no words to translate. */
+const NUMBER_VALUE = /^[-+]?[\d.,/ ]+$/;
+/** Unicode's left-to-right isolate and its end: keep a typed "4 1/2 IF" in order inside right-to-left words. */
+const LTR_OPEN = "\u2066";
+const LTR_CLOSE = "\u2069";
+const ISOLATES = /[\u2066\u2069]/g;
+
+/** A line without its isolates when nothing else in it needs a picture, so plain text stays in Helvetica. */
+function settle(text: string): string {
+  if (!text.includes(LTR_OPEN) && !text.includes(LTR_CLOSE)) return text;
+  const plain = text.replace(ISOLATES, "");
+  return /[^\x20-\x7e]/.test(plain) ? text : plain;
+}
 
 function num(value: number): string {
   return String(Math.round(value * 100) / 100);
@@ -45,7 +158,39 @@ export class PageCanvas {
   private readonly ops: string[] = [];
   readonly images = new Set<string>();
 
-  constructor(private readonly frame: PageFrame) {}
+  constructor(
+    private readonly frame: PageFrame,
+    private readonly ink: CardInk = new CardInk(),
+  ) {}
+
+  /** An English label, title or saved name in the card's language. */
+  word(english: string): string {
+    return this.ink.word(english);
+  }
+
+  /** A card label in the card's language (see CardInk.label). */
+  label(english: string): string {
+    return this.ink.label(english);
+  }
+
+  /** A saved value as the card prints it (see CardInk.value). */
+  value(saved: string, asTyped: boolean): string {
+    return this.ink.value(saved, asTyped);
+  }
+
+  /** How wide the text draws, in layout units. */
+  measure(text: string, bold: boolean, size: number): number {
+    const line = settle(text);
+    if (!this.ink.pictured(line)) return textWidth(line, bold, size);
+    return this.ink.image(line, size * this.frame.scale, bold).widthPt / this.frame.scale;
+  }
+
+  /** wrapText, measuring pictured text by its picture. */
+  wrap(text: string, bold: boolean, size: number, width: number): string[] {
+    const settled = settle(text);
+    if (!this.ink.pictured(settled)) return wrapText(settled, bold, size, width);
+    return wrapText(settled, bold, size, width, (line) => this.measure(line, bold, size));
+  }
 
   private px(x: number): number {
     return this.frame.left + x * this.frame.scale;
@@ -68,7 +213,15 @@ export class PageCanvas {
   }
 
   /** Text with its baseline at `baseline`, `size` in layout units. */
-  text(text: string, x: number, baseline: number, size: number, bold: boolean, fill: Rgb): void {
+  text(given: string, x: number, baseline: number, size: number, bold: boolean, fill: Rgb): void {
+    const text = settle(given);
+    if (this.ink.pictured(text)) {
+      const { name, image } = this.ink.picture(text, size * this.frame.scale, bold, fill);
+      this.images.add(name);
+      const bottom = this.py(baseline) + image.baselinePt - image.heightPt;
+      this.ops.push(`q ${num(image.widthPt)} 0 0 ${num(image.heightPt)} ${num(this.px(x))} ${num(bottom)} cm /${name} Do Q`);
+      return;
+    }
     this.ops.push(`BT ${color(fill)} rg /${bold ? "F2" : "F1"} ${num(size * this.frame.scale)} Tf ${num(this.px(x))} ${num(this.py(baseline))} Td ${literal(text)} Tj ET`);
   }
 
@@ -135,6 +288,12 @@ interface Placed {
 export class PdfWriter {
   private readonly placed = new Map<CardArt, Placed>();
   private readonly pages: PageCanvas[] = [];
+  /** The card's words and text pictures; hand it to every PageCanvas of this document. */
+  readonly ink: CardInk;
+
+  constructor(options: CardOptions = {}) {
+    this.ink = new CardInk(options);
+  }
 
   /** The resource name of a drawing, registering it the first time it is used. */
   imageName(art: CardArt): string {
@@ -153,8 +312,10 @@ export class PdfWriter {
 
   build(): Uint8Array {
     const placed = [...this.placed.values()];
+    const pictures = this.ink.drawn();
     const imageIds = new Map(placed.map((item, index) => [item.name, 5 + index]));
-    const firstPage = 5 + placed.length;
+    pictures.forEach((item, index) => imageIds.set(item.name, 5 + placed.length + index * 2));
+    const firstPage = 5 + placed.length + pictures.length * 2;
     const pageIds = this.pages.map((_, index) => firstPage + index * 2 + 1);
 
     const objects: Uint8Array[][] = [
@@ -167,6 +328,10 @@ export class PdfWriter {
       if (item.art.kind !== "image") throw new Error("vector art has no image object");
       objects.push(imageObject(item.art));
     }
+    pictures.forEach((item, index) => {
+      const maskId = 5 + placed.length + index * 2 + 1;
+      objects.push(...textImageObjects(item.image, item.fill, maskId));
+    });
     this.pages.forEach((page, index) => {
       const contentId = firstPage + index * 2;
       const stream = encoder.encode(page.content());
@@ -219,6 +384,40 @@ function rgbOf(hex: string): string {
 function dashOf(dash: number[] | undefined, sx: number): string {
   if (!dash || dash.length === 0) return "";
   return `[${dash.map((part) => num(part * sx)).join(" ")}] 0 d `;
+}
+
+/** A text picture: a block of the text's colour, seen through a soft mask of the ink cover. */
+function textImageObjects(image: TextImage, fill: Rgb, maskId: number): Uint8Array[][] {
+  const { pixelWidth: w, pixelHeight: h } = image;
+  const pixels = w * h;
+  if (image.alpha.length !== pixels) throw new Error(`text picture has ${image.alpha.length} cover bytes for ${w}x${h} pixels`);
+  const rgb = fill.map((part) => Math.max(0, Math.min(255, Math.round(part * 255))));
+  const solid = new Uint8Array(pixels * 3);
+  for (let index = 0; index < pixels; index++) {
+    solid[index * 3] = rgb[0] ?? 0;
+    solid[index * 3 + 1] = rgb[1] ?? 0;
+    solid[index * 3 + 2] = rgb[2] ?? 0;
+  }
+  const colour = zlibDeflate(solid);
+  const mask = zlibDeflate(image.alpha);
+  return [
+    [
+      encoder.encode(
+        `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 ` +
+          `/SMask ${maskId} 0 R /Filter /FlateDecode /Length ${colour.length} >>\nstream\n`,
+      ),
+      colour,
+      encoder.encode("\nendstream"),
+    ],
+    [
+      encoder.encode(
+        `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 ` +
+          `/Filter /FlateDecode /Length ${mask.length} >>\nstream\n`,
+      ),
+      mask,
+      encoder.encode("\nendstream"),
+    ],
+  ];
 }
 
 function imageObject(art: ImageArt): Uint8Array[] {

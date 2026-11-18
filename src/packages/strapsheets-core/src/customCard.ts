@@ -6,7 +6,6 @@ import { activeMarks, customFlagCells, parseMarks, type EndConfig } from "./cust
 import { customScene, sceneBounds, sceneItems } from "./customScene";
 import { BUILDER_W } from "./customShape";
 import type { EntryPayload } from "./entry";
-import { textWidth, wrapText } from "./helvetica";
 import { PageCanvas, type PdfWriter, type Rgb } from "./pdfWriter";
 
 const PAGE_WIDTH = 612;
@@ -65,7 +64,7 @@ export function layoutCustomCards(entries: EntryPayload[], writer: PdfWriter): v
   const xs = Array.from({ length: COLUMNS + 1 }, (_, i) => i * colW);
 
   for (let start = 0; start < entries.length; start += 3) {
-    const canvas = new PageCanvas({ left: (PAGE_WIDTH - TABLE_WIDTH * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT });
+    const canvas = new PageCanvas({ left: (PAGE_WIDTH - TABLE_WIDTH * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT }, writer.ink);
     let y = 0;
     for (const entry of entries.slice(start, start + 3)) {
       y = drawCard(canvas, entry, xs, y);
@@ -76,9 +75,11 @@ export function layoutCustomCards(entries: EntryPayload[], writer: PdfWriter): v
 }
 
 function drawCustomTitle(canvas: PageCanvas, top: number): void {
-  const title = "CUSTOM";
-  const width = textWidth(title, true, TITLE_SIZE);
-  canvas.text(title, (TABLE_WIDTH - width) / 2, top + TITLE_ROW - 2 - 0.21 * TITLE_SIZE, TITLE_SIZE, true, BLACK);
+  const title = canvas.word("CUSTOM");
+  let size = TITLE_SIZE;
+  while (size > MIN_SIZE && canvas.measure(title, true, size) > TABLE_WIDTH - 20) size -= 1;
+  const width = canvas.measure(title, true, size);
+  canvas.text(title, (TABLE_WIDTH - width) / 2, top + TITLE_ROW - 2 - 0.21 * size, size, true, BLACK);
 }
 
 function rgbOfHex(hex: string): Rgb {
@@ -90,7 +91,9 @@ function drawPicture(canvas: PageCanvas, marks: ReturnType<typeof parseMarks>, e
   const bounds = sceneBounds(marks, ends);
   const targetW = TABLE_WIDTH * PICTURE_SHARE;
   const scale = Math.min(targetW / BUILDER_W, PICTURE_MAX_H / bounds.h);
-  const { items, texts } = sceneItems(customScene(activeMarks(marks), "", false, ends));
+  // Thread names are translated before the scene shortens them; the scene's own words (BOX, PIN) as they are drawn.
+  const shownEnds: EndConfig = { ...ends, threadLower: canvas.value(ends.threadLower ?? "", false), threadUpper: canvas.value(ends.threadUpper ?? "", false) };
+  const { items, texts } = sceneItems(customScene(activeMarks(marks), "", false, shownEnds));
   let minX = Infinity;
   let maxX = -Infinity;
   for (const item of items) {
@@ -114,10 +117,11 @@ function drawPicture(canvas: PageCanvas, marks: ReturnType<typeof parseMarks>, e
   const maxEdge = ox + maxX * scale;
   for (const text of texts) {
     const size = text.size * scale;
-    const w = textWidth(text.s, true, size);
+    const shown = text.s === "PIN" || text.s === "BOX" ? canvas.word(text.s) : text.s;
+    const w = canvas.measure(shown, true, size);
     const rawX = ox + text.x * scale - w / 2;
-    const tx = text.s.length > 1 ? Math.max(minEdge, Math.min(maxEdge - w, rawX)) : rawX;
-    canvas.text(text.s, tx, oy + text.y * scale - size * 0.08, size, true, rgbOfHex(text.fill));
+    const tx = shown.length > 1 ? Math.max(minEdge, Math.min(maxEdge - w, rawX)) : rawX;
+    canvas.text(shown, tx, oy + text.y * scale - size * 0.08, size, true, rgbOfHex(text.fill));
   }
   return top + bounds.h * scale;
 }
@@ -140,11 +144,16 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
   };
 
   // Pair 1: Serial, Material, TOP, BTM, LEN, ID
+  const named = (...saved: (string | undefined)[]) =>
+    saved
+      .filter((value): value is string => Boolean(value))
+      .map((value) => canvas.value(value, false))
+      .join(" ");
   const pair1Values = [
     entry.cells.serial ?? "",
-    entry.cells.material ?? "",
-    [entry.cells.boxUpper, entry.cells.threadUpper].filter(Boolean).join(" "),
-    [entry.cells.boxLower, entry.cells.threadLower].filter(Boolean).join(" "),
+    named(entry.cells.material),
+    named(entry.cells.boxUpper, entry.cells.threadUpper),
+    named(entry.cells.boxLower, entry.cells.threadLower),
     entry.cells.totalLength ?? "",
     entry.cells.internalId ?? "",
   ];
@@ -161,7 +170,7 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
     canvas.line(x, p1Top, x, p1Top + p1Height, THIN);
   }
   HEADER_GROUPS.forEach((group, idx) => {
-    drawCell(canvas, areaOf(0, group.col, group.span), group.label, LABEL_SIZE, "center");
+    drawCell(canvas, areaOf(0, group.col, group.span), canvas.label(group.label), LABEL_SIZE, "center");
     const val = (pair1Values[idx] ?? "").trim();
     const isLegacy = group.label === "Serial" || group.label === "TOP" || group.label === "BTM";
     const size = isLegacy ? VALUE_SIZE : LEN_OD_VALUE_SIZE;
@@ -182,7 +191,7 @@ function drawCard(canvas: PageCanvas, entry: EntryPayload, xs: number[], top: nu
     }
     canvas.strokeRect(0, p2Top, blockWidth, p2Height, THICK);
     flags.forEach((flag, idx) => {
-      drawCell(canvas, areaOf(2, idx, 1), flag.label, LABEL_SIZE, "center");
+      drawCell(canvas, areaOf(2, idx, 1), canvas.label(flag.label), LABEL_SIZE, "center");
       if (flag.value.trim()) drawCell(canvas, areaOf(3, idx, 1), flag.value.trim(), LEN_OD_VALUE_SIZE, "center");
     });
   }
@@ -194,10 +203,10 @@ function drawCell(canvas: PageCanvas, area: CellArea, text: string, size: number
   const room = area.w - 2 * CELL_PADDING;
   const maxLinesFor = (s: number) => (align === "left" ? 1 : Math.max(1, Math.floor(area.h / (s * 1.2))));
   let fitted = size;
-  let lines = wrapText(text, true, fitted, room);
+  let lines = canvas.wrap(text, true, fitted, room);
   while (fitted > MIN_SIZE && lines.length > maxLinesFor(fitted)) {
     fitted -= 0.5;
-    lines = wrapText(text, true, fitted, room);
+    lines = canvas.wrap(text, true, fitted, room);
   }
   const maxLines = maxLinesFor(fitted);
   if (maxLines === 1 && lines.length > 1) lines = [lines.join("")];
@@ -206,7 +215,7 @@ function drawCell(canvas: PageCanvas, area: CellArea, text: string, size: number
   const blockTop = area.y + (area.h - lines.length * lineHeight) / 2;
   canvas.clipped(area.x, area.y, area.w, area.h, () => {
     lines.forEach((line, index) => {
-      const x = align === "left" ? area.x + CELL_PADDING : area.x + (area.w - textWidth(line, true, fitted)) / 2;
+      const x = align === "left" ? area.x + CELL_PADDING : area.x + (area.w - canvas.measure(line, true, fitted)) / 2;
       canvas.text(line, x, blockTop + index * lineHeight + lineHeight / 2 + 0.36 * fitted, fitted, true, BLACK);
     });
   });
