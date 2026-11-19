@@ -570,7 +570,7 @@ export const PRINT_CARDS: PrintCard[] = [
   {
     "name": "GAPs",
     "which": "Subs",
-    "title": "GAP/PULSER SUBS",
+    "title": "GAP/UBHO SUBS",
     "width": 11,
     "positions": 2,
     "posShift": 6,
@@ -588,6 +588,7 @@ export const PRINT_CARDS: PrintCard[] = [
     "typeCol": 96,
     "typeValues": [
       "GAP",
+      "UBHO",
       "Pulser"
     ],
     "statics": [

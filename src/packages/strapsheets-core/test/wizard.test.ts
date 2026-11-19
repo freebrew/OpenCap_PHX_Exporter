@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS, entryLines, findFamily, liveValue, measureSteps, normalizeEntry, prefillFromItem, serialStep, setCell, setRange, stepColumns, stepProblem, stepWarning, threadParts, validateEntry, type Cells, type EntryFamily, type EntryStep, type InventoryItem } from "../src/index";
+import { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS, entryLines, findFamily, liveValue, measureSteps, normalizeEntry, prefillFromItem, sealApplies, sealParts, sealSide, sealText, sealValue, serialStep, setCell, setRange, stepColumns, stepProblem, stepWarning, threadParts, validateEntry, type Cells, type EntryFamily, type EntryStep, type InventoryItem } from "../src/index";
 
 function motor(): EntryFamily {
   const family = findFamily(ENTRY_FAMILIES, "Motor");
@@ -120,5 +120,57 @@ describe("wizard", () => {
     if (subType.kind !== "choice" || serial?.kind !== "text") throw new Error("Subs steps");
     const cells = { [subType.col]: "Float", [serial.col]: "FLT-1" };
     expect(entryLines(family, cells).map((line) => line.label)).toEqual(["Serial", "Sub Type"]);
+  });
+});
+
+describe("UBHO seal measure", () => {
+  function subsFamily(): EntryFamily {
+    const family = findFamily(ENTRY_FAMILIES, "Subs");
+    if (!family) throw new Error("Subs family missing");
+    return family;
+  }
+  function sealed(family: EntryFamily): EntryStep {
+    const found = family.steps.find((candidate) => candidate.kind === "decimal" && candidate.seal);
+    if (!found) throw new Error("Subs has no seal step");
+    return found;
+  }
+
+  it("offers UBHO in place of Pulser and keeps the seal on the ring column", () => {
+    const family = subsFamily();
+    expect(family.extraOptions?.subTypeOptions).toContain("UBHO");
+    expect(family.extraOptions?.subTypeOptions).not.toContain("Pulser");
+    const ring = sealed(family);
+    expect(ring.kind === "decimal" && ring.col).toBe(101);
+    expect(ring.kind === "decimal" && ring.seal).toEqual({ typeCol: 96, types: ["UBHO"] });
+  });
+
+  it("shows the two-seal panel only on a UBHO", () => {
+    const ring = sealed(subsFamily());
+    expect(sealApplies(ring, { 96: "UBHO" })).toBe(true);
+    expect(sealApplies(ring, { 96: "GAP" })).toBe(false);
+    expect(sealApplies(ring, {})).toBe(false);
+  });
+
+  it("keeps a TOP number with its prefix and a BTM number as typed", () => {
+    expect(sealParts("TOP 3.25")).toEqual({ btm: "", top: "3.25" });
+    expect(sealParts("2.5")).toEqual({ btm: "2.5", top: "" });
+    expect(sealValue({ btm: "", top: " 3.25 " })).toBe("TOP 3.25");
+    expect(sealValue({ btm: "2.5", top: "" })).toBe("2.5");
+    expect(sealSide(sealParts("TOP 1"))).toBe("top");
+    expect(sealSide(sealParts("1"))).toBe("btm");
+    expect(sealSide(sealParts(""))).toBe("");
+    expect(sealText("top 3.25")).toBe("TOP 3.25");
+    expect(sealText("TOP x")).toBeNull();
+    expect(sealText("")).toBe("");
+  });
+
+  it("lets a TOP measure through the wizard and onto the stored entry", () => {
+    const family = subsFamily();
+    const ring = sealed(family);
+    expect(stepProblem(ring, { 96: "UBHO", 101: "TOP 3.25" })).toBeNull();
+    expect(stepProblem(ring, { 96: "UBHO", 101: "TOP" })).not.toBeNull();
+    const payload = { which: "Subs", cells: { 90: "UBHO-1", 96: "UBHO", 101: "TOP 3.25" } };
+    expect(validateEntry(family, payload).filter((problem) => problem.stepId === ring.id)).toEqual([]);
+    expect(normalizeEntry(family, payload).cells["101"]).toBe("TOP 3.25");
   });
 });

@@ -22,6 +22,12 @@ export interface CompanionChoice {
   required?: boolean;
 }
 
+/** The sub types whose measure may be taken from either seal (Subs: UBHO), and the column naming the type. */
+export interface SealRule {
+  typeCol: CellKey;
+  types: string[];
+}
+
 /** A single typed value. `col` is the 0-based column in Form Responses 1. */
 export interface TextStep extends StepBase {
   kind: "text" | "decimal";
@@ -30,6 +36,8 @@ export interface TextStep extends StepBase {
   col: CellKey;
   /** Motor Serial also asks whether the bend housing is fixed or adjustable. */
   companionChoice?: CompanionChoice;
+  /** A measure kept as "2.5" from the BTM seal or "TOP 3.25" from the TOP seal, for the listed types. */
+  seal?: SealRule;
 }
 
 /** One option from the family's list (`optionsKey` names which list). */

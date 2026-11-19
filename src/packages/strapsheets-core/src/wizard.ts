@@ -2,7 +2,7 @@
 // capitals as it is typed, decimals keep digits and one dot, a blank measure skips, and a range
 // only warns. The phone renders these; the tests pin them.
 
-import { decimalText, roundProblem, upperText, type EntryPayload } from "./entry";
+import { decimalText, roundProblem, sealNumber, sealText, upperText, type EntryPayload } from "./entry";
 import type { InventoryItem } from "./inventory";
 import { rangeFor, rangeWarning, type MeasureRange, type RangeWarning } from "./ranges";
 import { stepColumns, type CellKey, type EntryFamily, type EntryStep } from "./schema";
@@ -88,7 +88,7 @@ export function stepProblem(step: EntryStep, cells: Cells): string | null {
   ) {
     return `${step.companionChoice.label} is required.`;
   }
-  if (step.kind === "decimal" && decimalText(values[0] ?? "") == null) return `${step.label} needs a number.`;
+  if (step.kind === "decimal" && (step.seal ? sealText : decimalText)(values[0] ?? "") == null) return `${step.label} needs a number.`;
   if (step.kind === "round") return roundProblem(step, cells);
   return null;
 }
@@ -96,7 +96,8 @@ export function stepProblem(step: EntryStep, cells: Cells): string | null {
 /** Whether a measure sits outside the user's range. Never a reason to stop. */
 export function stepWarning(family: EntryFamily, step: EntryStep, cells: Cells, ranges: MeasureRange[]): RangeWarning {
   if (step.kind !== "decimal") return null;
-  const text = decimalText(cells[step.col] ?? "");
+  const raw = cells[step.col] ?? "";
+  const text = decimalText(step.seal ? sealNumber(raw) : raw);
   if (text == null || text === "") return null;
   return rangeWarning(rangeFor(ranges, family.which, step.id), Number(text));
 }
