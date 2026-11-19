@@ -32,7 +32,7 @@ const TABS = {
   Motors: { which: "Motor", title: "MOTORS" },
   Orbits: { which: "Orbit", title: "ORBITS" },
   Floats: { which: "Subs", title: "FLOAT Subs" },
-  GAPs: { which: "Subs", title: "GAP/PULSER SUBS" },
+  GAPs: { which: "Subs", title: "GAP/UBHO SUBS" },
   FlexNMs: { which: "NM Flex Monel", title: "FLEX NM" },
   StabsNMCarriers: { which: "NM Stabilizer Carrier", title: "STAB NM CARRIER" },
   HMJs: { which: "Jars", title: "JARS" },

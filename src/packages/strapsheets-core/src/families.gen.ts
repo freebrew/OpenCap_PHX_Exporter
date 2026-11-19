@@ -729,7 +729,7 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "Screen",
         "Burst",
         "GAP",
-        "Pulser",
+        "UBHO",
         "X-Over"
       ]
     },
@@ -819,7 +819,13 @@ export const ENTRY_FAMILIES: EntryFamily[] = [
         "kind": "decimal",
         "label": "Ring / Achor From BTM Seal",
         "header": "Ring / Achor From BTM Seal",
-        "col": 101
+        "col": 101,
+        "seal": {
+          "typeCol": 96,
+          "types": [
+            "UBHO"
+          ]
+        }
       }
     ]
   },

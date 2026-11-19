@@ -74,7 +74,10 @@ describe("the strap card layout", () => {
 
   it("splits Subs across the Float, GAP and X-Over layouts by sub type", () => {
     expect(strings(renderCards([subs("FLT-1", "Float")]))).toContain("FLOAT Subs");
-    expect(strings(renderCards([subs("GAP-1", "Pulser")]))).toContain("GAP/PULSER SUBS");
+    expect(strings(renderCards([subs("GAP-1", "UBHO")]))).toContain("GAP/UBHO SUBS");
+    expect(strings(renderCards([subs("GAP-2", "Pulser")]))).toContain("GAP/UBHO SUBS");
+    const fromTop = renderCards([{ ...subs("UBHO-1", "UBHO"), cells: { ...subs("UBHO-1", "UBHO").cells, 101: "TOP 3.25" } }]);
+    expect(strings(fromTop)).toContain("TOP 3.25");
     expect(strings(renderCards([subs("XO-1", "X-Over")]))).toContain("X-Overs");
     const mixed = renderCards([subs("FLT-1", "Float"), subs("XO-1", "X-Over"), subs("FLT-2", "Screen")]);
     expect(pageCount(mixed)).toBe(2);

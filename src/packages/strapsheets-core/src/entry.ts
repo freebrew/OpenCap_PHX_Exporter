@@ -37,6 +37,49 @@ export function decimalText(value: string): string | null {
   return /^\d*\.?\d+$/.test(trimmed) && trimmed !== "." ? trimmed : null;
 }
 
+/** A seal measure split into its two boxes. Only one is ever filled. */
+export interface SealParts {
+  btm: string;
+  top: string;
+}
+
+/** "TOP 3.25" is measured from the TOP seal; any other value is from the BTM seal. Entry.html reads it the same way. */
+export function sealParts(stored: string): SealParts {
+  const top = /^TOP\s+(.*)$/i.exec(stored.trim());
+  return top ? { btm: "", top: top[1] ?? "" } : { btm: stored.trim(), top: "" };
+}
+
+/** The stored value: a TOP number wins and is kept with its prefix. */
+export function sealValue(parts: SealParts): string {
+  const top = parts.top.trim();
+  return top ? `TOP ${top}` : parts.btm.trim();
+}
+
+/** Which seal the arrow on the drawing runs to; "" when nothing is entered. */
+export function sealSide(parts: SealParts): "top" | "btm" | "" {
+  if (parts.top.trim()) return "top";
+  return parts.btm.trim() ? "btm" : "";
+}
+
+/** The number a seal measure holds, without its TOP prefix. */
+export function sealNumber(stored: string): string {
+  const parts = sealParts(stored);
+  return parts.top || parts.btm;
+}
+
+/** A seal measure ready to store, blank when skipped, null when its number is not one. */
+export function sealText(value: string): string | null {
+  const parts = sealParts(value);
+  const text = decimalText(parts.top || parts.btm);
+  if (text == null) return null;
+  return sealValue(parts.top ? { btm: "", top: text } : { btm: text, top: "" });
+}
+
+/** Whether this step shows the two-seal panel for the type picked earlier in the entry. */
+export function sealApplies(step: EntryStep, cells: Record<string, string>): boolean {
+  return step.kind === "decimal" && !!step.seal && step.seal.types.includes((cells[step.seal.typeCol] ?? "").trim());
+}
+
 /**
  * Why a round's values cannot be saved, or null: a number that is not one. A running total that is
  * lower than the one before it is not a problem; it is kept as typed and never questioned.
@@ -54,7 +97,7 @@ function cellValue(step: EntryStep, raw: string): string | null {
     case "text":
       return upperText(raw);
     case "decimal":
-      return decimalText(raw);
+      return step.seal ? sealText(raw) : decimalText(raw);
     case "round":
       return step.decimal ? decimalText(raw) : upperText(raw);
     case "choice":
