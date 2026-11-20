@@ -5,6 +5,8 @@ export { filterItems, itemFromRow, itemsFromCsv, type InventoryItem, type Invent
 export { measureRangesSchema, rangeFor, rangeWarning, setRange, type MeasureRange, type RangeWarning } from "./ranges";
 export { ENTRY_FAMILIES, ENTRY_WHICH_OPTIONS } from "./families.gen";
 export { DEFAULT_THREADS, threadParts } from "./threads";
+export { canonicalThread, diameterToMm, extractCardTorqueRows, extractCustomTorqueRows, lookupTorque, snapIdTier, snapOdTier, type TorqueLookup, type TorqueRow } from "./torque";
+export { TORQUE_DATA, type IdTier, type OdTier, type TorqueData, type TorqueSpec } from "./torques.gen";
 export { looksLikeSerial, motorLike, normSerial, otherToolsFamily, skippedToolKind, strapCandidate, thirdPartySeed } from "./toolKinds";
 export { cardFileName, renderCards } from "./pdf";
 export type { CardOptions, TextImage, TextImager } from "./pdfWriter";
