@@ -11,6 +11,7 @@ import type { EntryPayload } from "./entry";
 import { ENTRY_FAMILIES } from "./families.gen";
 import { MWD_WHICH, mwdCardEntry } from "./mwd";
 import { PageCanvas, type PdfWriter, type Rgb } from "./pdfWriter";
+import { drawTorqueStrip, extractCardTorqueRows, torqueStripReservedHeight } from "./torque";
 import { findFamily } from "./wizard";
 
 const PAGE_WIDTH = 612;
@@ -149,24 +150,40 @@ function layoutGroup({ card, entries }: Group, writer: PdfWriter): void {
   const start = () => new PageCanvas({ left: (PAGE_WIDTH - tableWidth * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT }, writer.ink);
   let canvas = start();
   let y = 0;
-  const turn = () => {
+  let pageEntries: EntryPayload[] = [];
+  const finishPage = () => {
+    const torqueRows = extractCardTorqueRows(card, pageEntries);
+    if (torqueRows.length > 0) drawTorqueStrip(canvas, torqueRows, tableWidth, titleTop - 16);
     drawTitle(canvas, card.title, tableWidth, titleTop);
     writer.addPage(canvas);
+  };
+  const turn = () => {
+    finishPage();
     canvas = start();
     y = 0;
+    pageEntries = [];
   };
 
   if (art) y = drawDrawing(canvas, writer, art, tableWidth) + DRAWING_GAP;
   for (let first = 0; first < entries.length; first += card.positions) {
-    if (y + bandHeight > cardsBottom) turn();
+    const bandEntries: EntryPayload[] = [];
     for (let position = 0; position < card.positions; position++) {
       const entry = entries[first + position];
-      if (entry) drawCard(canvas, card, xs, y, position, entry);
+      if (entry) bandEntries.push(entry);
+    }
+    const nextTorqueRows = extractCardTorqueRows(card, [...pageEntries, ...bandEntries]);
+    const pageCardsBottom = Math.min(cardsBottom, titleTop - torqueStripReservedHeight(nextTorqueRows.length) - 16);
+    if (pageEntries.length > 0 && y + bandHeight > pageCardsBottom) turn();
+    for (let position = 0; position < card.positions; position++) {
+      const entry = entries[first + position];
+      if (entry) {
+        drawCard(canvas, card, xs, y, position, entry);
+        pageEntries.push(entry);
+      }
     }
     y += bandHeight;
   }
-  drawTitle(canvas, card.title, tableWidth, titleTop);
-  writer.addPage(canvas);
+  finishPage();
 }
 
 function vectorCenterShift(art: CardArt): number {

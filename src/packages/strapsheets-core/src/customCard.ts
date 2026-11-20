@@ -7,6 +7,7 @@ import { customScene, sceneBounds, sceneItems } from "./customScene";
 import { BUILDER_W } from "./customShape";
 import type { EntryPayload } from "./entry";
 import { PageCanvas, type PdfWriter, type Rgb } from "./pdfWriter";
+import { drawTorqueStrip, extractCustomTorqueRows, torqueStripReservedHeight } from "./torque";
 
 const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;
@@ -63,15 +64,31 @@ export function layoutCustomCards(entries: EntryPayload[], writer: PdfWriter): v
   const colW = TABLE_WIDTH / COLUMNS;
   const xs = Array.from({ length: COLUMNS + 1 }, (_, i) => i * colW);
 
-  for (let start = 0; start < entries.length; start += 3) {
-    const canvas = new PageCanvas({ left: (PAGE_WIDTH - TABLE_WIDTH * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT }, writer.ink);
-    let y = 0;
-    for (const entry of entries.slice(start, start + 3)) {
-      y = drawCard(canvas, entry, xs, y);
-    }
+  const startPage = () => new PageCanvas({ left: (PAGE_WIDTH - TABLE_WIDTH * scale) / 2, top: MARGIN_Y, scale, height: PAGE_HEIGHT }, writer.ink);
+  let canvas = startPage();
+  let y = 0;
+  let pageEntries: EntryPayload[] = [];
+  const finishPage = () => {
+    const torqueRows = extractCustomTorqueRows(pageEntries);
+    if (torqueRows.length > 0) drawTorqueStrip(canvas, torqueRows, TABLE_WIDTH, titleTop - 16);
     drawCustomTitle(canvas, titleTop);
     writer.addPage(canvas);
+  };
+
+  for (const entry of entries) {
+    const nextEntries = [...pageEntries, entry];
+    const nextTorqueH = torqueStripReservedHeight(extractCustomTorqueRows(nextEntries).length);
+    const estCardH = PICTURE_MAX_H + PICTURE_GAP + ROW_HEIGHTS.reduce((sum, h) => sum + h, 0);
+    if (pageEntries.length >= 3 || (pageEntries.length > 0 && y + estCardH > titleTop - nextTorqueH - 16)) {
+      finishPage();
+      canvas = startPage();
+      y = 0;
+      pageEntries = [];
+    }
+    y = drawCard(canvas, entry, xs, y);
+    pageEntries.push(entry);
   }
+  if (pageEntries.length > 0) finishPage();
 }
 
 function drawCustomTitle(canvas: PageCanvas, top: number): void {

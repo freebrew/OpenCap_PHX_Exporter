@@ -64,13 +64,13 @@ function stubImager(calls: { text: string; rtl: boolean }[] = []): TextImager {
 const table = (words: Record<string, string>) => (english: string) => words[english] ?? english;
 
 describe("English cards stay exactly as they were", () => {
-  // Hashes of the cards as the core drew them before CardOptions existed. A deliberate card change updates them.
+  // Hashes of the cards as the core draws them in English (with the torque reference strip). A deliberate card change updates them.
   const BEFORE: Record<string, string> = {
-    motor: "ef4797ac38fbc082200f3f585b2bece082d6d25bf8bd27ef3b5f8c7e128448dd",
-    float: "48503d7507649c246e8918764f710d5a33893fd4880cf0637585322374410aab",
-    custom: "9c2d3627c5e373accb7b324164c459bacc3596e5c756e1a30d6e814203b26ceb",
+    motor: "533a8fbff474adba266fd2dac5d621557ad6104bbcdb5c67889fb7983f50d463",
+    float: "af4d78870f3d40c7a1731b286eb1487634f7175a4e9fe3c237ef03817a24c7b6",
+    custom: "d78170814ddf0d15bc011097dd520278f2d46dc355ea6103f8190d30c9841873",
     mwd: "cd3669a9440c24527d10a5f81315c7309f2e5fe94d8a1a955eb9a29e7da87b84",
-    all: "5a91d7d413ffb486fcf911b13f997b61b5c734b1b36a41e0bec820ec1a89b8d6",
+    all: "df0505b5248798f4ce09f782ed05a3503a90de533e587db6f0adb99ceb89d322",
   };
   const cases: Record<string, EntryPayload[]> = { motor: [MOTOR], float: [FLOAT], custom: [CUSTOM], mwd: [MWD], all: [MOTOR, FLOAT, CUSTOM, MWD] };
 
