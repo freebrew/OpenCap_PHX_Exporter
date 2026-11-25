@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Privacy Policy — OpenCap Data Exporter</title>
+  <title>Privacy Policy — OpenCap Extensions</title>
   <link rel="canonical" href="https://freebrew.github.io/OpenCap_PHX_Exporter/privacy.html">
-  <meta name="description" content="Privacy policy for the OpenCap Data Exporter browser extension.">
+  <meta name="description" content="Privacy policy for the OpenCap Data Exporter and OpenCap Slidesheet browser extensions.">
   <style>
     :root { color-scheme: light dark; --text: #1a1a1a; --muted: #444; --border: #ccc; --bg: #fff; }
     @media (prefers-color-scheme: dark) {
@@ -34,100 +34,116 @@
 
   <h1>Privacy Policy</h1>
   <p class="meta">
-    OpenCap Data Exporter (Chrome Web Store item <code>egafclljokidcoiipaiojlaamgkooffb</code>,
-    including the same package when installed in Microsoft Edge).<br>
-    Effective date: October 25, 2026.
+    Applies to:<br>
+    • <strong>OpenCap Data Exporter</strong> (Chrome Web Store item <code>egafclljokidcoiipaiojlaamgkooffb</code>,
+      including the same package when installed in Microsoft Edge)<br>
+    • <strong>OpenCap Slidesheet</strong> (Chrome Web Store item <code>mgdlaaffobkcjinmijjkbjjhnhkgcfpe</code>)<br>
+    Effective date: November 25, 2026.
   </p>
 
   <p>
-    This page is the privacy policy for that extension. It describes what the extension
-    does with information from your FieldCap session, and what it does not do.
+    This page is the privacy policy for both extensions. It describes what information
+    they process from your FieldCap session, local workbooks, and optional mail
+    connections, and what they do not do.
   </p>
 
-  <h2>Who operates it</h2>
+  <h2>Who operates them</h2>
   <p>
-    OpenCap Data Exporter is an independent, unofficial tool published by Bruno Brottes.
-    It is not affiliated with PHX Technology, FieldCap, or Pason Systems.
-    Questions about this policy: open an issue at
+    OpenCap Data Exporter and OpenCap Slidesheet are independent, unofficial tools
+    published by Bruno Brottes. They are not affiliated with PHX Technology, FieldCap,
+    or Pason Systems. Questions about this policy: open an issue at
     <a href="https://github.com/freebrew/OpenCap_PHX_Exporter/issues">github.com/freebrew/OpenCap_PHX_Exporter/issues</a>.
   </p>
 
-  <h2>Information the extension processes</h2>
+  <h2>Information the extensions process</h2>
   <p>
-    The extension does not ask you to create an account, and it does not collect your
-    FieldCap password. While you are already logged into FieldCap in the same browser,
-    and only after you choose Fetch, it reads job information you can already see and
-    turns it into CSV files on your computer:
+    Neither extension collects or stores your FieldCap password. While you are already
+    logged into FieldCap in the same browser, and only when you choose to fetch or sync
+    a job, they read job information you can already see and keep it on your computer:
   </p>
   <ul>
-    <li>Job identity and job fields returned by FieldCap for the job id you enter.</li>
+    <li>Job identity, well geometry, directional parameters, and surveys returned by FieldCap or opened from your local Excel Slide Sheet workbook.</li>
     <li>Crew and personnel records, which can include names, roles, phone numbers, and email addresses.</li>
     <li>BHA equipment, inventory, serials, hours, and drilled metres.</li>
-    <li>Daily slide and rotate metres.</li>
+    <li>Daily slide and rotate metres, activity blocks, downlinks, and pipe tally entries.</li>
     <li>Daily ticket cost totals and ticket counts.</li>
+    <li>Optional mailbox sign-in (OpenCap Slidesheet only): if you connect Microsoft 365 / Outlook or Google / Gmail to create daily drilling report drafts, the extension handles the OAuth token for that sign-in and the draft recipients, subject, report text, and inline images you ask it to compose.</li>
+    <li>Optional StrapSheets sign-in (OpenCap Slidesheet only): if you choose to sign into StrapSheets and click Publish, the extension stores your StrapSheets session token locally and sends the shift snapshot you chose to publish.</li>
   </ul>
   <p>
-    It also keeps, on your device only, the CSV text from the last fetch, the folder
-    you picked, and a few extension settings (such as whether a FieldCap dialog is
-    suppressed). Optional network sniffing, if you turn it on, records FieldCap request
-    addresses in extension storage on that same device so an unknown endpoint can be
-    identified. It does not record your password.
+    Both extensions also store local settings, cached CSV text, folder handles, and
+    (in OpenCap Slidesheet) local workbook snapshots and restore points on your device.
+    Optional network diagnostics, if turned on, record FieldCap request addresses on
+    <code>*.phxtech.com</code> locally so an endpoint change can be diagnosed. They do
+    not record passwords or activity on other websites.
   </p>
 
   <h2>How that information is used</h2>
   <p>
-    The information is used only to build the CSV files you asked for and to show fetch
-    status in the extension popup. The extension does not use it for advertising,
-    credit, or profiling, and it does not sell it.
+    Information is used solely to build your CSV exports, run your local directional
+    drilling workbook, draw proximity gauges and 3D well paths, and prepare daily
+    report email drafts when you request them. Neither extension sells user data, uses
+    it for advertising, profiling, or creditworthiness, or transfers it to third
+    parties outside the services you explicitly connect.
   </p>
 
   <h2>Where it goes</h2>
   <ul>
     <li>
-      <strong>FieldCap.</strong> Requests go to FieldCap hosts you are logged into
-      (<code>*.phxtech.com</code>, including <code>fieldcap-cdn.phxtech.com</code>),
-      using the browser session you already have. On Edge, those requests run inside
-      the open FieldCap tab. On Chrome, the extension service worker makes them.
+      <strong>FieldCap.</strong> Read-only requests go to FieldCap hosts you are logged
+      into (<code>*.phxtech.com</code>, including <code>fieldcap-cdn.phxtech.com</code>),
+      using your existing browser session.
     </li>
     <li>
-      <strong>Your computer.</strong> CSV files are written to a folder you choose, or
-      to your Downloads folder if that write is blocked. A copy of the latest CSV text
-      stays in the extension’s local storage until you clear it or fetch again.
+      <strong>Your computer.</strong> CSV exports, local workbook snapshots, restore
+      points, and generated <code>.eml</code> drafts stay on your device in the folder
+      you choose, your Downloads folder, or the browser's local extension storage.
     </li>
     <li>
-      <strong>Not to the publisher.</strong> The extension does not send job, crew,
-      cost, or other FieldCap data to the author, to GitHub, or to any analytics service.
-      There are no ads and no third-party trackers.
+      <strong>Optional mail providers (OpenCap Slidesheet).</strong> Only when you
+      connect a mailbox and ask to create a daily report draft, requests go directly
+      from your browser to Microsoft (<code>login.microsoftonline.com</code>,
+      <code>graph.microsoft.com</code>, <code>outlook.office.com</code>) or Google
+      (<code>oauth2.googleapis.com</code>, <code>gmail.googleapis.com</code>), or to the
+      optional local Classic Outlook helper (<code>com.phx.outlook</code>) installed on
+      your Windows PC.
+    </li>
+    <li>
+      <strong>Not to the publisher.</strong> Neither extension sends job, crew, survey,
+      cost, or email data to the author, to GitHub, or to any analytics or advertising
+      service.
     </li>
   </ul>
 
   <h2>Permissions</h2>
   <ul>
-    <li><strong>Host access</strong> to <code>*.phxtech.com</code> — call FieldCap while you are logged in.</li>
-    <li><strong>storage</strong> — keep the last CSVs and settings on the device.</li>
-    <li><strong>downloads</strong> — save a CSV when the folder write is blocked.</li>
-    <li><strong>activeTab</strong> and <strong>scripting</strong> — read the FieldCap page you have open and, on Edge, run the FieldCap request there.</li>
-    <li><strong>webRequest</strong> — see FieldCap request addresses on <code>*.phxtech.com</code> when sniffing is on. It is not used on other sites.</li>
-    <li><strong>alarms</strong> — remind the toolbar icon when a store update is waiting.</li>
+    <li><strong>Host access to <code>*.phxtech.com</code></strong> — read FieldCap job data while you are logged in.</li>
+    <li><strong>Host access to Microsoft / Google mail APIs</strong> (OpenCap Slidesheet) — optional OAuth sign-in and draft creation when you choose to email a daily report.</li>
+    <li><strong>storage / unlimitedStorage</strong> — store cached CSVs, settings, multi-sheet workbooks, restore points, and optional sign-in tokens locally on your device.</li>
+    <li><strong>downloads / downloads.open</strong> — save CSVs, <code>.eml</code> report drafts, or the optional Classic Outlook helper ZIP, and open a generated <code>.eml</code> draft in your desktop mail app.</li>
+    <li><strong>activeTab / scripting</strong> — read the active FieldCap tab's Job ID and run read-only FieldCap page/OData reads inside the open FieldCap tab when needed.</li>
+    <li><strong>webRequest</strong> — optional read-only endpoint diagnostics on <code>*.phxtech.com</code> only.</li>
+    <li><strong>alarms</strong> — periodic read-only FieldCap availability checks and update badge reminders.</li>
+    <li><strong>identity</strong> (OpenCap Slidesheet) — optional OAuth browser sign-in for Outlook, Gmail, or StrapSheets.</li>
+    <li><strong>nativeMessaging</strong> (OpenCap Slidesheet) — optional communication with a user-installed Windows helper for Classic Outlook drafts.</li>
   </ul>
 
   <h2>Retention and your choices</h2>
   <p>
-    Data stays until you delete the CSV files, clear the extension’s site data, or
-    remove the extension. Removing the extension deletes its local storage.
-    You can skip any export (including ticket costs and crew) by clearing that
-    checkbox before Fetch.
+    Local data stays on your device until you delete the files, clear the extension's
+    storage, disconnect a linked mailbox, or remove the extension. Removing an extension
+    deletes its browser storage.
   </p>
 
   <h2>Sharing you do yourself</h2>
   <p>
-    If you email a CSV, put it in a workbook, or copy it to a shared drive, that
-    copy is under your control and your employer’s rules. This policy does not
-    cover what you do with the files after they leave the extension.
+    If you send a daily report email, copy a CSV or workbook, or publish a snapshot,
+    that copy is under your control and your employer's rules. This policy does not
+    cover what happens to files after you share them.
   </p>
 
   <h2>Children</h2>
-  <p>The extension is a field operations tool. It is not directed at children under 13.</p>
+  <p>These extensions are field operations tools. They are not directed at children under 13.</p>
 
   <h2>Changes</h2>
   <p>
