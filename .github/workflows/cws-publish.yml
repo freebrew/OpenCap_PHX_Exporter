@@ -1,0 +1,137 @@
+name: Chrome Web Store Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      extension:
+        description: "Which extension to build and upload"
+        required: true
+        type: choice
+        default: slidesheet
+        options:
+          - slidesheet
+          - exporter
+      action:
+        description: "status = check store status only | upload = upload draft | publish = upload and submit for review"
+        required: true
+        type: choice
+        default: status
+        options:
+          - status
+          - upload
+          - publish
+
+env:
+  CWS_PUBLISHER_ID: "87968202-9345-4f1b-aa3b-fea7f758430d"
+  SLIDESHEET_ITEM_ID: "mgdlaaffobkcjinmijjkbjjhnhkgcfpe"
+  EXPORTER_ITEM_ID: "egafclljokidcoiipaiojlaamgkooffb"
+
+jobs:
+  chrome-web-store:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (without private submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Resolve item ID
+        id: target
+        run: |
+          if [ "${{ inputs.extension }}" = "slidesheet" ]; then
+            echo "item_id=$SLIDESHEET_ITEM_ID" >> "$GITHUB_OUTPUT"
+          else
+            echo "item_id=$EXPORTER_ITEM_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm (Slidesheet build)
+        if: inputs.extension == 'slidesheet' && inputs.action != 'status'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Build and pack OpenCap Slidesheet
+        if: inputs.extension == 'slidesheet' && inputs.action != 'status'
+        id: pack_slidesheet
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @phx/extension build
+          STAGE="$(mktemp -d)"
+          cp -R src/extension/dist/. "$STAGE/"
+          find "$STAGE" -type f \( -name '*.map' -o -name '*.pem' -o -name '*.crx' \) -delete
+          STAGE="$STAGE" node -e '
+            const fs = require("fs");
+            const p = process.env.STAGE + "/manifest.json";
+            const m = JSON.parse(fs.readFileSync(p, "utf8"));
+            if (m.manifest_version !== 3) throw new Error("Requires Manifest V3");
+            if ((m.description || "").length > 132) throw new Error("Manifest description > 132 chars");
+            delete m.key;
+            fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+          '
+          VER="$(node -p "JSON.parse(require('fs').readFileSync('src/extension/dist/manifest.json','utf8')).version")"
+          mkdir -p dist
+          ZIP_PATH="$PWD/dist/OpenCap_Slidesheet_v${VER}.zip"
+          (cd "$STAGE" && zip -rq "$ZIP_PATH" .)
+          rm -rf "$STAGE"
+          echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "Packed $ZIP_PATH ($(du -h "$ZIP_PATH" | cut -f1))"
+
+      - name: Pack OpenCap Data Exporter
+        if: inputs.extension == 'exporter' && inputs.action != 'status'
+        id: pack_exporter
+        run: |
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("src/chrome-extension/manifest.json", "utf8"));
+            if (m.manifest_version !== 3) throw new Error("Requires Manifest V3");
+            if ((m.description || "").length > 132) throw new Error("Manifest description > 132 chars");
+          '
+          VER="$(node -p "JSON.parse(require('fs').readFileSync('src/chrome-extension/manifest.json','utf8')).version")"
+          mkdir -p dist
+          ZIP_PATH="$PWD/dist/OpenCap_DataExporter_v${VER}.zip"
+          (
+            cd src/chrome-extension
+            zip -rq "$ZIP_PATH" \
+              manifest.json \
+              browser-api.js \
+              background.js \
+              content.js \
+              injected-spy.js \
+              popup.html \
+              popup.js \
+              icons/icon16.png \
+              icons/icon48.png \
+              icons/icon128.png
+          )
+          echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "Packed $ZIP_PATH ($(du -h "$ZIP_PATH" | cut -f1))"
+
+      - name: Upload built package artifact
+        if: inputs.action != 'status'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cws-${{ inputs.extension }}-zip
+          path: ${{ steps.pack_slidesheet.outputs.zip || steps.pack_exporter.outputs.zip }}
+
+      - name: Call Chrome Web Store API v2
+        env:
+          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          ZIP_ARG=""
+          ZIP_PATH="${{ steps.pack_slidesheet.outputs.zip || steps.pack_exporter.outputs.zip }}"
+          if [ -n "$ZIP_PATH" ]; then
+            ZIP_ARG="--zip $ZIP_PATH"
+          fi
+          node src/extension/scripts/cws-publish.mjs \
+            --publisher "$CWS_PUBLISHER_ID" \
+            --item "${{ steps.target.outputs.item_id }}" \
+            --action "${{ inputs.action }}" \
+            $ZIP_ARG

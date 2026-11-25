@@ -24,11 +24,13 @@ for (const name of [
 }
 const zip = join(packed, "phx-outlook-host.zip");
 rmSync(zip, { force: true });
-const result = spawnSync("powershell.exe", [
-  "-NoProfile",
-  "-Command",
-  `Compress-Archive -Path '${stage}\\*' -DestinationPath '${zip}' -Force`,
-], { stdio: "inherit" });
+const result = process.platform === "win32"
+  ? spawnSync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `Compress-Archive -Path '${stage}\\*' -DestinationPath '${zip}' -Force`,
+    ], { stdio: "inherit" })
+  : spawnSync("zip", ["-rq", zip, "."], { cwd: stage, stdio: "inherit" });
 if (result.status !== 0) process.exit(result.status ?? 1);
 rmSync(stage, { recursive: true, force: true });
 console.log(zip);
