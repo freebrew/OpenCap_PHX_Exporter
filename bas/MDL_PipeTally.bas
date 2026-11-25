@@ -410,7 +410,7 @@ Public Sub EnsurePipeTallyFormButton()
     ss.Shapes(PT_BTN).Delete
     On Error GoTo 0
 
-    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.Width, rng.Height)
+    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.width, rng.Height)
     btn.name = PT_BTN
     btn.caption = PT_CAPTION
     btn.OnAction = "'" & ThisWorkbook.name & "'!ShowPipeTallyForm"
@@ -829,7 +829,7 @@ Public Sub EnsureTallyAppendButton()
     pt.Shapes(BTN_NAME).Delete
     On Error GoTo 0
 
-    Set btn = pt.Buttons.Add(rng.Left, rng.Top, rng.Width, rng.Height)
+    Set btn = pt.Buttons.Add(rng.Left, rng.Top, rng.width, rng.Height)
     btn.name = BTN_NAME
     btn.caption = BTN_CAPTION
     btn.OnAction = "'" & ThisWorkbook.name & "'!AppendTallyBitDepths"
@@ -858,7 +858,7 @@ Public Sub ResizeTallyAppendButton()
     Set rng = pt.Range(BTN_ANCHOR).MergeArea
     shp.Left = rng.Left
     shp.Top = rng.Top
-    shp.Width = rng.Width
+    shp.width = rng.width
     shp.Height = rng.Height
     shp.Placement = xlMoveAndSize
     On Error GoTo 0

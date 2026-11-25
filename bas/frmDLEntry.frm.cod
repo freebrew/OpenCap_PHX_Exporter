@@ -22,8 +22,8 @@ Private cboPeriod As MSForms.ComboBox
 Private cboType As MSForms.ComboBox
 Private cboBottom As MSForms.ComboBox
 Private lblSetting As MSForms.Label
-Private txtI As MSForms.TextBox
-Private txtJ As MSForms.TextBox
+Private WithEvents txtI As MSForms.TextBox
+Private WithEvents txtJ As MSForms.TextBox
 Private txtDepth As MSForms.TextBox
 Private cboCode As MSForms.ComboBox
 Private txtMon As MSForms.TextBox
@@ -41,6 +41,10 @@ Private m_dt As Date
 Private m_high As Boolean
 Private m_busy As Boolean
 Private m_placed As Boolean
+Private m_inRefresh As Boolean
+Private m_hasSeed As Boolean
+Private m_seedI As Double
+Private m_seedJ As Double
 
 Private Const X1 As Single = 12
 Private Const C1 As Single = 90
@@ -61,6 +65,7 @@ Private Sub UserForm_Initialize()
     m_src = MDL_DownlinkTracker.gDLT_SourceRow
     BuildControls
     LoadDefaults
+    RememberSeed
     m_busy = False
     RefreshCommand
     MDL_DownlinkTracker.DLT_WheelOn
@@ -311,6 +316,16 @@ Private Sub cboPass_Change()
     RefreshCode
 End Sub
 
+Private Sub txtI_Change()
+    If m_busy Or m_inRefresh Then Exit Sub
+    RememberSeed
+End Sub
+
+Private Sub txtJ_Change()
+    If m_busy Or m_inRefresh Then Exit Sub
+    RememberSeed
+End Sub
+
 Private Sub spnDepth_SpinUp()
     BumpDepth 1#
 End Sub
@@ -435,17 +450,38 @@ Private Sub RefreshCommand()
     RefreshCode
 End Sub
 
+Private Sub RememberSeed()
+    Dim sI As String, sJ As String
+    sI = Trim$(txtI.Text)
+    sJ = Trim$(txtJ.Text)
+    If Len(sI) = 0 Or Len(sJ) = 0 Then Exit Sub
+    If Not IsNumeric(sI) Or Not IsNumeric(sJ) Then Exit Sub
+    m_seedI = CDbl(sI)
+    m_seedJ = CDbl(sJ)
+    m_hasSeed = True
+End Sub
+
 Private Sub RefreshIJ()
     Dim pI As Double, pJ As Double, oI As Double, oJ As Double
     Dim hasPrev As Boolean
     Dim setting As String
 
     hasPrev = MDL_DownlinkTracker.DLT_PrevIJ(m_ws, m_row, PageKey(), pI, pJ)
+    If Not hasPrev And m_hasSeed Then
+        hasPrev = True
+        pI = m_seedI
+        pJ = m_seedJ
+    End If
     If UCase$(cboPass.Text) = "FAIL" Then
-        If hasPrev Then txtI.Text = NumText(pI): txtJ.Text = NumText(pJ)
+        If hasPrev Then
+            m_inRefresh = True
+            txtI.Text = NumText(pI): txtJ.Text = NumText(pJ)
+            m_inRefresh = False
+        End If
         Exit Sub
     End If
     setting = MDL_DownlinkTracker.DLT_LookupSetting(m_ws, PageKey(), Trim$(cboCmd.Text))
+    m_inRefresh = True
     Select Case MDL_DownlinkTracker.DLT_ComputeIJ(setting, hasPrev, pI, pJ, oI, oJ)
         Case DLT_IJ_SET
             txtI.Text = NumText(oI)
@@ -454,6 +490,7 @@ Private Sub RefreshIJ()
             txtI.Text = ""
             txtJ.Text = ""
     End Select
+    m_inRefresh = False
 End Sub
 
 Private Sub RefreshCode()

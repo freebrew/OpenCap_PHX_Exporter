@@ -11,7 +11,7 @@ Dim name As String
     Range("B5:F70").Select
     ActiveSheet.PageSetup.PrintArea = "$B$5:$F$70"
     
-    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=name, _
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, fileName:=name, _
     Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
     Range("E1:V70").Select

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDraft, type MailDraft, type TransportResult } from "@phx/mail";
 import { composeOnPort, probeClassic, type HostPort, type HostReply } from "./classicHost";
+import { openDesktopDraft, openDownloadedDraft, type DownloadChangeDelta, type DownloadsApi } from "./desktopDraft";
 import { chooseSuggestion, looksLikeClassic } from "./detect";
+import { mailtoUrl } from "./genericMail";
 import { createGmailDraft } from "./gmailDraft";
 import { createMicrosoftDraft } from "./microsoftDraft";
 import { deliverReport, rememberRetry, retryOpen, type ReportTransport } from "./pipeline";
@@ -206,12 +208,74 @@ describe("classic port and detection", () => {
     expect(script.sent.filter((message) => (message as { command: string }).command === "compose.commit")).toHaveLength(1);
   });
 
-  it("suggests one client and leaves a tie unselected", () => {
+  it("suggests one client, defaults to outlook when none detected, and leaves a tie unselected", () => {
     expect(looksLikeClassic({ outlookRegistered: true, mailtoCommand: "outlook.exe", defaultClient: "" })).toBe(true);
     expect(looksLikeClassic({ outlookRegistered: true, mailtoCommand: "", defaultClient: "New Outlook" })).toBe(false);
     expect(chooseSuggestion({ classicReady: true, tabVendors: [], connected: null }).client).toBe("classic");
     expect(chooseSuggestion({ classicReady: true, tabVendors: ["gmail"], connected: null }).client).toBeNull();
     expect(chooseSuggestion({ classicReady: false, tabVendors: [], connected: "microsoft" }).client).toBe("microsoft");
+    expect(chooseSuggestion({ classicReady: false, tabVendors: [], connected: null }).client).toBe("outlook");
+  });
+
+  it("opens an X-Unsent: 1 .eml draft directly in Classic or New Outlook via chrome.downloads.open", async () => {
+    const listeners = new Set<(delta: DownloadChangeDelta) => void>();
+    const openedIds: number[] = [];
+    let capturedBlob: Blob | null = null;
+    let savedFilename = "";
+    const downloads: DownloadsApi = {
+      async download(options) {
+        savedFilename = options.filename;
+        setTimeout(() => {
+          for (const listener of listeners) listener({ id: 42, state: { current: "complete" } });
+        }, 0);
+        return 42;
+      },
+      async search() { return [{ id: 42, state: "in_progress" }]; },
+      async open(id) { openedIds.push(id); },
+      onChanged: {
+        addListener(listener) { listeners.add(listener); },
+        removeListener(listener) { listeners.delete(listener); },
+      },
+    };
+    const outcome = await openDesktopDraft(draft(), {
+      downloads,
+      createObjectUrl(blob) { capturedBlob = blob; return "blob:test"; },
+      revokeObjectUrl() {},
+      now: () => new Date(2026, 10, 24),
+    });
+    expect(outcome.downloadId).toBe(42);
+    expect(outcome.result).toEqual({ status: "created-and-opened", id: "42", location: "Outlook" });
+    expect(openedIds).toEqual([42]);
+    expect(savedFilename).toBe("PHX-Reports/2026-11-24 Daily Report.eml");
+    expect(await capturedBlob!.text()).toMatch(/^X-Unsent: 1\r\nTo: a@example\.com\r\n/);
+  });
+
+  it("returns created-not-opened when Chrome requires a fresh click, and retries opening the same draft", async () => {
+    let attempts = 0;
+    const downloads: DownloadsApi = {
+      async download() { return 7; },
+      async search() { return [{ id: 7, state: "complete" }]; },
+      async open() {
+        attempts += 1;
+        if (attempts === 1) throw new Error("User gesture required");
+      },
+      onChanged: { addListener() {}, removeListener() {} },
+    };
+    const outcome = await openDesktopDraft(draft(), {
+      downloads,
+      createObjectUrl: () => "blob:retry",
+      revokeObjectUrl: () => undefined,
+    });
+    expect(outcome.downloadId).toBe(7);
+    expect(outcome.result.status).toBe("created-not-opened");
+    const retried = await openDownloadedDraft(7, downloads);
+    expect(retried).toEqual({ status: "created-and-opened", id: "7", location: "Outlook" });
+  });
+
+  it("encodes mailto spaces as %20 instead of + so Outlook subjects are clean", () => {
+    const url = mailtoUrl(draft());
+    expect(url).toContain("subject=Daily%20Drilling%20Summary%20-%20Job");
+    expect(url).not.toContain("Daily+Drilling+Summary");
   });
 });
 

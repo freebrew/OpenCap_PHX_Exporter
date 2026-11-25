@@ -19,6 +19,18 @@ export {
   sha256Text,
 } from "./handoff.js";
 export type { CanonBook, CellDecision, CellKind, HandoffBundleInput, HandoffCommit, HandoffDiff, HandoffOp, HandoffReceipt } from "./handoff.js";
+export {
+  defaultConflictChoice,
+  diffVisibleUserData,
+  isActiveBhaCell,
+  isBrowserAuthoritativeSheet,
+  isDerivedCell,
+  machineWrittenCell,
+  mergeVisibleUserData,
+  numbersClose,
+  scalarEqual,
+} from "./syncMerge.js";
+export type { CellOp, ScalarCell, ScalarKind, SyncConflict, VisibleMerge } from "./syncMerge.js";
 export { restyleWorkbook } from "./restyle.js";
 export type { MacroButton } from "./macroButtons.js";
 export { DEFAULT_LIMITS, ImportRejectedError } from "./types.js";

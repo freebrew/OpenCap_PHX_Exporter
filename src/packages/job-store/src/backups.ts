@@ -1,80 +1,108 @@
 import type { StoredDirectory } from "./directory.js";
+import { StoreError } from "./types.js";
 
-const RECENT_LIMIT = 10;
-const DAILY_LIMIT = 14;
-const WEEKLY_LIMIT = 8;
-const DAILY_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-const WEEKLY_AGE_MS = 56 * 24 * 60 * 60 * 1000;
+/** Single restore-point location under the job folder, next to the OpenCap CSV exports. */
+export const BACKUP_DIR = "OpenCap";
+export const BACKUP_FILE = ".phx-backup.json";
 
-export interface BackupPlan {
-  recent: string;
-  daily: string;
-  weekly: string;
+function isLegacyBackupName(name: string): boolean {
+  return name.startsWith(".phx-backup-") && name.endsWith(".json");
 }
 
-export function backupNames(now: Date): BackupPlan {
-  const stamp = now.toISOString().replace(/[:.]/g, "-");
-  const day = now.toISOString().slice(0, 10);
-  const week = isoWeek(now);
-  return {
-    recent: `.phx-backup-recent-${stamp}.json`,
-    daily: `.phx-backup-daily-${day}.json`,
-    weekly: `.phx-backup-weekly-${week}.json`,
+function isBackupFileName(name: string): boolean {
+  return name === BACKUP_FILE || isLegacyBackupName(name);
+}
+
+function compareLegacyNewestFirst(a: string, b: string): number {
+  const rank = (name: string) => {
+    if (name.includes("-recent-")) return 0;
+    if (name.includes("-daily-")) return 1;
+    if (name.includes("-weekly-")) return 2;
+    return 3;
   };
+  return rank(a) - rank(b) || b.localeCompare(a);
 }
 
-function isoWeek(date: Date): string {
-  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const day = utc.getUTCDay() || 7;
-  utc.setUTCDate(utc.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
-async function writeCopy(directory: StoredDirectory, name: string, bytes: Uint8Array): Promise<void> {
-  const existing = await directory.getFile(name, false);
-  if (existing) return;
+async function writeOverwrite(directory: StoredDirectory, name: string, bytes: Uint8Array): Promise<void> {
   const file = await directory.getFile(name, true);
-  if (!file) return;
+  if (!file) throw new StoreError("invalid", `Backup file ${name} could not be created.`);
   const writer = await file.writeExclusive();
-  await writer.write(bytes);
-  await writer.close();
-}
-
-export async function createRestorePoint(directory: StoredDirectory, canonical: Uint8Array, now = new Date()): Promise<void> {
-  const names = backupNames(now);
-  await writeCopy(directory, names.recent, canonical);
-  await writeCopy(directory, names.daily, canonical);
-  await writeCopy(directory, names.weekly, canonical);
-  await retain(directory, now);
-}
-
-export async function listBackups(directory: StoredDirectory): Promise<string[]> {
-  const names = await directory.list();
-  return names.filter((name) => name.startsWith(".phx-backup-")).sort();
-}
-
-async function retain(directory: StoredDirectory, now: Date): Promise<void> {
-  const names = await listBackups(directory);
-  await trim(directory, names.filter((name) => name.includes("-recent-")), RECENT_LIMIT, null, now);
-  await trim(directory, names.filter((name) => name.includes("-daily-")), DAILY_LIMIT, DAILY_AGE_MS, now);
-  await trim(directory, names.filter((name) => name.includes("-weekly-")), WEEKLY_LIMIT, WEEKLY_AGE_MS, now);
-}
-
-async function trim(directory: StoredDirectory, names: string[], limit: number, maxAge: number | null, now: Date): Promise<void> {
-  const ordered = [...names].sort();
-  const extras = ordered.slice(0, Math.max(0, ordered.length - limit));
-  for (const name of ordered) {
-    const stale = maxAge != null && now.getTime() - stampOf(name) > maxAge;
-    if (!extras.includes(name) && !stale) continue;
-    const file = await directory.getFile(name, false);
-    if (file) await file.remove();
+  try {
+    await writer.write(bytes);
+    await writer.close();
+  } catch (error) {
+    await writer.abort().catch(() => undefined);
+    throw error;
   }
 }
 
-function stampOf(name: string): number {
-  const match = name.match(/(\d{4}-\d{2}-\d{2})/);
-  if (!match) return Date.now();
-  return Date.parse(match[1]);
+async function removeFiles(directory: StoredDirectory, names: readonly string[]): Promise<void> {
+  for (const name of names) {
+    const file = await directory.getFile(name, false);
+    if (file) await file.remove().catch(() => undefined);
+  }
+}
+
+/**
+ * Overwrite the single restore point at `<job>/OpenCap/.phx-backup.json` and remove any
+ * legacy multi-backup files from the job root or `OpenCap/`.
+ */
+export async function createRestorePoint(directory: StoredDirectory, canonical: Uint8Array): Promise<void> {
+  const backupDir = await directory.getDirectory(BACKUP_DIR, true);
+  if (!backupDir) throw new StoreError("invalid", `${BACKUP_DIR} folder could not be created for backup.`);
+  await writeOverwrite(backupDir, BACKUP_FILE, canonical);
+  const [rootNames, openCapNames] = await Promise.all([directory.list(), backupDir.list()]);
+  await removeFiles(directory, rootNames.filter(isBackupFileName));
+  await removeFiles(backupDir, openCapNames.filter(isLegacyBackupName));
+}
+
+/**
+ * Consolidate legacy `.phx-backup-*.json` files left in the job root or `OpenCap/` by older builds
+ * into the single `OpenCap/.phx-backup.json` file, preserving the newest backup if none exists yet.
+ */
+export async function migrateLegacyBackups(directory: StoredDirectory): Promise<void> {
+  const rootNames = await directory.list();
+  const rootBackups = rootNames.filter(isBackupFileName);
+  const openCap = await directory.getDirectory(BACKUP_DIR, false);
+  const openCapNames = openCap ? await openCap.list() : [];
+  const openCapLegacy = openCapNames.filter(isLegacyBackupName);
+  if (rootBackups.length === 0 && openCapLegacy.length === 0) return;
+
+  const backupDir = openCap ?? (await directory.getDirectory(BACKUP_DIR, true));
+  if (!backupDir) return;
+
+  const existingFile = await backupDir.getFile(BACKUP_FILE, false);
+  const existingBytes = existingFile ? await existingFile.read() : null;
+  if (!existingBytes || existingBytes.byteLength === 0) {
+    const candidates: Array<{ dir: StoredDirectory; name: string }> = [
+      ...openCapLegacy.map((name) => ({ dir: backupDir, name })),
+      ...rootBackups.map((name) => ({ dir: directory, name })),
+    ].sort((a, b) => compareLegacyNewestFirst(a.name, b.name));
+    for (const candidate of candidates) {
+      const file = await candidate.dir.getFile(candidate.name, false);
+      const bytes = file ? await file.read() : null;
+      if (bytes && bytes.byteLength > 0) {
+        await writeOverwrite(backupDir, BACKUP_FILE, bytes);
+        break;
+      }
+    }
+  }
+
+  await removeFiles(directory, rootBackups);
+  await removeFiles(backupDir, openCapLegacy);
+}
+
+/** Available restore points: `OpenCap/.phx-backup.json` (plus any un-migrated legacy backups). */
+export async function listBackups(directory: StoredDirectory): Promise<string[]> {
+  const found: string[] = [];
+  const openCap = await directory.getDirectory(BACKUP_DIR, false);
+  if (openCap) {
+    for (const name of (await openCap.list()).filter(isBackupFileName).sort()) {
+      found.push(`${BACKUP_DIR}/${name}`);
+    }
+  }
+  for (const name of (await directory.list()).filter(isBackupFileName).sort()) {
+    found.push(name);
+  }
+  return found;
 }

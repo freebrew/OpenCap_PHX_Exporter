@@ -47,7 +47,12 @@ export function yawPoint(view: ShaftYaw, n: number, e: number): { n: number; e: 
   return { n: sign * (n * view.c - e * view.s), e: sign * (n * view.s + e * view.c) };
 }
 
-/** Signed screen turn in degrees; positive is visually clockwise/right because canvas Y points down. */
+/**
+ * Signed screen turn in degrees. Canvas Y points down, so positive is visually clockwise. The shaft
+ * runs down the page, and a path heading down that turns clockwise bends toward the page's LEFT
+ * (counter-clockwise bends right). A left turn of the hole (azimuth decreasing) has to read
+ * positive here, a right turn negative.
+ */
 function signedScreenBend(view: ShaftYaw, a: Pt3, b: Pt3): number {
   const onScreen = (d: Pt3) => {
     const y = yawPoint(view, d.n, d.e);
@@ -63,25 +68,35 @@ export function screenBend(view: ShaftYaw, a: Pt3, b: Pt3): number {
 }
 
 const TURN_GAIN_DEG = 10;
+/** A world turn smaller than this is noise; it does not decide which way the picture must bend. */
+const TURN_MIN_DEG = 3;
 
 /**
  * Facing-the-bit heading for the shaft. Facing the bit can put the eye in the plane of a turn,
  * which draws a curved day as a straight line (the shadows still show it). When another heading
  * shows at least TURN_GAIN_DEG more of the bend, use the one that shows the most, nearest the bit.
+ *
+ * Only a heading that bends the same way the hole turns is acceptable, the facing one included:
+ * a left turn (azimuth decreasing) has to bend toward the page's left, a right turn toward the right.
  */
 export function shaftFacing(endAz: number, start: Pt3, end: Pt3): number {
   const startAz = Math.atan2(start.e, start.n);
   const worldTurn = Math.atan2(Math.sin(endAz - startAz), Math.cos(endAz - startAz));
-  const turnSign = Math.sign(worldTurn);
+  const turnSign = Math.abs(worldTurn) * DEG < TURN_MIN_DEG ? 0 : Math.sign(worldTurn);
+  // On a hole running down the page, clockwise on screen (positive) bends left.
+  const wanted = -turnSign;
   const tries = Array.from({ length: 72 }, (_, k) => {
     const az = endAz + k * 5 * Math.PI / 180;
     const signedBend = signedScreenBend(shaftYaw(az, false), start, end);
     return { az, bend: Math.abs(signedBend), handed: Math.sign(signedBend), off: Math.min(k, 72 - k) };
   });
-  const atBit = tries[0]!.bend;
-  const handed = turnSign === 0 ? tries : tries.filter((t) => t.handed === turnSign);
+  const handed = turnSign === 0 ? tries : tries.filter((t) => t.handed === wanted);
+  const atBit = turnSign === 0 || tries[0]!.handed === wanted ? tries[0]!.bend : 0;
+  if (handed.length === 0) return endAz;
   const most = Math.max(...handed.map((t) => t.bend));
-  if (most < atBit + TURN_GAIN_DEG) return endAz;
+  // A facing view that visibly bends the wrong way is replaced even when the right-way view shows little.
+  const wrongAtBit = turnSign !== 0 && tries[0]!.handed !== wanted && tries[0]!.bend >= TURN_MIN_DEG;
+  if (!wrongAtBit && most < atBit + TURN_GAIN_DEG) return endAz;
   const near = handed.filter((t) => t.bend >= most - 3).sort((a, b) => a.off - b.off);
   return near[0]!.az;
 }

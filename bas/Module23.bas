@@ -101,12 +101,13 @@ Public Sub RefreshData()
     Dim prevSheet As Worksheet
     Dim prevCellAddr As String
     If TypeOf ActiveSheet Is Worksheet Then
-        If ActiveSheet.Parent Is ThisWorkbook Then
+        If ActiveSheet.parent Is ThisWorkbook Then
             Set prevSheet = ActiveSheet
             prevCellAddr = ActiveCell.Address(False, False)
         End If
     End If
 
+    ShowWorkbookWindow
     ' Freeze the screen for the WHOLE refresh.  The nested routines below use the
     ' same reference-counted guard, so none of them can thaw the screen early
     ' and let Excel repaint a half-built sheet.
@@ -150,14 +151,18 @@ Public Sub RefreshData()
     DDTools_SyncActiveBhaRow
     If SheetExists(SH_UI) And fBha <> "" Then
         Application.StatusBar = "Refresh: redrawing DD Tools BHA detail..."
-        Dim activeBha As Long, dM As Double, dSm As Double, dSh As Double, dRh As Double, dCh As Double
-        If DayRoll_ActiveBhaTotals(activeBha, dM, dSm, dSh, dRh, dCh) Then
-            If GetFirstBHARow(activeBha) > 0 Then
+        Dim activeBHA As Long, dM As Double, dSm As Double, dSh As Double, dRh As Double, dCh As Double
+        If DayRoll_ActiveBhaTotals(activeBHA, dM, dSm, dSh, dRh, dCh) Then
+            If GetFirstBHARow(activeBHA) > 0 Then
                 Dim ddWs As Worksheet, ddProt As Boolean
                 Set ddWs = Worksheets(SH_UI)
                 ddProt = SheetUnprotectForVba(ddWs)
-                HighlightBHAButton ddWs, activeBha
-                DrawBHADetail ddWs, activeBha
+                HighlightBHAButton ddWs, activeBHA
+                ' DrawBHADetail clears A:AD, the cumulative table and the raw
+                ' summary (Data!H36:M47 mirror) included; redraw them as SelectBHA does.
+                DrawBHADetail ddWs, activeBHA
+                DrawCumulativeTable ddWs
+                DrawRawBHASummaryTable ddWs
                 SheetReprotectAfterVba ddWs, ddProt
             End If
         End If
@@ -209,6 +214,46 @@ ErrHandler:
     MsgBox "Error " & Err.Number & ": " & Err.Description, vbCritical, "Refresh"
 End Sub
 
+' Silent, MsgBox-free DD Tools + derived Data table refresh called from browser handoff.
+Public Sub SyncDDToolsFromCsvs(ByVal fJob As String, ByVal fCrew As String, ByVal fBha As String)
+    On Error GoTo Done
+    If fJob = "" And fCrew = "" And fBha = "" Then Exit Sub
+
+    SetupDataSheets
+    If fJob <> "" Then ImportCSVToSheet fJob, Worksheets(SH_JOB)
+    If fCrew <> "" Then ImportCSVToSheet fCrew, Worksheets(SH_CREW)
+    If fBha <> "" Then ImportCSVToSheet fBha, Worksheets(SH_BHA)
+
+    If fJob <> "" And fCrew <> "" And fBha <> "" Then
+        If SheetExists(SH_UI) Then BuildUI
+    End If
+
+    On Error Resume Next
+    EnsureDataBhaMirrorUnlocked
+    Application.Calculate
+    DDTools_SyncActiveBhaRow
+    If SheetExists(SH_UI) And fBha <> "" Then
+        Dim activeBHA As Long, dM As Double, dSm As Double, dSh As Double, dRh As Double, dCh As Double
+        If DayRoll_ActiveBhaTotals(activeBHA, dM, dSm, dSh, dRh, dCh) Then
+            If GetFirstBHARow(activeBHA) > 0 Then
+                Dim ddWs As Worksheet, ddProt As Boolean
+                Set ddWs = Worksheets(SH_UI)
+                ddProt = SheetUnprotectForVba(ddWs)
+                HighlightBHAButton ddWs, activeBHA
+                DrawBHADetail ddWs, activeBHA
+                DrawCumulativeTable ddWs
+                DrawRawBHASummaryTable ddWs
+                SheetReprotectAfterVba ddWs, ddProt
+            End If
+        End If
+    End If
+    Application.Calculate
+    ToolHours_SeedFromInventory
+    ToolHours_Sync
+    BuildDataSerialHoursTable
+Done:
+End Sub
+
 Public Sub RebuildDashboard()
     If Not SheetExists(SH_BHA) Then
         MsgBox "No data found. Click REFRESH first.", vbInformation, "DD Tools"
@@ -220,7 +265,7 @@ Public Sub RebuildDashboard()
     Dim prevSheet As Worksheet
     Dim prevCellAddr As String
     If TypeOf ActiveSheet Is Worksheet Then
-        If ActiveSheet.Parent Is ThisWorkbook Then
+        If ActiveSheet.parent Is ThisWorkbook Then
             Set prevSheet = ActiveSheet
             prevCellAddr = ActiveCell.Address(False, False)
         End If
@@ -320,7 +365,7 @@ Private Sub ImportCSVToSheet(filePath As String, ws As Worksheet)
 
         Dim c As Long
         For c = 0 To UBound(fields)
-            ws.Cells(rowIdx, c + 1).Value = SmartConvert(fields(c))
+            ws.Cells(rowIdx, c + 1).value = SmartConvert(fields(c))
         Next c
 
         rowIdx = rowIdx + 1
@@ -439,10 +484,13 @@ Private Sub BuildUI()
     Exit Sub
 
 ErrHandler:
+    Dim errNum As Long, errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
     On Error Resume Next
     SheetReprotectAfterVba ws, ddWasProt
     On Error GoTo 0
-    MsgBox "Error " & Err.Number & " in BuildUI [" & uiStep & "]:" & Chr(10) & Err.Description, _
+    MsgBox "Error " & errNum & " in BuildUI [" & uiStep & "]:" & Chr(10) & errDesc, _
            vbCritical, "DD Tools - BuildUI"
 End Sub
 
@@ -486,7 +534,7 @@ Private Sub DrawToolbar(ws As Worksheet)
     ' Title in A1:C1
     With ws.Range("A1:C1")
         .Merge
-        .Value = "FIELDCAP DD TOOLS"
+        .value = "FIELDCAP DD TOOLS"
         .Font.size = 13
         .Font.bold = True
         .Font.Color = cBlack()
@@ -498,7 +546,7 @@ Private Sub DrawToolbar(ws As Worksheet)
     Dim jobLabel As String
     jobLabel = GetJobHeaderLabel()
     With ws.Cells(R_JOB, 1)
-        .Value = jobLabel
+        .value = jobLabel
         .Font.size = 8
         .Font.Color = cGrayDk()
         .Font.bold = False
@@ -519,7 +567,7 @@ End Sub
 Private Sub IslandSummaryPair(ws As Worksheet, r As Long, labelCol As Long, _
                               label As String, val As String, rowBg As Long)
     With ws.Cells(r, labelCol)
-        .Value = label
+        .value = label
         .Interior.Color = rowBg
         .Font.Color = cGrayDk()
         .Font.size = 8
@@ -527,7 +575,7 @@ Private Sub IslandSummaryPair(ws As Worksheet, r As Long, labelCol As Long, _
         .HorizontalAlignment = xlHAlignRight
     End With
     With ws.Cells(r, labelCol + 1)
-        .Value = val
+        .value = val
         .Interior.Color = rowBg
         .Font.Color = cBlack()
         .Font.size = 9
@@ -572,7 +620,7 @@ Private Sub DrawSummaryIslandFourColumns(ws As Worksheet, bhaNum As Long, _
 
     With ws.Range(ws.Cells(hdr, COL_SUMMARY_L), ws.Cells(hdr, COL_SUMMARY_L + 1))
         .Merge
-        .Value = "SELECTED BHA"
+        .value = "SELECTED BHA"
         .Interior.Color = cGrayBg()
         .Font.bold = True
         .Font.size = 8
@@ -582,7 +630,7 @@ Private Sub DrawSummaryIslandFourColumns(ws As Worksheet, bhaNum As Long, _
     End With
     With ws.Range(ws.Cells(hdr, COL_SUMMARY_R), ws.Cells(hdr, COL_SUMMARY_END))
         .Merge
-        .Value = "BHA " & CStr(bhaNum)
+        .value = "BHA " & CStr(bhaNum)
         .Interior.Color = cGrayBg()
         .Font.bold = True
         .Font.size = 8
@@ -731,7 +779,7 @@ Private Sub DrawBHAButtons(ws As Worksheet, bhaList As Variant)
         Set targetCell = ws.Cells(R_TOOLBAR, targetCol)
 
         Dim btn As Button
-        Set btn = ws.Buttons.Add(targetCell.Left, targetCell.Top, targetCell.Width, targetCell.Height)
+        Set btn = ws.Buttons.Add(targetCell.Left, targetCell.Top, targetCell.width, targetCell.Height)
         btn.name = "BHABtn_" & bNum
         btn.OnAction = "'" & ThisWorkbook.name & "'!SelectBHA"
         btn.Placement = xlMoveAndSize
@@ -772,7 +820,7 @@ Private Sub AddControlButtons(ws As Worksheet)
     Dim cellRef As Range
     Set cellRef = ws.Cells(R_TOOLBAR, 4)
     Dim bImport As Button
-    Set bImport = ws.Buttons.Add(cellRef.Left, cellRef.Top, cellRef.Width, cellRef.Height)
+    Set bImport = ws.Buttons.Add(cellRef.Left, cellRef.Top, cellRef.width, cellRef.Height)
     bImport.name = "BtnImport"
     bImport.OnAction = "'" & ThisWorkbook.name & "'!RefreshData"
     bImport.Placement = xlMoveAndSize
@@ -782,7 +830,7 @@ Private Sub AddControlButtons(ws As Worksheet)
     Dim cellReb As Range
     Set cellReb = ws.Cells(R_TOOLBAR, 5)
     Dim bRebuild As Button
-    Set bRebuild = ws.Buttons.Add(cellReb.Left, cellReb.Top, cellReb.Width, cellReb.Height)
+    Set bRebuild = ws.Buttons.Add(cellReb.Left, cellReb.Top, cellReb.width, cellReb.Height)
     bRebuild.name = "BtnRebuild"
     bRebuild.OnAction = "'" & ThisWorkbook.name & "'!RebuildDashboard"
     bRebuild.Placement = xlMoveAndSize
@@ -902,18 +950,18 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
         .Font.bold = True
         .Font.size = 8
     End With
-    ws.Cells(r, 1).Value = "#"
+    ws.Cells(r, 1).value = "#"
     ws.Cells(r, 1).HorizontalAlignment = xlHAlignCenter
-    ws.Cells(r, 2).Value = "SERIAL #"
-    ws.Cells(r, 3).Value = "ITEM CODE"
-    ws.Cells(r, 4).Value = "DESCRIPTION"
-    ws.Cells(r, 5).Value = "HRS SLD"
+    ws.Cells(r, 2).value = "SERIAL #"
+    ws.Cells(r, 3).value = "ITEM CODE"
+    ws.Cells(r, 4).value = "DESCRIPTION"
+    ws.Cells(r, 5).value = "HRS SLD"
     ws.Cells(r, 5).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, 6).Value = "HRS ROT"
+    ws.Cells(r, 6).value = "HRS ROT"
     ws.Cells(r, 6).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, 7).Value = "TOTAL HRS"
+    ws.Cells(r, 7).value = "TOTAL HRS"
     ws.Cells(r, 7).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, COL_DATA_LAST).Value = "BHAs"
+    ws.Cells(r, COL_DATA_LAST).value = "BHAs"
     ws.Cells(r, COL_DATA_LAST).HorizontalAlignment = xlHAlignRight
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
@@ -930,7 +978,7 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
     Dim dr As Long
     For dr = 2 To lastRow
         Dim rawBNum As Variant
-        rawBNum = bhaWs.Cells(dr, cBNum).Value
+        rawBNum = bhaWs.Cells(dr, cBNum).value
         If IsNumeric(rawBNum) Then
             If CLng(rawBNum) = bhaNum Then
                 ' Skip blank rows (no serial AND no item code AND no description)
@@ -953,21 +1001,21 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
 
                 ' Hours columns align with the island metrics
                 With ws.Cells(r, 5)
-                    .Value = Format(sldHrs, "0.00")
+                    .value = Format(sldHrs, "0.00")
                     .Interior.Color = bg
                     .Font.Color = cBlack()
                     .Font.size = 9
                     .HorizontalAlignment = xlHAlignRight
                 End With
                 With ws.Cells(r, 6)
-                    .Value = Format(rotHrs, "0.00")
+                    .value = Format(rotHrs, "0.00")
                     .Interior.Color = bg
                     .Font.Color = cBlack()
                     .Font.size = 9
                     .HorizontalAlignment = xlHAlignRight
                 End With
                 With ws.Cells(r, 7)
-                    .Value = Format(totHrs, "0.00")
+                    .value = Format(totHrs, "0.00")
                     .Interior.Color = bg
                     .Font.Color = cBlack()
                     .Font.bold = True
@@ -975,7 +1023,7 @@ Private Sub DrawBHADetail(ws As Worksheet, bhaNum As Long)
                     .HorizontalAlignment = xlHAlignRight
                 End With
                 With ws.Cells(r, COL_DATA_LAST)
-                    .Value = bhaNum
+                    .value = bhaNum
                     .Interior.Color = bg
                     .Font.Color = cGrayDk()
                     .Font.size = 9
@@ -1004,12 +1052,12 @@ SkipComp:
 End Sub
 
 Private Sub MetricRow(ws As Worksheet, r As Long, c As Long, label As String, val As String)
-    ws.Cells(r, c).Value = label
+    ws.Cells(r, c).value = label
     ws.Cells(r, c).Font.Color = cGrayDk()
     ws.Cells(r, c).Font.size = 8
     ws.Cells(r, c).Font.bold = True
     ws.Cells(r, c).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, c + 1).Value = val
+    ws.Cells(r, c + 1).value = val
     ws.Cells(r, c + 1).Font.Color = cBlack()
     ws.Cells(r, c + 1).Font.size = 9
     ws.Cells(r, c + 1).HorizontalAlignment = xlHAlignLeft
@@ -1056,7 +1104,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         .Font.bold = True
         .Font.size = 10
     End With
-    ws.Cells(r, 1).Value = "SERIAL HOURS PER BHA (BHA-tab items)"
+    ws.Cells(r, 1).value = "SERIAL HOURS PER BHA (BHA-tab items)"
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
         .Color = cTeal()
@@ -1072,15 +1120,15 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         .Font.bold = True
         .Font.size = 8
     End With
-    ws.Cells(r, 1).Value = "#"
+    ws.Cells(r, 1).value = "#"
     ws.Cells(r, 1).HorizontalAlignment = xlHAlignCenter
-    ws.Cells(r, 2).Value = "SERIAL #"
-    ws.Cells(r, 3).Value = "DESCRIPTION"
-    ws.Cells(r, 6).Value = "HRS CIRC"
+    ws.Cells(r, 2).value = "SERIAL #"
+    ws.Cells(r, 3).value = "DESCRIPTION"
+    ws.Cells(r, 6).value = "HRS CIRC"
     ws.Cells(r, 6).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, 7).Value = "HSLS"
+    ws.Cells(r, 7).value = "HSLS"
     ws.Cells(r, 7).HorizontalAlignment = xlHAlignRight
-    ws.Cells(r, COL_DATA_LAST).Value = "BHA #"
+    ws.Cells(r, COL_DATA_LAST).value = "BHA #"
     ws.Cells(r, COL_DATA_LAST).HorizontalAlignment = xlHAlignRight
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
@@ -1102,7 +1150,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
 
         ' HSLS: bold, red past 300 h since service
         With ws.Cells(r, 7)
-            .Value = Format(aHsls(k), "0.00")
+            .value = Format(aHsls(k), "0.00")
             .Interior.Color = bg
             .HorizontalAlignment = xlHAlignRight
             .Font.size = 9
@@ -1119,7 +1167,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         End With
 
         With ws.Cells(r, COL_DATA_LAST)
-            .Value = aBha(k)
+            .value = aBha(k)
             .Interior.Color = bg
             .Font.Color = cGrayDk()
             .HorizontalAlignment = xlHAlignRight
@@ -1143,7 +1191,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         .Font.bold = True
         .Font.size = 10
     End With
-    ws.Cells(r, 1).Value = "OVER-LIMIT (>300h since service)"
+    ws.Cells(r, 1).value = "OVER-LIMIT (>300h since service)"
     With ws.Range(ws.Cells(r, 1), ws.Cells(r, COL_DATA_LAST)).Borders(xlEdgeBottom)
         .LineStyle = xlContinuous
         .Color = cRed()
@@ -1165,7 +1213,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
                 PutCell ws, r, 2, aSer(k), cWhite(), cRed(), True, xlHAlignLeft
                 PutCell ws, r, 3, aDes(k), cWhite(), cBlack(), False, xlHAlignLeft
                 With ws.Cells(r, 7)
-                    .Value = Format(aHsls(k), "0.00")
+                    .value = Format(aHsls(k), "0.00")
                     .HorizontalAlignment = xlHAlignRight
                     .Font.Color = cRed()
                     .Font.bold = True
@@ -1178,7 +1226,7 @@ Private Sub DrawCumulativeTable(ws As Worksheet)
         End If
     Next k
     If nOver = 0 Then
-        ws.Cells(r, 1).Value = "No components over 300h since service."
+        ws.Cells(r, 1).value = "No components over 300h since service."
         ws.Cells(r, 1).Font.Color = cGrayDk()
         r = r + 1
     End If
@@ -1259,7 +1307,7 @@ Private Function CollectBhaTabSerialRows(ByRef aSer() As String, ByRef aDes() As
     Dim dupKey As String
     Dim hsls As Double
     For r = 2 To lastRow
-        If Not IsNumeric(bhaWs.Cells(r, cBNum).Value) Then GoTo NextRow
+        If Not IsNumeric(bhaWs.Cells(r, cBNum).value) Then GoTo NextRow
         srl = Trim$(SafeStr(bhaWs.Cells(r, cSer)))
         If srl = "" Then GoTo NextRow
         ku = UCase$(srl)
@@ -1280,7 +1328,7 @@ Private Function CollectBhaTabSerialRows(ByRef aSer() As String, ByRef aDes() As
         End If
         If Not keep Then GoTo NextRow
 
-        bNum = CLng(bhaWs.Cells(r, cBNum).Value)
+        bNum = CLng(bhaWs.Cells(r, cBNum).value)
         dupKey = ku & "|" & CStr(bNum)
         On Error Resume Next
         seen.Add 1, dupKey
@@ -1375,11 +1423,11 @@ Public Sub BuildDataSerialHoursTable()
     End With
 
     ' Header styled like the sheet's other tables: gray fill, bold, boxed.
-    ws.Range("X2").Value = "Serial"
-    ws.Range("Y2").Value = "Description"
-    ws.Range("Z2").Value = "Circ Hours"
-    ws.Range("AA2").Value = "HSLS"
-    ws.Range("AB2").Value = "BHA#"
+    ws.Range("X2").value = "Serial"
+    ws.Range("Y2").value = "Description"
+    ws.Range("Z2").value = "Circ Hours"
+    ws.Range("AA2").value = "HSLS"
+    ws.Range("AB2").value = "BHA#"
     With ws.Range("X2:AB2")
         .Font.bold = True
         .Interior.Color = RGB(217, 217, 217)
@@ -1400,13 +1448,13 @@ Public Sub BuildDataSerialHoursTable()
             prevBha = aBha(k)
         End If
 
-        ws.Cells(r, 24).Value = aSer(k)
-        ws.Cells(r, 25).Value = aDes(k)
-        ws.Cells(r, 26).Value = aCirc(k)
+        ws.Cells(r, 24).value = aSer(k)
+        ws.Cells(r, 25).value = aDes(k)
+        ws.Cells(r, 26).value = aCirc(k)
         ws.Cells(r, 26).numberFormat = "0.00"
-        ws.Cells(r, 27).Value = aHsls(k)
+        ws.Cells(r, 27).value = aHsls(k)
         ws.Cells(r, 27).numberFormat = "0.00"
-        ws.Cells(r, 28).Value = aBha(k)
+        ws.Cells(r, 28).value = aBha(k)
         ws.Cells(r, 28).numberFormat = "0"
 
         With ws.Range(ws.Cells(r, 24), ws.Cells(r, 28))
@@ -1483,7 +1531,7 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
     ' Section title (row 3 ? same row band cleared only through col N elsewhere)
     With ws.Range(ws.Cells(titleRow, startCol), ws.Cells(titleRow, endCol))
         .Merge
-        .Value = "RAW BHA SUMMARY"
+        .value = "RAW BHA SUMMARY"
         .Font.bold = True
         .Font.size = 9
         .Font.Color = cGrayDk()
@@ -1497,7 +1545,7 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
     hdr = Split("BHA,Meters,Mtrs Sld,Mtrs Rot,Hrs Sld,Hrs Rot,Hrs Crc,Total Hrs,Below Rot", ",")
     Dim i As Long
     For i = 0 To UBound(hdr)
-        ws.Cells(hdrRow, startCol + i).Value = hdr(i)
+        ws.Cells(hdrRow, startCol + i).value = hdr(i)
         ws.Cells(hdrRow, startCol + i).HorizontalAlignment = xlHAlignCenter
     Next i
     With ws.Range(ws.Cells(hdrRow, startCol), ws.Cells(hdrRow, endCol))
@@ -1532,7 +1580,7 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
             ws.rows(r).Hidden = False
             If ws.rows(r).rowHeight < 14 Then ws.rows(r).rowHeight = 15
 
-            ws.Cells(r, startCol + 0).Value = CLng(bhaList(i))
+            ws.Cells(r, startCol + 0).value = CLng(bhaList(i))
             Dim totalM As Double: totalM = GetBHAMetricValue(bhaWs, cBNum, cMtr, CLng(bhaList(i)))
             Dim slideM As Double: slideM = 0
             Dim rotM As Double: rotM = 0
@@ -1541,14 +1589,14 @@ Private Sub DrawRawBHASummaryTable(ws As Worksheet)
             If rotM = 0 And totalM > 0 And slideM > 0 And totalM >= slideM Then rotM = totalM - slideM
             If slideM = 0 And totalM > 0 And rotM > 0 And totalM >= rotM Then slideM = totalM - rotM
 
-            ws.Cells(r, startCol + 1).Value = totalM
-            ws.Cells(r, startCol + 2).Value = slideM
-            ws.Cells(r, startCol + 3).Value = rotM
-            ws.Cells(r, startCol + 4).Value = GetNum(bhaWs.Cells(fr, cSld))
-            ws.Cells(r, startCol + 5).Value = GetNum(bhaWs.Cells(fr, cRot))
-            ws.Cells(r, startCol + 6).Value = GetNum(bhaWs.Cells(fr, cCrc))
-            ws.Cells(r, startCol + 7).Value = GetNum(bhaWs.Cells(fr, cTot))
-            ws.Cells(r, startCol + 8).Value = GetNum(bhaWs.Cells(fr, cBlw))
+            ws.Cells(r, startCol + 1).value = totalM
+            ws.Cells(r, startCol + 2).value = slideM
+            ws.Cells(r, startCol + 3).value = rotM
+            ws.Cells(r, startCol + 4).value = GetNum(bhaWs.Cells(fr, cSld))
+            ws.Cells(r, startCol + 5).value = GetNum(bhaWs.Cells(fr, cRot))
+            ws.Cells(r, startCol + 6).value = GetNum(bhaWs.Cells(fr, cCrc))
+            ws.Cells(r, startCol + 7).value = GetNum(bhaWs.Cells(fr, cTot))
+            ws.Cells(r, startCol + 8).value = GetNum(bhaWs.Cells(fr, cBlw))
 
             With ws.Range(ws.Cells(r, startCol), ws.Cells(r, endCol))
                 .Interior.Color = rawBg
@@ -1599,14 +1647,14 @@ Private Sub WriteActiveBhaFromDayRows(ws As Worksheet)
     If metres <= 0# Then Exit Sub
     c = COL_RAW_SUMMARY_START
     For r = R_DETAIL + 1 To R_DETAIL + 45
-        If IsNumeric(ws.Cells(r, c).Value) And Not IsEmpty(ws.Cells(r, c).Value) Then
-            If CLng(ws.Cells(r, c).Value) = bha Then
-                ws.Cells(r, c + 1).Value = Round(metres, 2)
-                ws.Cells(r, c + 2).Value = Round(slideM, 2)
-                ws.Cells(r, c + 3).Value = Round(metres - slideM, 2)
-                ws.Cells(r, c + 4).Value = Round(slideH, 2)
-                ws.Cells(r, c + 5).Value = Round(rotH, 2)
-                ws.Cells(r, c + 6).Value = Round(circH, 2)
+        If IsNumeric(ws.Cells(r, c).value) And Not IsEmpty(ws.Cells(r, c).value) Then
+            If CLng(ws.Cells(r, c).value) = bha Then
+                ws.Cells(r, c + 1).value = Round(metres, 2)
+                ws.Cells(r, c + 2).value = Round(slideM, 2)
+                ws.Cells(r, c + 3).value = Round(metres - slideM, 2)
+                ws.Cells(r, c + 4).value = Round(slideH, 2)
+                ws.Cells(r, c + 5).value = Round(rotH, 2)
+                ws.Cells(r, c + 6).value = Round(circH, 2)
                 Exit Sub
             End If
         End If
@@ -1648,7 +1696,7 @@ Private Function GetBHAList() As Variant
     Dim seen As New Collection
     Dim r As Long
     For r = 2 To lastRow
-        Dim v As Variant: v = ws.Cells(r, col).Value
+        Dim v As Variant: v = ws.Cells(r, col).value
         If IsNumeric(v) And v <> "" Then
             On Error Resume Next
             seen.Add CLng(v), CStr(CLng(v))
@@ -1695,8 +1743,8 @@ Private Function GetFirstBHARow(bhaNum As Long) As Long
 
     Dim r As Long
     For r = 2 To lastRow
-        If IsNumeric(ws.Cells(r, col).Value) Then
-            If CLng(ws.Cells(r, col).Value) = bhaNum Then
+        If IsNumeric(ws.Cells(r, col).value) Then
+            If CLng(ws.Cells(r, col).value) = bhaNum Then
                 GetFirstBHARow = r
                 Exit Function
             End If
@@ -1713,8 +1761,8 @@ Private Function GetBHAMetricValue(ws As Worksheet, bhaCol As Long, metricCol As
 
     Dim r As Long
     For r = 2 To lastRow
-        If IsNumeric(ws.Cells(r, bhaCol).Value) Then
-            If CLng(ws.Cells(r, bhaCol).Value) = bhaNum Then
+        If IsNumeric(ws.Cells(r, bhaCol).value) Then
+            If CLng(ws.Cells(r, bhaCol).value) = bhaNum Then
                 Dim v As Double
                 v = GetNum(ws.Cells(r, metricCol))
                 If v <> 0 Then
@@ -1791,14 +1839,14 @@ End Function
 
 Private Function SafeStr(cell As Range) As String
     On Error Resume Next
-    SafeStr = Trim(CStr(cell.Value))
+    SafeStr = Trim(CStr(cell.value))
     On Error GoTo 0
 End Function
 
 Private Function GetNum(cell As Range) As Double
     GetNum = 0
     On Error Resume Next
-    If IsNumeric(cell.Value) Then GetNum = CDbl(cell.Value)
+    If IsNumeric(cell.value) Then GetNum = CDbl(cell.value)
     On Error GoTo 0
 End Function
 
@@ -1806,7 +1854,7 @@ Private Sub PutCell(ws As Worksheet, r As Long, c As Long, val As String, _
                     bg As Long, fg As Long, bold As Boolean, align As Long)
     With ws.Cells(r, c)
         .numberFormat = "@"
-        .Value = val
+        .value = val
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = bold
@@ -1819,7 +1867,7 @@ End Sub
 
 Private Sub PutNum(ws As Worksheet, r As Long, c As Long, val As Double, bg As Long)
     With ws.Cells(r, c)
-        .Value = val
+        .value = val
         .Interior.Color = bg
         .Font.Color = cBlack()
         .Font.size = 9
@@ -1839,6 +1887,8 @@ End Sub
 Private Sub SwapL(arr() As Long, i As Long, j As Long)
     Dim t As Long: t = arr(i): arr(i) = arr(j): arr(j) = t
 End Sub
+
+
 
 
 

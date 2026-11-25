@@ -4,12 +4,12 @@ Option Explicit
 ' Sync Data "Position of Wellbore (as of last survey)":
 '   R/L from Plan     <- gauge frame X (ax): >=0 Right, <0 Left
 '   Above/Below Plan  <- gauge frame Y (ay): plan TVD - as-drilled TVD (>=0 Above/UP, <0 Below/DN)
-'   Distance from Geo
+'   Distance from Geo — the metres are the offset; the direction word is Distance.
 '     Vertical / curve (Inc < ~90 or MD before sail waypoints AC14:AD33):
 '       hypot(E/W, N/S) from plan — there is no geo target yet.
 '     Lateral (Inc >= 80 and MD at/after first sail waypoint):
 '       Slidesheet GEO Window column AB on the last survey row
-'       (skip AB14 header; >=0 Above geo, <0 Below geo)
+'       (skip AB14 header; the sign still chooses the magnitude)
 
 Private Const SH_DATA As String = "Data"
 Private Const SH_SS As String = "Slidesheet"
@@ -43,7 +43,6 @@ Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean,
     Dim geoM As Double
     Dim hasGeo As Boolean
     Dim geoAbs As Double
-    Dim geoDir As String
 
     Set wsD = ThisWorkbook.Worksheets(SH_DATA)
 
@@ -63,8 +62,8 @@ Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean,
     If hasLat Then
         latAbs = Abs(latM)
         latDir = IIf(latM >= 0#, "Right", "Left")
-        wsD.Cells(ROW_RL, COL_VAL).Value = Format$(latAbs, "0.00") & "m"
-        wsD.Cells(ROW_RL, COL_DIR).Value = latDir
+        wsD.Cells(ROW_RL, COL_VAL).value = Format$(latAbs, "0.00") & "m"
+        wsD.Cells(ROW_RL, COL_DIR).value = latDir
     End If
 
     If hasPlanUp Then
@@ -74,19 +73,14 @@ Public Sub UpdateWellborePosition(ByVal latM As Double, ByVal hasLat As Boolean,
         Else
             planDir = "Above"
         End If
-        wsD.Cells(ROW_AB, COL_VAL).Value = Format$(planAbs, "0.00") & "m"
-        wsD.Cells(ROW_AB, COL_DIR).Value = planDir
+        wsD.Cells(ROW_AB, COL_VAL).value = Format$(planAbs, "0.00") & "m"
+        wsD.Cells(ROW_AB, COL_DIR).value = planDir
     End If
 
     If hasGeo Then
         geoAbs = Abs(geoM)
-        If geoM < 0# Then
-            geoDir = "Below"
-        Else
-            geoDir = "Above"
-        End If
-        wsD.Cells(ROW_GEO, COL_VAL).Value = Format$(geoAbs, "0.00") & "m"
-        wsD.Cells(ROW_GEO, COL_DIR).Value = geoDir
+        wsD.Cells(ROW_GEO, COL_VAL).value = Format$(geoAbs, "0.00") & "m"
+        wsD.Cells(ROW_GEO, COL_DIR).value = "Distance"
     End If
 
     SheetReprotectAfterVba wsD, wasProt

@@ -1532,20 +1532,71 @@ const finalizeSurveyPatchMap = (totals) => {
     const rotHrs = v.rotHrs ?? 0;
     if (v.slide <= 0 && v.rot <= 0 && v.total <= 0 && slideHrs <= 0 && rotHrs <= 0) continue;
     const patch = {};
-    if (v.slide > 0) patch.SlideMetres = Number(v.slide.toFixed(2));
-    if (v.rot > 0) patch.RotateMetres = Number(v.rot.toFixed(2));
-    if (v.total > 0) patch.MetresDrilled = Number(v.total.toFixed(2));
-    if (slideHrs > 0) patch.SlideHours = Number(slideHrs.toFixed(2));
-    if (rotHrs > 0) patch.RotateHours = Number(rotHrs.toFixed(2));
+    if (v.slide > 0) patch.SlideMetres = roundHalfUp(v.slide);
+    if (v.rot > 0) patch.RotateMetres = roundHalfUp(v.rot);
+    if (v.total > 0) patch.MetresDrilled = roundHalfUp(v.total);
+    if (slideHrs > 0) patch.SlideHours = roundHalfUp(slideHrs);
+    if (rotHrs > 0) patch.RotateHours = roundHalfUp(rotHrs);
     if (Object.keys(patch).length) out[bha] = patch;
   }
   return out;
+};
+
+// Halves round up (away from zero), as Excel's ROUND does. toFixed works on the
+// binary value, so 1.005 came out 1.00.
+const roundHalfUp = (n, digits = 2) => {
+  const f = 10 ** digits;
+  return (Math.sign(n) * Math.round(Number((Math.abs(n) * f).toPrecision(15)))) / f;
 };
 
 const SLIDE_DAY_COLUMNS = [
   "Job ID", "Date", "BHA #", "Slide Metres", "Rotate Metres",
   "Slide Hours", "Rotate Hours", "Survey Course Sum",
 ];
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const nextIsoDay = (iso) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+
+// The workbook matches FieldCap days to its Midnight rows in date order, so a day
+// the BHA was in the hole without drilling needs a row too, or every later day
+// lands one row early. Zero rows run from the BHA's first by-day row (its first
+// drilling day; the trip in before it has no table row) to the last day the BHA
+// has an activity logged.
+const fillInHoleDays = (csv, jobId, logDetail) => {
+  const lines = String(csv ?? "").split("\r\n").filter((ln) => ln.length > 0);
+  if (lines.length < 2) return { csv, rowCount: Math.max(0, lines.length - 1) };
+  const have = new Set();
+  const span = new Map();
+  const rows = lines.slice(1).map((line) => ({ line, cols: line.split(",") }));
+  for (const { cols } of rows) {
+    const day = cols[1] ?? "";
+    const bha = cols[2] ?? "";
+    if (!ISO_DAY.test(day) || !bha) continue;
+    have.add(`${day}|${bha}`);
+    const s = span.get(bha);
+    if (!s) span.set(bha, { first: day, last: day });
+    else {
+      if (day < s.first) s.first = day;
+      if (day > s.last) s.last = day;
+    }
+  }
+  for (const r of logDetail ?? []) {
+    if (!r?.bha || !ISO_DAY.test(r.day ?? "") || String(r.countedAs ?? "").startsWith("skipped")) continue;
+    const s = span.get(r.bha);
+    if (s && r.day > s.last) s.last = r.day;
+  }
+  for (const [bha, { first, last }] of span) {
+    for (let day = first; day <= last; day = nextIsoDay(day)) {
+      if (have.has(`${day}|${bha}`)) continue;
+      rows.push({ line: [jobId, day, bha, 0, 0, 0, 0, 0].join(","), cols: [String(jobId), day, bha] });
+    }
+  }
+  rows.sort((a, b) =>
+    (a.cols[1] ?? "").localeCompare(b.cols[1] ?? "") ||
+    String(a.cols[2] ?? "").localeCompare(String(b.cols[2] ?? ""), undefined, { numeric: true })
+  );
+  return { csv: [lines[0], ...rows.map((r) => r.line)].join("\r\n"), rowCount: rows.length };
+};
 
 const buildSlideRotateMetresByDayCsv = (jobId, byDay, lifetimeTotals = {}) => {
   const rows = [];
@@ -1556,11 +1607,11 @@ const buildSlideRotateMetresByDayCsv = (jobId, byDay, lifetimeTotals = {}) => {
         "Job ID": jobId,
         "Date": date,
         "BHA #": bha,
-        "Slide Metres": v.slide > 0 ? Number(v.slide.toFixed(2)) : "",
-        "Rotate Metres": v.rot > 0 ? Number(v.rot.toFixed(2)) : "",
-        "Slide Hours": (v.slideHrs ?? 0) > 0 ? Number(v.slideHrs.toFixed(2)) : "",
-        "Rotate Hours": (v.rotHrs ?? 0) > 0 ? Number(v.rotHrs.toFixed(2)) : "",
-        "Survey Course Sum": v.total > 0 ? Number(v.total.toFixed(2)) : "",
+        "Slide Metres": v.slide > 0 ? roundHalfUp(v.slide) : "",
+        "Rotate Metres": v.rot > 0 ? roundHalfUp(v.rot) : "",
+        "Slide Hours": (v.slideHrs ?? 0) > 0 ? roundHalfUp(v.slideHrs) : "",
+        "Rotate Hours": (v.rotHrs ?? 0) > 0 ? roundHalfUp(v.rotHrs) : "",
+        "Survey Course Sum": v.total > 0 ? roundHalfUp(v.total) : "",
       });
     }
   }
@@ -1571,11 +1622,11 @@ const buildSlideRotateMetresByDayCsv = (jobId, byDay, lifetimeTotals = {}) => {
         "Job ID": jobId,
         "Date": "(lifetime — no calendar date on survey rows in OData)",
         "BHA #": bha,
-        "Slide Metres": v.slide > 0 ? Number(v.slide.toFixed(2)) : "",
-        "Rotate Metres": v.rot > 0 ? Number(v.rot.toFixed(2)) : "",
-        "Slide Hours": (v.slideHrs ?? 0) > 0 ? Number(v.slideHrs.toFixed(2)) : "",
-        "Rotate Hours": (v.rotHrs ?? 0) > 0 ? Number(v.rotHrs.toFixed(2)) : "",
-        "Survey Course Sum": v.total > 0 ? Number(v.total.toFixed(2)) : "",
+        "Slide Metres": v.slide > 0 ? roundHalfUp(v.slide) : "",
+        "Rotate Metres": v.rot > 0 ? roundHalfUp(v.rot) : "",
+        "Slide Hours": (v.slideHrs ?? 0) > 0 ? roundHalfUp(v.slideHrs) : "",
+        "Rotate Hours": (v.rotHrs ?? 0) > 0 ? roundHalfUp(v.rotHrs) : "",
+        "Survey Course Sum": v.total > 0 ? roundHalfUp(v.total) : "",
       });
     }
   }
@@ -1611,11 +1662,11 @@ const buildSlideRotateMetresByDayCsvFromActivities = (rows, jobId) => {
         "Job ID": jobId,
         "Date": date,
         "BHA #": bha,
-        "Slide Metres": v.slide > 0 ? Number(v.slide.toFixed(2)) : "",
-        "Rotate Metres": v.rot > 0 ? Number(v.rot.toFixed(2)) : "",
-        "Slide Hours": v.slideHrs > 0 ? Number(v.slideHrs.toFixed(2)) : "",
-        "Rotate Hours": v.rotHrs > 0 ? Number(v.rotHrs.toFixed(2)) : "",
-        "Survey Course Sum": sum > 0 ? Number(sum.toFixed(2)) : "",
+        "Slide Metres": v.slide > 0 ? roundHalfUp(v.slide) : "",
+        "Rotate Metres": v.rot > 0 ? roundHalfUp(v.rot) : "",
+        "Slide Hours": v.slideHrs > 0 ? roundHalfUp(v.slideHrs) : "",
+        "Rotate Hours": v.rotHrs > 0 ? roundHalfUp(v.rotHrs) : "",
+        "Survey Course Sum": sum > 0 ? roundHalfUp(sum) : "",
       });
     }
   }
@@ -2954,6 +3005,7 @@ const fetchAll = async (
       slideByDayCsv = merged.csv;
       slideByDayRowCount = merged.rowCount;
     }
+    ({ csv: slideByDayCsv, rowCount: slideByDayRowCount } = fillInHoleDays(slideByDayCsv, jobId, logDetail));
     results.activityLogCsv = buildActivityLogDetailCsv(jobId, logDetail, odataActivityRows, liveActivityRows, merged.winners);
     const interceptedMap = stored[KEY_INTERCEPT] ?? {};
     const bhaGridRowsByJob = stored[KEY_BHA_GRID] ?? {};

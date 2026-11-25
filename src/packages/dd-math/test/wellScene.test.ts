@@ -86,7 +86,12 @@ describe("well scene", () => {
     const dx = (heel?.outer[0] ?? 0) - 250;
     const dy = (heel?.outer[1] ?? 0) - 50;
     const dz = (heel?.outer[2] ?? 0) + 200;
-    expect(Math.hypot(dx, dy, dz)).toBeCloseTo(heel?.radius ?? 0);
+    expect(heel?.radius).toBe(20);
+    expect(Math.hypot(dx, dy, dz)).toBeCloseTo(20);
+    const ix = (heel?.inner[0] ?? 0) - 250;
+    const iy = (heel?.inner[1] ?? 0) - 50;
+    const iz = (heel?.inner[2] ?? 0) + 200;
+    expect(Math.hypot(ix, iy, iz)).toBeCloseTo(10);
     expect(Math.abs(dx * 500 + dy * 100 + dz * -400)).toBeLessThan(0.05);
     expect(south?.concern).toBe(false);
     expect(south?.color).toBe("#2E7D32");
@@ -99,6 +104,100 @@ describe("well scene", () => {
 
   it("draws nothing until the plan has two stations", () => {
     expect(buildWellScene(book())).toBeNull();
+  });
+
+  it("reads header-shifted _OC_Survey columns (Sub-Sea before TVD/NS/EW)", () => {
+    const sheet = book();
+    ["MD", "INC", "AZI", "Sub-Sea", "TVD", "NS", "EW"].forEach((head, idx) => sheet.setValue("_OC_Survey", 2, idx + 1, head));
+    sheet.setValue("_OC_Survey", 3, 1, 0);
+    sheet.setValue("_OC_Survey", 3, 2, 0);
+    sheet.setValue("_OC_Survey", 3, 3, 0);
+    sheet.setValue("_OC_Survey", 3, 4, 891.4);
+    sheet.setValue("_OC_Survey", 3, 5, 0);
+    sheet.setValue("_OC_Survey", 3, 6, 0);
+    sheet.setValue("_OC_Survey", 3, 7, 0);
+    sheet.setValue("_OC_Survey", 4, 1, 100);
+    sheet.setValue("_OC_Survey", 4, 2, 90);
+    sheet.setValue("_OC_Survey", 4, 3, 90);
+    sheet.setValue("_OC_Survey", 4, 4, 827.74);
+    sheet.setValue("_OC_Survey", 4, 5, 63.66);
+    sheet.setValue("_OC_Survey", 4, 6, 0.25);
+    sheet.setValue("_OC_Survey", 4, 7, 63.8);
+    const scene = buildWellScene(sheet);
+    expect(scene).not.toBeNull();
+    // Exact Compass NS/EW within 2 m of min-curvature are preserved (not overwritten).
+    expect(scene!.plan.xyz[3]).toBeCloseTo(63.8, 2);
+    expect(scene!.plan.xyz[4]).toBeCloseTo(0.25, 2);
+    expect(scene!.plan.xyz[5]).toBeCloseTo(-63.66, 2);
+  });
+
+  it("rebuilds NS/EW from MD/INC/AZI when a legacy Crystal import stored Sub-Sea in EW", () => {
+    const sheet = book();
+    ["MD", "INC", "AZI", "TVD", "NS", "EW"].forEach((head, idx) => sheet.setValue("_OC_Survey", 2, idx + 1, head));
+    // Legacy glued-Subsea corruption: NS = 0 and EW = Sub-Sea (891.82 down to 791.82)
+    sheet.setValue("_OC_Survey", 3, 1, 0);
+    sheet.setValue("_OC_Survey", 3, 2, 0);
+    sheet.setValue("_OC_Survey", 3, 3, 0);
+    sheet.setValue("_OC_Survey", 3, 4, 0);
+    sheet.setValue("_OC_Survey", 3, 5, 0);
+    sheet.setValue("_OC_Survey", 3, 6, 891.82);
+    sheet.setValue("_OC_Survey", 4, 1, 1000);
+    sheet.setValue("_OC_Survey", 4, 2, 0);
+    sheet.setValue("_OC_Survey", 4, 3, 0);
+    sheet.setValue("_OC_Survey", 4, 4, 1000);
+    sheet.setValue("_OC_Survey", 4, 5, 0);
+    sheet.setValue("_OC_Survey", 4, 6, -108.18);
+    sheet.setValue("_OC_Survey", 5, 1, 1100);
+    sheet.setValue("_OC_Survey", 5, 2, 90);
+    sheet.setValue("_OC_Survey", 5, 3, 180);
+    sheet.setValue("_OC_Survey", 5, 4, 1063.66);
+    sheet.setValue("_OC_Survey", 5, 5, 0);
+    sheet.setValue("_OC_Survey", 5, 6, -171.84);
+    const scene = buildWellScene(sheet);
+    expect(scene).not.toBeNull();
+    // Origin is (0, 0, 0), and station 3 (100 m build 0->90 deg due South) is ~63.66 m South, 0 m East.
+    expect(scene!.plan.xyz[0]).toBeCloseTo(0, 3);
+    expect(scene!.plan.xyz[1]).toBeCloseTo(0, 3);
+    expect(scene!.plan.xyz[6]).toBeCloseTo(0, 1);
+    expect(scene!.plan.xyz[7]).toBeCloseTo(-63.66, 1);
+    expect(scene!.plan.xyz[8]).toBeCloseTo(-1063.66, 1);
+  });
+
+  it("integrates the drilled path from Slidesheet row 12 tie-on", () => {
+    const sheet = book();
+    sheet.setValue("_OC_Survey", 3, 1, 0);
+    sheet.setValue("_OC_Survey", 3, 4, 0);
+    sheet.setValue("_OC_Survey", 3, 5, 0);
+    sheet.setValue("_OC_Survey", 3, 6, 0);
+    sheet.setValue("_OC_Survey", 4, 1, 1000);
+    sheet.setValue("_OC_Survey", 4, 4, 1000);
+    sheet.setValue("_OC_Survey", 4, 5, 0);
+    sheet.setValue("_OC_Survey", 4, 6, 0);
+    // Row 12 tie-on: MD 500, Inc 90, Azi 90 (due East), TVD 495, NS 25 (AL12), EW 40 (AM12)
+    sheet.setValue("Slidesheet", 12, 5, 500);
+    sheet.setValue("Slidesheet", 12, 6, 90);
+    sheet.setValue("Slidesheet", 12, 7, 90);
+    sheet.setValue("Slidesheet", 12, 8, 495);
+    sheet.setValue("Slidesheet", 12, 38, 25);
+    sheet.setValue("Slidesheet", 12, 39, 40);
+    // First survey at MD 600 holding 90 deg Inc, 90 deg Azi -> +100 m East
+    sheet.setValue("Slidesheet", 13, 5, 600);
+    sheet.setValue("Slidesheet", 13, 6, 90);
+    sheet.setValue("Slidesheet", 13, 7, 90);
+    sheet.setFill("Slidesheet", { row: 13, col: 6, row2: 13, col2: 6 }, GOOD_SURVEY_FILL);
+    sheet.setFill("Slidesheet", { row: 13, col: 7, row2: 13, col2: 7 }, GOOD_SURVEY_FILL);
+
+    const scene = buildWellScene(sheet);
+    expect(scene?.drilled).not.toBeNull();
+    // Point 0 is the row 12 tie-on (E=40, N=25, z=-495); Point 1 is row 13 (E=140, N=25, z=-495).
+    expect(scene!.drilled!.md[0]).toBeCloseTo(500);
+    expect(scene!.drilled!.xyz[0]).toBeCloseTo(40, 2);
+    expect(scene!.drilled!.xyz[1]).toBeCloseTo(25, 2);
+    expect(scene!.drilled!.xyz[2]).toBeCloseTo(-495, 2);
+    expect(scene!.drilled!.md[1]).toBeCloseTo(600);
+    expect(scene!.drilled!.xyz[3]).toBeCloseTo(140, 2);
+    expect(scene!.drilled!.xyz[4]).toBeCloseTo(25, 2);
+    expect(scene!.drilled!.xyz[5]).toBeCloseTo(-495, 2);
   });
 
   it("puts a formation top on the scene at its TVD above the first plan station", () => {
@@ -241,6 +340,19 @@ describe("offset paths", () => {
     const south = scene?.offsets.find((offset) => offset.name.includes("South"));
     expect(north?.breaks).toEqual([2]);
     expect(south?.breaks).toEqual([]);
+  });
+
+  it("joins a curved survey leg and leaves a jump across a missing stretch open", () => {
+    const scene = sceneWith([
+      { well: NORTH, refMd: 100, offMd: 100 },
+      { well: NORTH, refMd: 390, offMd: 300 },
+      { well: SOUTH, refMd: 100, offMd: 100 },
+      { well: SOUTH, refMd: 180, offMd: 400 },
+    ], false);
+    const north = scene?.offsets.find((offset) => offset.name.includes("North"));
+    const south = scene?.offsets.find((offset) => offset.name.includes("South"));
+    expect(north?.breaks).toEqual([]);
+    expect(south?.breaks).toEqual([1]);
   });
 
   it("leave out a row that is not where its printed C2C says, and say so", () => {

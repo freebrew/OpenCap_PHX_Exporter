@@ -1,8 +1,10 @@
-import type { MacroButton } from "@phx/xlsx-bridge";
+import { readWorkbook, type MacroButton, type UniverSheet } from "@phx/xlsx-bridge";
 import { renderCorridor } from "../../../packages/corridor-3d/src/index";
 import { morningReport as composeMorningReport, morningSummaryMini, type MorningFields } from "../../../packages/reports/src/index";
 import {
   appendTallyBitDepths,
+  applySurveySync,
+  auditSlidesheetSurveys,
   bhaNumbers,
   bhaSummary,
   CLEAR_SUMMARY,
@@ -12,6 +14,7 @@ import {
   contDiTargetHit,
   DLT_FIRST,
   DLT_LAST,
+  formatSurveyAuditPrompt,
   highlightActiveTarget,
   importAntiCollision,
   importNote,
@@ -23,12 +26,15 @@ import {
   lengthsFromCsv,
   loadNamedTargets,
   missingTallySheet,
+  parseWellSeekerCsv,
+  parseWellSeekerGrid,
   PT_SHEET,
   prepareSlideComments,
   pullLastSurvey,
   readNumber,
   refreshRotateMetres,
   serialHours,
+  slidesheetTieThreshold,
   writeSerialHoursTable,
   refreshSlideComments,
   startEntry,
@@ -155,6 +161,9 @@ export async function runMacro(button: MacroButton, context: MacroContext): Prom
       return;
     case "ImportAntiCollision":
       await importAc(context);
+      return;
+    case "SyncWellSeekerSurveys":
+      await syncWellSeekerSurveys(context);
       return;
     case "RefreshSetup":
     case "RefreshAllCsvData":
@@ -338,6 +347,102 @@ async function importAc(context: MacroContext): Promise<void> {
   }
 }
 
+function sheetToGrid(sheet: UniverSheet): unknown[][] {
+  const rowIndices = Object.keys(sheet.cellData ?? {}).map(Number).filter(Number.isFinite);
+  if (rowIndices.length === 0) return [];
+  const maxR = Math.max(...rowIndices);
+  const grid: unknown[][] = [];
+  for (let r = 0; r <= maxR; r += 1) {
+    const rowObj = sheet.cellData?.[r];
+    if (!rowObj) {
+      grid.push([]);
+      continue;
+    }
+    const cols = Object.keys(rowObj).map(Number).filter(Number.isFinite);
+    const maxC = cols.length > 0 ? Math.max(...cols) : -1;
+    const arr: unknown[] = new Array(maxC + 1).fill("");
+    for (const c of cols) arr[c] = rowObj[c]?.v ?? "";
+    grid.push(arr);
+  }
+  return grid;
+}
+
+/** SyncWellSeekerSurveys: audit & sync Slidesheet E/F/G against a Well Seeker X export. */
+async function syncWellSeekerSurveys(context: MacroContext): Promise<void> {
+  const picked = await pickFile("phx-sync-surveys", [
+    {
+      description: "Well Seeker X Survey Report (*.xlsx, *.csv)",
+      accept: {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx", ".xlsm"],
+        "text/csv": [".csv"],
+      },
+    },
+  ], context.jobFolder());
+  if (!picked) return;
+  const book = context.book();
+  if (!book) return;
+  const fileName = picked.file.name;
+  context.notify(`Auditing surveys against ${fileName}...`);
+  try {
+    const tieThreshold = slidesheetTieThreshold(book);
+    const isCsv = fileName.toLowerCase().endsWith(".csv") || fileName.toLowerCase().endsWith(".txt");
+    let parsed = { stations: [] as Array<{ md: number; inc: number; azi: number }>, interpSkipped: 0, tieMd: null as number | null };
+    if (isCsv) {
+      parsed = parseWellSeekerCsv(await picked.file.text(), tieThreshold);
+    } else {
+      const mapped = await readWorkbook(new Uint8Array(await picked.file.arrayBuffer()));
+      const sheets = mapped.workbook.sheetOrder.map((id) => mapped.workbook.sheets[id]).filter((s): s is UniverSheet => Boolean(s));
+      const preferred = [...sheets.filter((s) => s.name.toLowerCase().includes("survey")), ...sheets.filter((s) => !s.name.toLowerCase().includes("survey"))];
+      for (const sheet of preferred) {
+        const res = parseWellSeekerGrid(sheetToGrid(sheet), tieThreshold);
+        if (res.stations.length > 0) {
+          parsed = res;
+          break;
+        }
+      }
+    }
+    if (parsed.stations.length === 0) {
+      window.alert(`No survey rows found in ${fileName} (expected MD, INC, AZI columns).`);
+      context.notify("Survey audit failed — no survey columns found");
+      return;
+    }
+
+    const audit = auditSlidesheetSurveys(book, parsed);
+    if (!audit.ok) {
+      window.alert(audit.reason ?? "Could not audit surveys.");
+      context.notify(audit.blocked ? "Survey sync blocked — well mismatch" : "Survey audit skipped");
+      return;
+    }
+
+    const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const anchor = context.namedCell("OC_ImpSurvRow");
+    if (audit.diffs.length === 0) {
+      applySurveySync(book, audit, `${fileName}  [OK: 0 diffs @ ${stamp}]`, anchor);
+      await commit(context, book);
+      const deeper = audit.deeperInWellSeeker > 0 ? `\n\nWell Seeker X has ${audit.deeperInWellSeeker} deeper survey(s) not yet on Slidesheet.` : "";
+      window.alert(`Slidesheet matches Well Seeker X across all ${audit.matched} matched surveys (max delta <= 0.005).${deeper}`);
+      context.notify(`Surveys verified clean against ${fileName}`);
+      return;
+    }
+
+    const prompt = formatSurveyAuditPrompt(fileName, audit);
+    if (!window.confirm(prompt)) {
+      applySurveySync(book, { ...audit, diffs: [] }, `${fileName}  [Audit: ${audit.diffs.length} diffs, not applied]`, anchor);
+      await commit(context, book);
+      context.notify(`Survey audit cancelled (${audit.diffs.length} diffs left unchanged)`);
+      return;
+    }
+
+    const updated = applySurveySync(book, audit, `${fileName}  [Synced ${audit.diffs.length} rows @ ${stamp}]`, anchor);
+    await commit(context, book);
+    context.redrawGauge();
+    window.alert(`Updated ${updated} survey row(s) on Slidesheet and refreshed the proximity gauge.`);
+    context.notify(`Synced ${updated} survey row(s) from ${fileName}`);
+  } catch (error) {
+    context.notify(`Survey sync failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /** BuildDataSerialHoursTable, after the OpenCap load has filled _OC_BHA and _OC_Inventory. */
 function writeSerialHours(context: MacroContext): void {
   const book = context.book();
@@ -484,10 +589,15 @@ export async function emailReport(context: MacroContext): Promise<void> {
 /** RenderCorridorPng for the mail body as base64. Blank when the day has no picture to draw. */
 async function corridorPng(snapshot: SnapshotBook | null): Promise<string | undefined> {
   if (!snapshot) return undefined;
-  const canvas = document.createElement("canvas");
-  if (!renderCorridor(canvas, new SheetBook(snapshot, []))) return undefined;
-  const url = canvas.toDataURL("image/png");
-  return url.slice(url.indexOf(",") + 1);
+  try {
+    const canvas = document.createElement("canvas");
+    if (!renderCorridor(canvas, new SheetBook(snapshot, []))) return undefined;
+    const url = canvas.toDataURL("image/png");
+    return url.slice(url.indexOf(",") + 1);
+  } catch (error) {
+    console.warn("Corridor picture could not be rendered for email:", error);
+    return undefined;
+  }
 }
 
 async function pickAttachment(host: WorkbookHost, row: number, notify: (message: string) => void): Promise<void> {

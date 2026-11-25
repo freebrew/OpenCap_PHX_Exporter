@@ -46,6 +46,9 @@ start_litellm_BYOK.ps1
 
 # Workbook backups: never commit (real-field copies contain PII)
 backups/
+
+# Browser handoff bundles written into a job folder. Never commit.
+.phx/
 *.bak_REAL_SENSITIVE_*
 
 # Field workbook — real job data; NEVER commit (Demo is the GitHub workbook)
@@ -58,6 +61,8 @@ Slide Sheet - 35780.xlsm
 Slide Sheet - 34801.xlsm
 **/Slide Sheet - 34801.xlsm
 Slide Sheet - [0-9]*.xlsm
+[0-9]* Surveys.xlsx
+**/[0-9]* Surveys.xlsx
 OpenCap_REAL_SENSITIVE*
 *REAL_SENSITIVE*
 

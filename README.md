@@ -232,7 +232,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
 3. **Load unpacked** → `src/chrome-extension/`.
 4. Log into FieldCap, open the extension popup, enter Job ID, **Fetch & Build CSVs**.
 
-**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.15.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
+**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.19.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
 
 ---
 
@@ -254,7 +254,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.2.15
+    ├── chrome-extension/            ← Manifest V3, v3.2.19
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -262,6 +262,21 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### v3.2.19 — Excel rounding and in-hole days
+
+- Slide and rotate metres and hours round halves up, as Excel's ROUND does. 1.005 now writes 1.01, not 1.00.
+- The by-day file gets a zero row for each day a BHA was in the hole without drilling, from its first drilling day to its last logged activity. The workbook matches FieldCap days to its Midnight rows in date order, so a missing day used to put every later day one row early.
+
+### v3.2.18 — By-day file keeps earlier days
+
+- Activity logs, JobActivities and the page scrape now merge per Date + BHA. The page scrape only holds the day on screen, and it used to replace the whole file.
+
+### v3.2.16–v3.2.17 — Slide hours capped at bit hours; activity-log detail
+
+- FieldCap logs a whole slide stand as one Sliding block, so slide + rotate time could run past bit hours. Day slide hours now scale to bit hours when the two exceed it.
+- New `fieldcap-job-<job>-activity-log-detail.csv` lists every activity block, its hours and how it was counted.
+- `alarms` permission added for the toolbar update pulse.
 
 ### v3.2.15 — Spreadsheet popup theme
 

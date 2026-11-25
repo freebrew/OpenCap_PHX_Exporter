@@ -5,7 +5,7 @@ import { renderCorridor } from "../../../packages/corridor-3d/src/picture";
 import { ODATA_ENTITIES } from "../../../packages/fieldcap-sync/src/index";
 import { dailyText, escapeHtml, exportXlsx } from "../../../packages/reports/src/index";
 import { MailSettings } from "./mail/MailSettings";
-import { costDateSerial, daySlideMetres, readCostDays, readNumber, SheetBook, writeCostDay, type CostDay, type SnapshotBook } from "../../../packages/workbook-commands/src/index";
+import { bindCostHeadline, costDateSerial, daySlideMetres, readCostDays, readNumber, SheetBook, writeCostDay, type CostDay, type SnapshotBook } from "../../../packages/workbook-commands/src/index";
 import type { WorkbookHost } from "../workbook/facade";
 
 /** The panel docks beside the grid so it never sits under (or over) Univer's canvas layers. */
@@ -103,7 +103,9 @@ export function Tools(props: ToolsProps) {
       props.onStatus("The Costs sheet has no free day row left.");
       return;
     }
+    bindCostHeadline(sheet);
     host.applyWrites(sheet.writes);
+    void host.flushCalculation();
     const hours = dayHours(book, serial);
     props.onStatus(`Costs ${written.added ? "added" : "updated"} row ${written.row}${hours}.`);
   }

@@ -103,10 +103,38 @@ describe("corridor picture (MDL_CorridorImage port) on the Demo well", () => {
     expect(screenBend(shaftYaw(endAz, false), start, end)).toBeLessThan(10);
     const az = shaftFacing(endAz, start, end);
     expect(screenBend(shaftYaw(az, false), start, end)).toBeGreaterThan(40);
-    expect(signedScreenTurn(az, start, end)).toBeLessThan(0);
+    // Azimuth decreasing is a left turn. The shaft runs down the page, so it has to bend toward the page's left
+    // (clockwise on screen, positive).
+    expect(signedScreenTurn(az, start, end)).toBeGreaterThan(0);
 
     const straight = dir(30, 120);
     expect(shaftFacing(120 * Math.PI / 180, straight, straight)).toBe(120 * Math.PI / 180);
+  });
+
+  it("bends the shaft the way the hole turns, left for a falling azimuth and right for a rising one", () => {
+    const dir = (inc: number, az: number) => {
+      const [i, a] = [inc * Math.PI / 180, az * Math.PI / 180];
+      return { n: Math.sin(i) * Math.cos(a), e: Math.sin(i) * Math.sin(a), v: Math.cos(i) };
+    };
+    const signedScreenTurn = (az: number, start: ReturnType<typeof dir>, end: ReturnType<typeof dir>) => {
+      const view = shaftYaw(az, false);
+      const angle = (d: ReturnType<typeof dir>) => {
+        const y = yawPoint(view, d.n, d.e);
+        return Math.atan2(d.v - y.n * 0.4 + y.e * 0.18, y.e * 0.88 + y.n * 0.52);
+      };
+      return Math.atan2(Math.sin(angle(end) - angle(start)), Math.cos(angle(end) - angle(start)));
+    };
+    // Builds past 42 degrees that turn each way, from several headings.
+    for (let endAzDeg = 0; endAzDeg < 360; endAzDeg += 30) {
+      for (const turn of [-60, -25, 25, 60]) {
+        const start = dir(38, endAzDeg - turn);
+        const end = dir(46, endAzDeg);
+        const az = shaftFacing(endAzDeg * Math.PI / 180, start, end);
+        const bend = signedScreenTurn(az, start, end);
+        if (turn < 0) expect(bend).toBeGreaterThan(0);
+        else expect(bend).toBeLessThan(0);
+      }
+    }
   });
 
   it("tilts the tunnel 0.18 for every 0.88 along hole", () => {

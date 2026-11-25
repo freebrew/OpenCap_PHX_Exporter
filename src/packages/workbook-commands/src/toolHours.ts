@@ -1,5 +1,5 @@
 import { bhaNumber, numOrZero, OcTable, vbaStr, vbTrim } from "./ocTable";
-import { cellText, isNumber, numeric, rgb, type CellArea, type SheetBook } from "./sheetBook";
+import { cellText, isNumber, rgb, type CellArea, type SheetBook } from "./sheetBook";
 import { looksLikeSerial, motorLike, normSerial, thirdPartySeed } from "../../strapsheets-core/src/toolKinds";
 
 // Port of MDL_ToolHours.ToolHours_Sync: Data's 3rd-party tool table (O31:S41) and motor table
@@ -77,6 +77,8 @@ class ToolHours {
   private metaIndex: Map<string, InventoryMeta> | null = null;
   readonly rows: TrackRow[] = [];
   private trackerLast = 1;
+  private bhaHours = new Map<number, number>();
+  private curBha = 0;
 
   constructor(private readonly book: SheetBook) {
     this.inv = new OcTable(book, "_OC_Inventory");
@@ -244,30 +246,42 @@ class ToolHours {
     }
   }
 
-  recomputeJobHours(curBha: number, liveHours: number): void {
+  /** BHA # -> BHA Total Hrs from the first row of that BHA. */
+  private readBhaHours(): Map<number, number> {
     const hours = new Map<number, number>();
-    const members = new Map<string, string>();
     const cNum = this.bha.col("BHA #");
     const cHrs = this.bha.col("BHA Total Hrs");
-    if (this.bha.exists && cNum > 0 && cHrs > 0) {
-      const last = this.bha.lastRow(cNum);
-      for (let row = 2; row <= last; row += 1) {
-        const n = bhaNumber(this.bha.value(row, cNum));
-        if (n > 0 && !hours.has(n)) hours.set(n, numOrZero(this.bha.value(row, cHrs)));
-      }
+    if (!this.bha.exists || cNum === 0 || cHrs === 0) return hours;
+    const last = this.bha.lastRow(cNum);
+    for (let row = 2; row <= last; row += 1) {
+      const n = bhaNumber(this.bha.value(row, cNum));
+      if (n > 0 && !hours.has(n)) hours.set(n, numOrZero(this.bha.value(row, cHrs)));
     }
+    return hours;
+  }
+
+  /** Serial -> comma-separated BHA numbers that carried it. */
+  private memberLists(): Map<string, string> {
+    const members = new Map<string, string>();
+    const cNum = this.bha.col("BHA #");
     const cSn = this.bha.col("Serial #");
-    if (this.bha.exists && cNum > 0 && cSn > 0) {
-      const last = this.bha.lastRow(cSn);
-      for (let row = 2; row <= last; row += 1) {
-        const n = bhaNumber(this.bha.value(row, cNum));
-        const key = normSerial(this.cellSerial(this.bha.value(row, cSn)));
-        if (n <= 0 || key === "") continue;
-        const current = members.get(key);
-        if (!current) members.set(key, String(n));
-        else if (!`,${current},`.includes(`,${n},`)) members.set(key, `${current},${n}`);
-      }
+    if (!this.bha.exists || cNum === 0 || cSn === 0) return members;
+    const last = this.bha.lastRow(cSn);
+    for (let row = 2; row <= last; row += 1) {
+      const n = bhaNumber(this.bha.value(row, cNum));
+      const key = normSerial(this.cellSerial(this.bha.value(row, cSn)));
+      if (n <= 0 || key === "") continue;
+      const current = members.get(key);
+      if (!current) members.set(key, String(n));
+      else if (!`,${current},`.includes(`,${n},`)) members.set(key, `${current},${n}`);
     }
+    return members;
+  }
+
+  recomputeJobHours(curBha: number, liveHours: number): void {
+    this.curBha = curBha;
+    this.bhaHours = this.readBhaHours();
+    const members = this.memberLists();
     for (const row of this.rows) {
       const key = normSerial(vbTrim(row.serial));
       row.bhas = key !== "" ? members.get(key) ?? "" : "";
@@ -278,11 +292,51 @@ class ToolHours {
         if (n <= 0 || seen.has(n)) continue;
         seen.add(n);
         if (n === curBha) job += liveHours;
-        else job += hours.get(n) ?? 0;
+        else job += this.bhaHours.get(n) ?? 0;
       }
       row.job = job;
       row.total = row.pre + job;
     }
+  }
+
+  /**
+   * Current Hours follows Q24, the live circulating total, plus hours from every
+   * other BHA that carried the serial. A row already on the active table with
+   * no BHA history still follows Q24.
+   */
+  circFormula(bhas: string, curBha: number, hours: Map<number, number>): string {
+    const seen = new Set<number>();
+    let prior = 0;
+    let live = bhas === "";
+    for (const part of bhas === "" ? [] : bhas.split(",")) {
+      const n = bhaNumber(vbTrim(part));
+      if (n <= 0 || seen.has(n)) continue;
+      seen.add(n);
+      if (n === curBha) live = true;
+      else prior += hours.get(n) ?? 0;
+    }
+    const extra = Math.round(prior * 10000) / 10000;
+    if (live && extra === 0) return "=Q24";
+    if (live) return `=Q24+${extra}`;
+    return `=${extra}`;
+  }
+
+  /** Point the painted tool and motor rows at Q24. Does not add, clear, or restamp serials. */
+  bindFrontFormulas(): boolean {
+    const curBha = bhaNumber(this.book.value(DATA, 3, 8));
+    const hours = this.readBhaHours();
+    const members = this.memberLists();
+    let changed = false;
+    for (const [first, last] of [[TOOLS_FIRST, TOOLS_LAST], [MOTOR_FIRST, MOTOR_LAST]] as const) {
+      for (let row = first; row <= last; row += 1) {
+        const serial = this.serialAt(row);
+        if (!looksLikeSerial(serial)) continue;
+        const before = this.book.writes.length;
+        this.writeCurrentFormula(row, this.circFormula(members.get(normSerial(serial)) ?? "", curBha, hours));
+        if (this.book.writes.length > before) changed = true;
+      }
+    }
+    return changed;
   }
 
   activeToolSerials(bha: number): string[] {
@@ -393,21 +447,20 @@ class ToolHours {
     this.ensureFormat(cell.row, cell.col, "@");
     if (!same(vbaStr(this.book.value(DATA, cell.row, cell.col)), serial)) this.book.setValue(DATA, cell.row, cell.col, serial);
     if (normSerial(old) !== normSerial(serial)) this.book.clear(DATA, { row, col: COL_PREV, row2: row, col2: COL_PREV });
-    this.writeNum(row, COL_CURRENT, this.rows[index]!.job);
+    const tracked = this.rows[index]!;
+    this.writeCurrentFormula(row, this.circFormula(tracked.bhas, this.curBha, this.bhaHours));
   }
 
-  private writeNum(row: number, col: number, hours: number): void {
-    const value = this.book.value(DATA, row, col);
-    if (value != null) {
-      const n = numeric(value);
-      if (n != null && Math.abs(n - hours) < 0.000001) return;
-    }
-    this.book.setValue(DATA, row, col, hours);
+  private writeCurrentFormula(row: number, formula: string): void {
+    const current = this.book.formula(DATA, row, COL_CURRENT);
+    const compact = (value: string) => value.trim().replace(/^=/, "").replace(/\s+/g, "").toUpperCase();
+    if (current != null && compact(current) === compact(formula)) return;
+    this.book.setFormula(DATA, row, COL_CURRENT, formula);
   }
 
   private clearFrontRow(row: number): void {
     const cell = this.book.mergeAt(DATA, row, COL_SERIAL);
-    const empty = (col: number) => this.book.value(DATA, row, col) == null;
+    const empty = (col: number) => this.book.value(DATA, row, col) == null && !this.book.hasFormula(DATA, row, col);
     if (vbTrim(vbaStr(this.book.value(DATA, cell.row, cell.col))) === "" && empty(COL_PREV) && empty(COL_CURRENT)) return;
     this.ensureFormat(cell.row, cell.col, "@");
     this.book.setValue(DATA, cell.row, cell.col, null);
@@ -474,6 +527,12 @@ class ToolHours {
 function addUnique(list: string[], serial: string): void {
   const key = normSerial(serial);
   if (key !== "" && !list.some((entry) => normSerial(entry) === key)) list.push(serial);
+}
+
+/** Replace a stamped Current Hours number with a formula that follows Q24. */
+export function bindLiveToolHours(book: SheetBook): boolean {
+  if (!book.hasSheet(DATA)) return false;
+  return new ToolHours(book).bindFrontFormulas();
 }
 
 /** ToolHours_Sync. Returns null when the workbook has no Data sheet. */

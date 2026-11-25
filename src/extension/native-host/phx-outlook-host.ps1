@@ -87,11 +87,28 @@ function Get-OutlookApp {
   return $null
 }
 
+function Read-DefaultMailClient {
+  $progId = ""
+  try {
+    $progId = [string](Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\mailto\UserChoice" -ErrorAction Stop).ProgId
+  } catch {}
+  if ($progId -ne "") {
+    try {
+      $app = Get-ItemProperty -Path "HKCU:\Software\Classes\$progId\Application" -ErrorAction Stop
+      if ([string]$app.AppUserModelID -match "OutlookForWindows") { return "New Outlook" }
+      if ([string]$app.ApplicationName -ne "") { return [string]$app.ApplicationName }
+    } catch {}
+    if ($progId -match "Outlook\.URL\.mailto") { return "Microsoft Outlook" }
+  }
+  $client = Read-RegistryDefault "HKCU:\Software\Clients\Mail"
+  if ($client -eq "") { $client = Read-RegistryDefault "HKLM:\SOFTWARE\Clients\Mail" }
+  return $client
+}
+
 function Send-Probe {
   $mailto = Read-RegistryDefault "HKCU:\Software\Classes\mailto\shell\open\command"
   if ($mailto -eq "") { $mailto = Read-RegistryDefault "HKLM:\SOFTWARE\Classes\mailto\shell\open\command" }
-  $client = Read-RegistryDefault "HKCU:\Software\Clients\Mail"
-  if ($client -eq "") { $client = Read-RegistryDefault "HKLM:\SOFTWARE\Clients\Mail" }
+  $client = Read-DefaultMailClient
   $version = "0"
   $versionPath = Join-Path $PSScriptRoot "host-version.json"
   if (Test-Path $versionPath) {

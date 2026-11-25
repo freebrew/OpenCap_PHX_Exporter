@@ -2,7 +2,10 @@ Attribute VB_Name = "MDL_DayRoll"
 Option Explicit
 
 ' Autofill the current day-row in Data!H4:V22 from the RAW BHA SUMMARY mirror
-' at Data!H35:M47 (BHA totals). Meters Sliding + Time Sliding are deltas
+' at Data!H35:M47 (BHA totals). A day the FieldCap by-day CSV covers takes
+' FieldCap's slide metres and slide time as logged (L, M:N) on every REFRESH;
+' everything below is the fallback for days it does not cover.
+' Without a FieldCap day, Meters Sliding + Time Sliding are deltas
 ' against prior rows, unless the Slidesheet has Slide From/To intervals (R/S).
 ' Those intervals say where the metres were slid, so each daily row keeps only
 ' the overlap with its own Start/End depth. The by-day total has no depth and
@@ -14,6 +17,9 @@ Option Explicit
 '   OpenCap / mirror K column = decimal hours (fraction = hundredths of an hour,
 '   e.g. 15.33h). Column V formulas use M + N/60 (minutes as sixtieths).
 '   When writing M:N we convert decimal hours -> hours + minutes via *60.
+'   Time Rotating (C10, C17, S) is Pason bit hours minus slide hours (P-V).
+'   Total metres K = End-Start (J-I). Rotated O = K-L. Email C4:C20 reads
+'   the daily table only (rows 23/24). No sidecar AJ:AM helper columns.
 
 Private Const SH_DATA As String = "Data"
 Private Const SH_OC_SLIDE As String = "_OC_Slide"
@@ -34,9 +40,20 @@ Private Const COL_TOTAL As Long = 11    ' K
 Private Const COL_SLIDE_M As Long = 12  ' L
 Private Const COL_HRS As Long = 13      ' M
 Private Const COL_MIN As Long = 14      ' N
+Private Const COL_ROTATED As Long = 15  ' O
 Private Const COL_BIT As Long = 16      ' P
 Private Const COL_CIRC As Long = 17     ' Q
 Private Const COL_SLIDE_DEC As Long = 22 ' V
+' Retired sidecar AJ:AM (FieldCap Total / Rotated / Rot Hrs / Rotating Hrs).
+' Cleared on every refresh so they cannot come back.
+Private Const COL_HELPER_FIRST As Long = 36  ' AJ
+Private Const COL_HELPER_LAST As Long = 39   ' AM
+Private Const ROW_TODAY As Long = 23
+Private Const ROW_TOTALS As Long = 24
+' Date serials 2000-01-01 .. 2099-12-31; a by-day key outside is a row index, not a day.
+Private Const DATE_SERIAL_MIN As Double = 36526
+Private Const DATE_SERIAL_MAX As Double = 73050
+Private Const MAX_FILL_DAYS As Long = 400
 
 Private Const SRC_FIRST As Long = 36
 Private Const SRC_LAST As Long = 47
@@ -59,6 +76,15 @@ Public gDayRoll_Applied As Boolean
 ' Smoke-test hook: when True, skip the modal form after writing I/L/M/N.
 Public gDayRoll_SuppressForm As Boolean
 
+' One report day as FieldCap logged it, less the 6am / 4pm rows above it in that day.
+Private Type FcDay
+    slideM As Double
+    slideH As Double
+    rotM As Double
+    rotH As Double
+    totalM As Double
+End Type
+
 Public Sub DayRoll_OnDataChange(ByVal Target As Range)
     Dim ws As Worksheet
     Dim area As Range
@@ -75,7 +101,7 @@ Public Sub DayRoll_OnDataChange(ByVal Target As Range)
 
     For Each cell In area.Cells
         r = cell.row
-        period = Trim$(CStr(cell.Value & ""))
+        period = Trim$(CStr(cell.value & ""))
         If IsValidPeriod(period) Then
             ' Always show the End Depth / Pason hours form when H is set.
             ' Refresh current-row L/M/N from the active BHA mirror first.
@@ -110,13 +136,16 @@ Public Sub DayRoll_BackfillSlideMetrics()
     Dim wrote As Boolean
     Dim bha As Long
     Dim hasDay As Boolean
-    Dim dayM As Double
-    Dim dayH As Double
+    Dim day As FcDay
+    Dim prevEvents As Boolean
 
+    prevEvents = Application.EnableEvents
     On Error GoTo Fail
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
     wasProt = SheetUnprotectForVba(ws)
 
+    Application.EnableEvents = False
+    EnsureFieldCapFormulas ws
     On Error Resume Next
     Application.Calculate
     On Error GoTo Fail
@@ -127,13 +156,23 @@ Public Sub DayRoll_BackfillSlideMetrics()
     ' the whole by-day total while the slide sits in a later End of Run window.
     Dim depthOn As Boolean
     depthOn = HasSlideIntervals()
+    ' Rows FieldCap no longer covers go back to depth and bit hours before any
+    ' closing row subtracts the 6am / 4pm rows above it.
     For r = ROW_FIRST To ROW_LAST
-        period = Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))
+        If Not DaySlideForRow(ws, bha, r, day) Then ClearFieldCapDay ws, r
+    Next r
+    Application.EnableEvents = prevEvents
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo Fail
+
+    For r = ROW_FIRST To ROW_LAST
+        period = Trim$(CStr(ws.Cells(r, COL_PERIOD).value & ""))
         If IsValidPeriod(period) Then
+            hasDay = DaySlideForRow(ws, bha, r, day)
             ' A day the OpenCap by-day CSV covers is always re-posted for THAT
             ' row (even if it already holds a wrong value). Only rows with no
             ' by-day data fall back to the blank / active-row delta rules.
-            hasDay = DaySlideForRow(ws, bha, r, dayM, dayH)
             If depthOn Or hasDay Or r = activeRow Or NeedsSlideBackfill(ws, r) Then
                 wrote = FillSlideMetrics(ws, r, depthOn Or (r = activeRow) Or hasDay)
                 If wrote Then
@@ -150,6 +189,7 @@ Public Sub DayRoll_BackfillSlideMetrics()
 
 Fail:
     On Error Resume Next
+    Application.EnableEvents = prevEvents
     SheetReprotectAfterVba ws, wasProt
     On Error GoTo 0
 End Sub
@@ -177,8 +217,8 @@ Public Function DayRoll_ApplyPasonHours(ByVal bitTotal As Double, _
 
     If Not ValidateEndDepth(endDepth, errMsg) Then Exit Function
 
-    bitDelta = Round(bitTotal - gDayRoll_PriorBit, 4)
-    circDelta = Round(circTotal - gDayRoll_PriorCirc, 4)
+    bitDelta = RoundHalfUp(bitTotal - gDayRoll_PriorBit, 4)
+    circDelta = RoundHalfUp(circTotal - gDayRoll_PriorCirc, 4)
 
     If Not ValidateHourDeltas(bitDelta, circDelta, gDayRoll_SlideHrs, _
                              gDayRoll_Period, errMsg) Then
@@ -190,14 +230,14 @@ Public Function DayRoll_ApplyPasonHours(ByVal bitTotal As Double, _
     Application.EnableEvents = False
     On Error GoTo RestoreEvents
 
-    ws.Cells(r, COL_END).Value = endDepth
-    ws.Cells(r, COL_BIT).Value = bitDelta
-    ws.Cells(r, COL_CIRC).Value = circDelta
+    ws.Cells(r, COL_END).value = endDepth
+    ws.Cells(r, COL_BIT).value = bitDelta
+    ws.Cells(r, COL_CIRC).value = circDelta
     ' No bit hours today -> no sliding either. Fill blank L/M/N with zeros so
     ' the row's ROP / % formulas resolve instead of sitting empty.
     If bitDelta = 0 Then
-        If CellBlank(ws.Cells(r, COL_SLIDE_M)) Then ws.Cells(r, COL_SLIDE_M).Value = 0
-        If CellBlank(ws.Cells(r, COL_HRS)) Then ws.Cells(r, COL_HRS).Value = 0
+        If CellBlank(ws.Cells(r, COL_SLIDE_M)) Then ws.Cells(r, COL_SLIDE_M).value = 0
+        If CellBlank(ws.Cells(r, COL_HRS)) Then ws.Cells(r, COL_HRS).value = 0
         If CellBlank(ws.Cells(r, COL_MIN)) Then WriteMinutesCell ws.Cells(r, COL_MIN), 0
     End If
     ' End Depth just landed, so re-place slide metres across every row. The
@@ -264,8 +304,7 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long, _
     Dim priorH As Double
     Dim deltaM As Double
     Dim deltaH As Double
-    Dim dayM As Double
-    Dim dayH As Double
+    Dim day As FcDay
     Dim hrsPart As Long
     Dim minPart As Long
     Dim prevEvents As Boolean
@@ -277,47 +316,40 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long, _
     bha = ResolveActiveBha(ws)
     If bha = 0 Then Exit Function
     srcRow = FindSourceRow(ws, bha)
-    If srcRow = 0 Then Exit Function
+    Dim hasDay As Boolean
+    hasDay = DaySlideForRow(ws, bha, r, day)
 
     ' FieldCap's own BHA totals. The mirror row of the active BHA is rebuilt
     ' from these day rows, so reading it here would feed the table back to itself.
+    ' A FieldCap day needs neither, so an empty DD Tools mirror cannot stop it.
     If Not FieldCapBhaTotals(bha, mtrsSld, hrsSld) Then
-        mtrsSld = GetNum(ws.Cells(srcRow, SRC_MTRS_SLD))
-        hrsSld = GetNum(ws.Cells(srcRow, SRC_HRS_SLD))
+        If srcRow = 0 And Not hasDay Then Exit Function
+        If srcRow > 0 Then
+            mtrsSld = GetNum(ws.Cells(srcRow, SRC_MTRS_SLD))
+            hrsSld = GetNum(ws.Cells(srcRow, SRC_HRS_SLD))
+        End If
     End If
     priorM = SumNumeric(ws, COL_SLIDE_M, ROW_FIRST, r - 1)
     ' Prefer H:M (min/60) so backfill works even if col V formulas are stale
     ' under Calculation=Manual during Refresh.
     priorH = SumSlideHoursDecimal(ws, ROW_FIRST, r - 1)
-    deltaM = Round(mtrsSld - priorM, 2)
-    deltaH = Round(hrsSld - priorH, 4)
+    deltaM = RoundHalfUp(mtrsSld - priorM, 2)
+    deltaH = RoundHalfUp(hrsSld - priorH, 4)
 
-    ' Per-day OpenCap figures beat the "BHA total minus everything above" delta,
-    ' which dumps every earlier mistake into this one row.
-    Dim hasDay As Boolean
-    hasDay = DaySlideForRow(ws, bha, r, dayM, dayH)
+    ' FieldCap's day is the source of truth for slide metres and slide time
+    ' (L, M:N). Total / rotated metres stay End-Start and End-Start-slide (K, O).
+    ' Only rows FieldCap does not cover fall back to the Slidesheet intervals.
     If hasDay Then
-        deltaM = dayM
-        deltaH = dayH
+        deltaM = day.slideM
+        deltaH = day.slideH
         overwriteSlide = True
-    End If
-
-    ' Depth beats the by-day bucket for metres. The bucket has no MD, so a
-    ' whole day's slide was landing on the first closing row. Hours stay the
-    ' day's own: a share of the whole BHA's hours by metres moved hours
-    ' between days with different slide ROP.
-    ' The Slidesheet gets a slide when the next survey goes in, so a row that
-    ' ends past its last slide can be missing the newest ones. FieldCap's day
-    ' already has them.
-    Dim depthM As Double, depthH As Double
-    If DepthSlideForRow(ws, bha, r, mtrsSld, hrsSld, depthM, depthH) Then
-        deltaM = depthM
-        If hasDay Then
-            If dayM > depthM + 0.005 And RowEndsPastSlides(ws, r) Then deltaM = dayM
-        Else
+    Else
+        Dim depthM As Double, depthH As Double
+        If DepthSlideForRow(ws, bha, r, mtrsSld, hrsSld, depthM, depthH) Then
+            deltaM = depthM
             deltaH = depthH
+            overwriteSlide = True
         End If
-        overwriteSlide = True
     End If
 
     prevEvents = Application.EnableEvents
@@ -328,8 +360,8 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long, _
     If r > ROW_FIRST Then
         If CellBlank(ws.Cells(r, COL_START)) Then
             If Not CellBlank(ws.Cells(r - 1, COL_END)) Then
-                If IsNumeric(ws.Cells(r - 1, COL_END).Value) Then
-                    ws.Cells(r, COL_START).Value = ws.Cells(r - 1, COL_END).Value
+                If IsNumeric(ws.Cells(r - 1, COL_END).value) Then
+                    ws.Cells(r, COL_START).value = ws.Cells(r - 1, COL_END).value
                     wrote = True
                 End If
             End If
@@ -337,23 +369,17 @@ Private Function FillSlideMetrics(ByVal ws As Worksheet, ByVal r As Long, _
     End If
 
     If deltaM >= 0 And (overwriteSlide Or CellBlank(ws.Cells(r, COL_SLIDE_M))) Then
-        ws.Cells(r, COL_SLIDE_M).Value = deltaM
+        ws.Cells(r, COL_SLIDE_M).value = deltaM
         wrote = True
     End If
 
-    ' The depth share and the BHA delta know nothing of this row's bit
-    ' hours, and slide time past them prints negative rotating time.
-    Dim rowBit As Double
-    rowBit = GetNum(ws.Cells(r, COL_BIT))
-    If rowBit > 0 And deltaH > rowBit Then deltaH = rowBit
-
-    ' A source with no slide hours (stale or partial _OC_Slide) must not
-    ' replace hours the DD typed with 0:00.
+    ' Without a FieldCap day, a source with no slide hours (stale BHA mirror)
+    ' must not replace hours the DD typed with 0:00.
     Dim hrsBlank As Boolean
     hrsBlank = CellBlank(ws.Cells(r, COL_HRS)) And CellBlank(ws.Cells(r, COL_MIN))
-    If deltaH >= 0 And (deltaH > 0 Or hrsBlank) And (overwriteSlide Or hrsBlank) Then
+    If deltaH >= 0 And (hasDay Or deltaH > 0 Or hrsBlank) And (overwriteSlide Or hrsBlank) Then
         SplitDecimalHours deltaH, hrsPart, minPart
-        ws.Cells(r, COL_HRS).Value = hrsPart
+        ws.Cells(r, COL_HRS).value = hrsPart
         WriteMinutesCell ws.Cells(r, COL_MIN), minPart
         wrote = True
     End If
@@ -378,14 +404,14 @@ Private Sub PrepareFormContext(ByVal ws As Worksheet, ByVal r As Long, _
     gDayRoll_PriorCirc = SumNumeric(ws, COL_CIRC, ROW_FIRST, r - 1)
     gDayRoll_PriorSlide = SumSlideHoursDecimal(ws, ROW_FIRST, r - 1)
 
-    If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).Value) Then
-        gDayRoll_BHA = CLng(ws.Cells(ROW_BHA, COL_PERIOD).Value)
+    If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).value) Then
+        gDayRoll_BHA = CLng(ws.Cells(ROW_BHA, COL_PERIOD).value)
     Else
         gDayRoll_BHA = 0
     End If
 
-    If IsNumeric(ws.Cells(r, COL_START).Value) Then
-        gDayRoll_StartDepth = CDbl(ws.Cells(r, COL_START).Value)
+    If IsNumeric(ws.Cells(r, COL_START).value) Then
+        gDayRoll_StartDepth = CDbl(ws.Cells(r, COL_START).value)
         gDayRoll_HasStartDepth = True
     Else
         gDayRoll_StartDepth = 0
@@ -393,12 +419,12 @@ Private Sub PrepareFormContext(ByVal ws As Worksheet, ByVal r As Long, _
     End If
 
     slideDec = 0
-    If IsNumeric(ws.Cells(r, COL_SLIDE_DEC).Value) Then
-        slideDec = CDbl(ws.Cells(r, COL_SLIDE_DEC).Value)
-    ElseIf IsNumeric(ws.Cells(r, COL_HRS).Value) Or IsNumeric(ws.Cells(r, COL_MIN).Value) Then
+    If IsNumeric(ws.Cells(r, COL_SLIDE_DEC).value) Then
+        slideDec = CDbl(ws.Cells(r, COL_SLIDE_DEC).value)
+    ElseIf IsNumeric(ws.Cells(r, COL_HRS).value) Or IsNumeric(ws.Cells(r, COL_MIN).value) Then
         slideDec = GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
     End If
-    gDayRoll_SlideHrs = Round(slideDec, 4)
+    gDayRoll_SlideHrs = RoundHalfUp(slideDec, 4)
 End Sub
 
 Private Function ValidateEndDepth(ByVal endDepth As Double, _
@@ -456,16 +482,19 @@ Private Function ResolveActiveBha(ByVal ws As Worksheet) As Long
     Dim lastBha As Long
     ResolveActiveBha = 0
     lastBha = LastSourceBha(ws)
-    If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).Value) Then
-        headerBha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).Value)
+    If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).value) Then
+        headerBha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).value)
         If FindSourceRow(ws, headerBha) > 0 Then
             ResolveActiveBha = headerBha
             Exit Function
         End If
     End If
     If lastBha > 0 Then
-        ws.Cells(ROW_BHA, COL_PERIOD).Value = lastBha
+        ws.Cells(ROW_BHA, COL_PERIOD).value = lastBha
         ResolveActiveBha = lastBha
+    ElseIf headerBha > 0 Then
+        ' Empty mirror (DD Tools not built): keep the BHA the DD picked.
+        ResolveActiveBha = headerBha
     End If
 End Function
 
@@ -474,7 +503,7 @@ Private Function LastSourceBha(ByVal ws As Worksheet) As Long
     Dim v As Variant
     LastSourceBha = 0
     For r = SRC_FIRST To SRC_LAST
-        v = ws.Cells(r, SRC_BHA).Value
+        v = ws.Cells(r, SRC_BHA).value
         If IsNumeric(v) And v <> "" Then LastSourceBha = CLng(v)
     Next r
 End Function
@@ -484,7 +513,7 @@ Private Function FindSourceRow(ByVal ws As Worksheet, ByVal bha As Long) As Long
     Dim v As Variant
     FindSourceRow = 0
     For r = SRC_FIRST To SRC_LAST
-        v = ws.Cells(r, SRC_BHA).Value
+        v = ws.Cells(r, SRC_BHA).value
         If IsNumeric(v) Then
             If CLng(v) = bha Then
                 FindSourceRow = r
@@ -498,33 +527,29 @@ Private Function IsClosingPeriod(ByVal s As String) As Boolean
     IsClosingPeriod = (s = "Midnight" Or s = "End of Run")
 End Function
 
-' Slide metres / hours for the report day that daily-table row r closes, taken
-' from the OpenCap "slide-rotate by day" CSV (hidden _OC_Slide) for BHA bha.
-' Days are matched in date order to the Midnight / End of Run rows of the table
-' (the table has no date column). 6am / 4pm rows inside a day are subtracted
-' so the closing row carries only the remainder. False = no by-day data for
-' this row (caller keeps the old delta rules).
-' FieldCap logs a slide stand as one Sliding block, connections and surveys
-' included, so its Sliding + Drilling time runs past Pason's on-bottom hours.
-' The day keeps FieldCap's slide-to-rotate split of the bit hours instead,
-' and slide time can never exceed bit time.
+' FieldCap's report day that daily-table row r closes, from the OpenCap
+' "slide-rotate by day" CSV (hidden _OC_Slide) for BHA bha. Days are matched in
+' date order to the Midnight / End of Run rows of the table (the table has no
+' date column). 6am / 4pm rows inside a day are subtracted so the closing row
+' carries only the remainder. False = no by-day data for this row.
+' FieldCap is the source of truth for slide metres/time and rotate metres, even
+' past Pason's bit hours (a slide block includes connections and surveys).
+' Rotate clock hours still land in AL; report Time Rotating is P-V, not AL.
 Private Function DaySlideForRow(ByVal ws As Worksheet, ByVal bha As Long, _
-                                ByVal r As Long, ByRef outM As Double, _
-                                ByRef outH As Double) As Boolean
+                                ByVal r As Long, ByRef out As FcDay) As Boolean
     Dim wsS As Worksheet
     Dim lastR As Long, i As Long, j As Long, n As Long, pos As Long
-    Dim keys() As Double, mt() As Double, hr() As Double, ro() As Double
+    Dim keys() As Double, mt() As Double, hr() As Double, rm() As Double, ro() As Double
     Dim v As Variant
-    Dim k As Double, m As Double, h As Double, rh As Double
-    Dim bitDay As Double, dayH As Double
+    Dim k As Double, m As Double, h As Double, rmv As Double, rh As Double
     Dim period As String
     Dim dayIdx As Long, rr As Long, firstOfDay As Long
+    Dim blankDay As FcDay
 
     DaySlideForRow = False
-    outM = 0
-    outH = 0
+    out = blankDay
     If bha <= 0 Or r < ROW_FIRST Or r > ROW_LAST Then Exit Function
-    period = Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))
+    period = Trim$(CStr(ws.Cells(r, COL_PERIOD).value & ""))
     If Not IsClosingPeriod(period) Then Exit Function
 
     On Error Resume Next
@@ -537,6 +562,7 @@ Private Function DaySlideForRow(ByVal ws As Worksheet, ByVal bha As Long, _
     ReDim keys(1 To lastR)
     ReDim mt(1 To lastR)
     ReDim hr(1 To lastR)
+    ReDim rm(1 To lastR)
     ReDim ro(1 To lastR)
     n = 0
     For i = 2 To lastR
@@ -552,6 +578,7 @@ Private Function DaySlideForRow(ByVal ws As Worksheet, ByVal bha As Long, _
                     k = i
                 End If
                 m = GetNum(wsS.Cells(i, 4))
+                rmv = GetNum(wsS.Cells(i, 5))
                 h = GetNum(wsS.Cells(i, 6))
                 rh = GetNum(wsS.Cells(i, 7))
                 pos = 0
@@ -560,6 +587,7 @@ Private Function DaySlideForRow(ByVal ws As Worksheet, ByVal bha As Long, _
                 Next j
                 If pos > 0 Then
                     mt(pos) = mt(pos) + m
+                    rm(pos) = rm(pos) + rmv
                     hr(pos) = hr(pos) + h
                     ro(pos) = ro(pos) + rh
                 Else
@@ -568,56 +596,183 @@ Private Function DaySlideForRow(ByVal ws As Worksheet, ByVal bha As Long, _
                         If keys(j) > k Then pos = j: Exit For
                     Next j
                     For j = n To pos Step -1
-                        keys(j + 1) = keys(j): mt(j + 1) = mt(j): hr(j + 1) = hr(j): ro(j + 1) = ro(j)
+                        keys(j + 1) = keys(j): mt(j + 1) = mt(j): rm(j + 1) = rm(j)
+                        hr(j + 1) = hr(j): ro(j + 1) = ro(j)
                     Next j
-                    keys(pos) = k: mt(pos) = m: hr(pos) = h: ro(pos) = rh
+                    keys(pos) = k: mt(pos) = m: rm(pos) = rmv: hr(pos) = h: ro(pos) = rh
                     n = n + 1
                 End If
             End If
         End If
     Next i
     If n = 0 Then Exit Function
+    FillMissingDays keys, mt, hr, rm, ro, n
 
     ' Which report day does row r close?
     dayIdx = 0
     firstOfDay = ROW_FIRST
     For rr = ROW_FIRST To r
-        If IsClosingPeriod(Trim$(CStr(ws.Cells(rr, COL_PERIOD).Value & ""))) Then
+        If IsClosingPeriod(Trim$(CStr(ws.Cells(rr, COL_PERIOD).value & ""))) Then
             dayIdx = dayIdx + 1
             If rr < r Then firstOfDay = rr + 1
         End If
     Next rr
     If dayIdx < 1 Or dayIdx > n Then Exit Function
 
-    dayH = hr(dayIdx)
-    bitDay = SumNumeric(ws, COL_BIT, firstOfDay, r)
-    If bitDay > 0 And dayH + ro(dayIdx) > bitDay Then
-        dayH = dayH * bitDay / (dayH + ro(dayIdx))
-    End If
-    outM = mt(dayIdx) - SumNumeric(ws, COL_SLIDE_M, firstOfDay, r - 1)
-    outH = dayH - SumSlideHoursDecimal(ws, firstOfDay, r - 1)
-    If outM < 0 Then outM = 0
-    If outH < 0 Then outH = 0
-    outM = Round(outM, 2)
-    outH = Round(outH, 4)
+    out.slideM = RemainderOf(mt(dayIdx) - SumNumeric(ws, COL_SLIDE_M, firstOfDay, r - 1), 2)
+    out.slideH = RemainderOf(hr(dayIdx) - SumSlideHoursDecimal(ws, firstOfDay, r - 1), 4)
+    out.rotM = RemainderOf(rm(dayIdx), 2)
+    out.rotH = RemainderOf(ro(dayIdx), 4)
+    out.totalM = RemainderOf(mt(dayIdx) + rm(dayIdx), 2)
     DaySlideForRow = True
 End Function
+
+Private Function RemainderOf(ByVal x As Double, ByVal digits As Long) As Double
+    If x < 0 Then x = 0
+    RemainderOf = RoundHalfUp(x, digits)
+End Function
+
+' VBA Round sends a half to the even digit (0.125 -> 0.12). Reports round halves up.
+Private Function RoundHalfUp(ByVal x As Double, ByVal digits As Long) As Double
+    RoundHalfUp = Application.WorksheetFunction.Round(x, digits)
+End Function
+
+' FieldCap writes a zero row for a day the BHA was in the hole without drilling.
+' An older by-day file skips that day, so the dates between the BHA's first and
+' last FieldCap day are filled with zero days here. Otherwise every later day
+' would close the table row above its own.
+Private Sub FillMissingDays(ByRef keys() As Double, ByRef mt() As Double, ByRef hr() As Double, _
+                            ByRef rm() As Double, ByRef ro() As Double, ByRef n As Long)
+    Dim first As Long, span As Long, i As Long, idx As Long
+    Dim fk() As Double, fm() As Double, fh() As Double, frm() As Double, fro() As Double
+    If n < 2 Then Exit Sub
+    If keys(1) < DATE_SERIAL_MIN Or keys(n) > DATE_SERIAL_MAX Then Exit Sub
+    first = CLng(Int(keys(1)))
+    span = CLng(Int(keys(n))) - first + 1
+    If span <= n Or span > MAX_FILL_DAYS Then Exit Sub
+    ReDim fk(1 To span)
+    ReDim fm(1 To span)
+    ReDim fh(1 To span)
+    ReDim frm(1 To span)
+    ReDim fro(1 To span)
+    For i = 1 To span
+        fk(i) = first + i - 1
+    Next i
+    For i = 1 To n
+        idx = CLng(Int(keys(i))) - first + 1
+        fm(idx) = fm(idx) + mt(i)
+        fh(idx) = fh(idx) + hr(i)
+        frm(idx) = frm(idx) + rm(i)
+        fro(idx) = fro(idx) + ro(i)
+    Next i
+    keys = fk: mt = fm: hr = fh: rm = frm: ro = fro
+    n = span
+End Sub
+
+' Wipe retired AJ:AM sidecar on one day row (leftover FieldCap Total / Rot Hrs).
+Private Sub ClearFieldCapDay(ByVal ws As Worksheet, ByVal r As Long)
+    Dim rng As Range
+    Set rng = ws.Range(ws.Cells(r, COL_HELPER_FIRST), ws.Cells(r, COL_HELPER_LAST))
+    If Application.WorksheetFunction.CountA(rng) > 0 Then rng.ClearContents
+End Sub
+
+Private Sub ClearHelperBand(ByVal ws As Worksheet)
+    Dim rng As Range
+    Set rng = ws.Range(ws.Cells(2, COL_HELPER_FIRST), ws.Cells(ROW_TOTALS, COL_HELPER_LAST))
+    If Application.WorksheetFunction.CountA(rng) > 0 Then rng.ClearContents
+End Sub
+
+' Daily-table formulas: K = J-I, O = J-I-L, S = O/(P-V). Email C9/C10/C16/C17
+' read V/P/S/T/U on rows 23/24. AJ:AM sidecar is cleared, never rewritten.
+Private Sub EnsureFieldCapFormulas(ByVal ws As Worksheet)
+    Dim r As Long
+    Dim a As String
+    ClearHelperBand ws
+    For r = ROW_FIRST To ROW_LAST
+        a = CStr(r)
+        SetFormulaIfDiff ws.Cells(r, COL_TOTAL), _
+            "=IFERROR(IF(ISBLANK(J" & a & "),"""",J" & a & "-I" & a & "),"""")"
+        SetFormulaIfDiff ws.Cells(r, COL_ROTATED), _
+            "=IFERROR(IF(ISBLANK(J" & a & "),"""",J" & a & "-I" & a & "-L" & a & "),"""")"
+        SetFormulaIfDiff ws.Cells(r, 19), _
+            "=IFERROR(IF(ISBLANK(P" & a & "),"""",ROUND(O" & a & "/(P" & a & "-V" & a & "),2)),"""")"
+    Next r
+    SetFormulaIfDiff ws.Cells(ROW_TOTALS, 19), "=IFERROR(ROUND(O24/(P24-V24),2),"""")"
+    ' BHA slide time from V24: SUM(N) skips minutes typed as text and never carries past 60.
+    SetFormulaIfDiff ws.Cells(ROW_TOTALS, COL_HRS), "=IFERROR(INT(ROUND(V24*60,0)/60),"""")"
+    SetFormulaIfDiff ws.Cells(ROW_TOTALS, COL_MIN), "=IFERROR(MOD(ROUND(V24*60,0),60),"""")"
+    SetFormulaIfDiff ws.Range("C9"), _
+        "=IFERROR(IF(IFERROR(N(V23),0)=0,""0Hrs"",ROUND(V23,2)&""Hrs / ""&ROUND(T23,4)*100&""% / ""&ROUND(R23,2)&""m/hr""),"""")"
+    SetFormulaIfDiff ws.Range("C10"), _
+        "=IFERROR(IF(U23=0,""0Hrs"",ROUND(P23-V23,2)&""Hrs / ""&ROUND(U23,4)*100&""% / ""&ROUND(S23,2)&""m/hr""),"""")"
+    SetFormulaIfDiff ws.Range("C16"), _
+        "=IFERROR(IF(IFERROR(N(V24),0)=0,""0Hrs"",ROUND(V24,2)&""Hrs / ""&ROUND(T24,4)*100&""% / ""&ROUND(R24,2)&""m/hr""),"""")"
+    SetFormulaIfDiff ws.Range("C17"), _
+        "=IFERROR(IF(U24=0,""0Hrs"",ROUND(P24-V24,2)&""Hrs / ""&ROUND(U24,4)*100&""% / ""&ROUND(S24,2)&""m/hr""),"""")"
+    ' Slide metres print whole (ROUND halves up). Rotated is total less slide (O).
+    SetFormulaIfDiff ws.Range("C7"), "=IFERROR(ROUND(IF(ISERROR(L23),0,L23),0),"""")"
+    SetFormulaIfDiff ws.Range("C8"), "=IFERROR(ROUND(O23,2),"""")"
+    SetFormulaIfDiff ws.Range("C14"), "=IFERROR(ROUND(L24,0),"""")"
+    SetFormulaIfDiff ws.Range("C15"), "=IFERROR(ROUND(O24,2),"""")"
+    SetFormulaIfDiff ws.Range("C18"), _
+        "=IFERROR(IF(U24=0,""0Hrs"",ROUND(K24/P24,2)&""m/hr""),"""")"
+    SetFormulaIfDiff ws.Range("C19"), "=IFERROR(P24,"""")"
+    SetFormulaIfDiff ws.Range("C20"), "=IFERROR(Q24,"""")"
+    SetFormatIfDiff ws.Range("C7"), "0""m"""
+    SetFormatIfDiff ws.Range("C14"), "0""m"""
+    SetFormatIfDiff ws.Range(ws.Cells(ROW_FIRST, COL_SLIDE_M), ws.Cells(ROW_TOTALS, COL_SLIDE_M)), "0"
+End Sub
+
+' Formula-only: K/O/S/C9-C17 from the daily table; wipe AJ:AM. No L/M/N or Pason writes.
+Public Sub DayRoll_EnsureReportHourFormulas()
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    Dim prevEvents As Boolean
+    prevEvents = Application.EnableEvents
+    On Error GoTo Fail
+    Set ws = ThisWorkbook.Worksheets(SH_DATA)
+    wasProt = SheetUnprotectForVba(ws)
+    Application.EnableEvents = False
+    EnsureFieldCapFormulas ws
+    On Error Resume Next
+    Application.Calculate
+    On Error GoTo Fail
+    SheetReprotectAfterVba ws, wasProt
+    Application.EnableEvents = prevEvents
+    Exit Sub
+Fail:
+    On Error Resume Next
+    Application.EnableEvents = prevEvents
+    SheetReprotectAfterVba ws, wasProt
+End Sub
+
+Private Sub SetFormulaIfDiff(ByVal cell As Range, ByVal f As String)
+    If CStr(cell.formula) <> f Then cell.formula = f
+End Sub
+
+Private Sub SetFormatIfDiff(ByVal rng As Range, ByVal fmt As String)
+    If IsNull(rng.numberFormat) Then
+        rng.numberFormat = fmt
+    ElseIf rng.numberFormat <> fmt Then
+        rng.numberFormat = fmt
+    End If
+End Sub
 
 ' True when Slidesheet R/S holds at least one real slide interval.
 Private Function HasSlideIntervals() As Boolean
     Dim ss As Worksheet
     Dim r As Long
-    Dim va As Variant, vb As Variant
+    Dim vA As Variant, vb As Variant
     HasSlideIntervals = False
     On Error Resume Next
     Set ss = ThisWorkbook.Worksheets(SH_SS)
     On Error GoTo 0
     If ss Is Nothing Then Exit Function
     For r = SS_FIRST To SS_LAST
-        va = ss.Cells(r, COL_SLIDE_FROM).Value2
+        vA = ss.Cells(r, COL_SLIDE_FROM).Value2
         vb = ss.Cells(r, COL_SLIDE_TO).Value2
-        If IsNumeric(va) And IsNumeric(vb) Then
-            If CDbl(vb) > CDbl(va) Then
+        If IsNumeric(vA) And IsNumeric(vb) Then
+            If CDbl(vb) > CDbl(vA) Then
                 HasSlideIntervals = True
                 Exit Function
             End If
@@ -625,35 +780,12 @@ Private Function HasSlideIntervals() As Boolean
     Next r
 End Function
 
-' True when row r ends deeper than the last Slide To on the Slidesheet.
-Private Function RowEndsPastSlides(ByVal ws As Worksheet, ByVal r As Long) As Boolean
-    Dim ss As Worksheet
-    Dim rr As Long
-    Dim va As Variant, vb As Variant
-    Dim lo As Double, hi As Double, deepest As Double
-    RowEndsPastSlides = False
-    If Not RowDepthWindow(ws, r, lo, hi) Then Exit Function
-    On Error Resume Next
-    Set ss = ThisWorkbook.Worksheets(SH_SS)
-    On Error GoTo 0
-    If ss Is Nothing Then Exit Function
-    deepest = 0#
-    For rr = SS_FIRST To SS_LAST
-        va = ss.Cells(rr, COL_SLIDE_FROM).Value2
-        vb = ss.Cells(rr, COL_SLIDE_TO).Value2
-        If IsNumeric(va) And IsNumeric(vb) And Not IsEmpty(va) And Not IsEmpty(vb) Then
-            If CDbl(vb) > CDbl(va) And CDbl(vb) > deepest Then deepest = CDbl(vb)
-        End If
-    Next rr
-    RowEndsPastSlides = (hi > deepest + 0.5)
-End Function
-
 ' FieldCap's slide metres / hours for one BHA, from the OpenCap BHA CSV.
 Private Function FieldCapBhaTotals(ByVal bha As Long, ByRef outM As Double, _
                                    ByRef outH As Double) As Boolean
     Dim names As Variant, nm As Variant
     Dim wsB As Worksheet
-    Dim cB As Long, cM As Long, cH As Long, c As Long, i As Long, lastR As Long
+    Dim cB As Long, cM As Long, ch As Long, c As Long, i As Long, lastR As Long
     Dim hdr As String
     Dim v As Variant
     FieldCapBhaTotals = False
@@ -667,21 +799,21 @@ Private Function FieldCapBhaTotals(ByVal bha As Long, ByRef outM As Double, _
         Set wsB = ThisWorkbook.Worksheets(CStr(nm))
         On Error GoTo 0
         If Not wsB Is Nothing Then
-            cB = 0: cM = 0: cH = 0
+            cB = 0: cM = 0: ch = 0
             For c = 1 To 80
-                hdr = Trim$(CStr(wsB.Cells(1, c).Value & ""))
+                hdr = Trim$(CStr(wsB.Cells(1, c).value & ""))
                 If hdr = "BHA #" Then cB = c
                 If hdr = "BHA Mtrs Slid" Then cM = c
-                If hdr = "BHA Hrs Slid" Then cH = c
+                If hdr = "BHA Hrs Slid" Then ch = c
             Next c
-            If cB > 0 And (cM > 0 Or cH > 0) Then
+            If cB > 0 And (cM > 0 Or ch > 0) Then
                 lastR = wsB.Cells(wsB.rows.Count, cB).End(xlUp).row
                 For i = 2 To lastR
                     v = wsB.Cells(i, cB).Value2
                     If IsNumeric(v) And Not IsEmpty(v) Then
                         If CLng(v) = bha Then
                             If cM > 0 Then outM = GetNum(wsB.Cells(i, cM))
-                            If cH > 0 Then outH = GetNum(wsB.Cells(i, cH))
+                            If ch > 0 Then outH = GetNum(wsB.Cells(i, ch))
                             FieldCapBhaTotals = True
                             Exit Function
                         End If
@@ -694,13 +826,14 @@ End Function
 
 ' Totals of the Data day rows (H4:V22) for the BHA in Data!H3: the numbers
 ' the email's BHA lines print, so the BHA table can show the same ones.
-' Rotate hours are bit hours less slide hours. False = no day rows.
+' Metres are column K (End-Start). Rotate hours are always bit hours less
+' slide hours, matching Time Rotating on Data. False = no day rows.
 Public Function DayRoll_ActiveBhaTotals(ByRef bha As Long, ByRef metres As Double, _
                                         ByRef slideM As Double, ByRef slideH As Double, _
                                         ByRef rotH As Double, ByRef circH As Double) As Boolean
     Dim ws As Worksheet
     Dim r As Long
-    Dim bit As Double
+    Dim rowSlideH As Double
     Dim lo As Double, hi As Double
     DayRoll_ActiveBhaTotals = False
     bha = 0: metres = 0#: slideM = 0#: slideH = 0#: rotH = 0#: circH = 0#
@@ -708,53 +841,76 @@ Public Function DayRoll_ActiveBhaTotals(ByRef bha As Long, ByRef metres As Doubl
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
-    If Not IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).Value) Then Exit Function
+    If Not IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).value) Then Exit Function
     If CellBlank(ws.Cells(ROW_BHA, COL_PERIOD)) Then Exit Function
-    bha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).Value)
+    bha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).value)
     For r = ROW_FIRST To ROW_LAST
-        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))) Then
-            If RowDepthWindow(ws, r, lo, hi) Then
+        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).value & ""))) Then
+            If IsNumeric(ws.Cells(r, COL_TOTAL).value) And Not CellBlank(ws.Cells(r, COL_TOTAL)) Then
+                metres = metres + CDbl(ws.Cells(r, COL_TOTAL).value)
+            ElseIf RowDepthWindow(ws, r, lo, hi) Then
                 metres = metres + (hi - lo)
-            Else
-                metres = metres + GetNum(ws.Cells(r, COL_TOTAL))
             End If
+            rowSlideH = GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
             slideM = slideM + GetNum(ws.Cells(r, COL_SLIDE_M))
-            slideH = slideH + GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
-            bit = bit + GetNum(ws.Cells(r, COL_BIT))
+            slideH = slideH + rowSlideH
+            If Not CellBlank(ws.Cells(r, COL_BIT)) Then
+                rotH = rotH + GetNum(ws.Cells(r, COL_BIT)) - rowSlideH
+            End If
             circH = circH + GetNum(ws.Cells(r, COL_CIRC))
             DayRoll_ActiveBhaTotals = True
         End If
     Next r
-    rotH = bit - slideH
     If rotH < 0# Then rotH = 0#
 End Function
 
-' Day rows whose slide time is more than their bit time (rotating time would
-' go negative in the email). Empty string = none.
+' After REFRESH: day rows that do not match FieldCap's day, and rows FieldCap
+' does not cover whose slide time is more than their bit time (rotating time
+' there is bit hours less slide hours and would print negative). "" = none.
 Public Function DayRoll_SlideHoursWarning() As String
     Dim ws As Worksheet
     Dim r As Long
+    Dim bha As Long
     Dim slideH As Double, bit As Double
-    Dim msg As String
+    Dim day As FcDay
+    Dim off As String
+    Dim msgFc As String, msgBit As String
     DayRoll_SlideHoursWarning = ""
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(SH_DATA)
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
+    If IsNumeric(ws.Cells(ROW_BHA, COL_PERIOD).value) And Not CellBlank(ws.Cells(ROW_BHA, COL_PERIOD)) Then
+        bha = CLng(ws.Cells(ROW_BHA, COL_PERIOD).value)
+    End If
     For r = ROW_FIRST To ROW_LAST
-        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))) Then
-            If IsNumeric(ws.Cells(r, COL_BIT).Value) And Not CellBlank(ws.Cells(r, COL_BIT)) Then
-                bit = CDbl(ws.Cells(r, COL_BIT).Value)
-                slideH = GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
+        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).value & ""))) Then
+            slideH = GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
+            If DaySlideForRow(ws, bha, r, day) Then
+                off = ""
+                If Abs(GetNum(ws.Cells(r, COL_SLIDE_M)) - day.slideM) > 0.005 Then off = off & " slide m"
+                If Abs(slideH - day.slideH) > 0.01 Then off = off & " slide time"
+                If off <> "" Then
+                    msgFc = msgFc & vbLf & "  Row " & r & " (" & ws.Cells(r, COL_PERIOD).value & "):" & off & _
+                            "  (FieldCap S " & Format$(day.slideM, "0.00") & " m / " & Format$(day.slideH, "0.00") & " h)"
+                End If
+            ElseIf IsNumeric(ws.Cells(r, COL_BIT).value) And Not CellBlank(ws.Cells(r, COL_BIT)) Then
+                bit = CDbl(ws.Cells(r, COL_BIT).value)
                 If slideH > bit + 0.01 Then
-                    msg = msg & vbLf & "  Row " & r & " (" & ws.Cells(r, COL_PERIOD).Value & "): " & _
-                          Format$(slideH, "0.00") & " h sliding, " & Format$(bit, "0.00") & " bit hours"
+                    msgBit = msgBit & vbLf & "  Row " & r & " (" & ws.Cells(r, COL_PERIOD).value & "): " & _
+                             Format$(slideH, "0.00") & " h sliding, " & Format$(bit, "0.00") & " bit hours"
                 End If
             End If
         End If
     Next r
-    If msg <> "" Then
-        DayRoll_SlideHoursWarning = "Time Sliding is more than the bit hours on:" & msg & vbLf & vbLf & _
+    If msgFc <> "" Then
+        DayRoll_SlideHoursWarning = "These day rows do not match FieldCap's day:" & msgFc & vbLf & vbLf & _
+            "REFRESH writes FieldCap's numbers. If a row still differs, its cells are locked or hold text."
+    End If
+    If msgBit <> "" Then
+        If DayRoll_SlideHoursWarning <> "" Then DayRoll_SlideHoursWarning = DayRoll_SlideHoursWarning & vbLf & vbLf
+        DayRoll_SlideHoursWarning = DayRoll_SlideHoursWarning & _
+            "FieldCap has no day for these rows, and Time Sliding is more than the bit hours:" & msgBit & vbLf & vbLf & _
             "Rotating time would print negative in the email. Fix the slide time (M:N) or the bit hours (P) on those rows."
     End If
 End Function
@@ -826,13 +982,13 @@ Private Function DepthSlideForRow(ByVal ws As Worksheet, ByVal bha As Long, _
             ss.Range(ss.Cells(SS_FIRST, COL_SLIDE_TO), ss.Cells(SS_LAST, COL_SLIDE_TO)))
     If isError(vM) Then Exit Function
     If Not IsNumeric(vM) Then Exit Function
-    outM = Round(CDbl(vM), 2)
+    outM = RoundHalfUp(CDbl(vM), 2)
     If Not BhaByDayPool(bha, poolM, poolH) Then
         poolM = mirrorM
         poolH = mirrorH
     End If
     If poolM > 0.0001 And outM > 0# And poolH > 0# Then
-        outH = Round(poolH * (outM / poolM), 4)
+        outH = RoundHalfUp(poolH * (outM / poolM), 4)
     Else
         outH = 0#
     End If
@@ -859,7 +1015,7 @@ Private Function LastValidPeriodRow(ByVal ws As Worksheet) As Long
     Dim r As Long
     LastValidPeriodRow = 0
     For r = ROW_LAST To ROW_FIRST Step -1
-        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).Value & ""))) Then
+        If IsValidPeriod(Trim$(CStr(ws.Cells(r, COL_PERIOD).value & ""))) Then
             LastValidPeriodRow = r
             Exit Function
         End If
@@ -884,7 +1040,7 @@ Private Sub SplitDecimalHours(ByVal decHrs As Double, _
         minPart = 0
         Exit Sub
     End If
-    totalMin = CLng(Round(decHrs * 60#, 0))
+    totalMin = CLng(RoundHalfUp(decHrs * 60#, 0))
     hrsPart = totalMin \ 60
     minPart = totalMin Mod 60
     If minPart = 60 Then
@@ -898,9 +1054,9 @@ Private Sub WriteMinutesCell(ByVal cell As Range, ByVal minutes As Long)
     Dim fmt As String
     fmt = CStr(cell.numberFormat & "")
     If InStr(1, fmt, "@", vbBinaryCompare) > 0 Then
-        cell.Value = Format$(minutes, "00")
+        cell.value = Format$(minutes, "00")
     Else
-        cell.Value = minutes
+        cell.value = minutes
     End If
 End Sub
 
@@ -914,8 +1070,8 @@ Private Function SumNumeric(ByVal ws As Worksheet, ByVal col As Long, _
         Exit Function
     End If
     For r = r1 To r2
-        If IsNumeric(ws.Cells(r, col).Value) Then
-            tot = tot + CDbl(ws.Cells(r, col).Value)
+        If IsNumeric(ws.Cells(r, col).value) Then
+            tot = tot + CDbl(ws.Cells(r, col).value)
         End If
     Next r
     SumNumeric = tot
@@ -935,10 +1091,10 @@ Private Function SumSlideHoursDecimal(ByVal ws As Worksheet, _
     End If
     For r = r1 To r2
         dec = 0
-        If IsNumeric(ws.Cells(r, COL_SLIDE_DEC).Value) Then
-            dec = CDbl(ws.Cells(r, COL_SLIDE_DEC).Value)
-        ElseIf IsNumeric(ws.Cells(r, COL_HRS).Value) _
-            Or IsNumeric(ws.Cells(r, COL_MIN).Value) Then
+        If IsNumeric(ws.Cells(r, COL_SLIDE_DEC).value) Then
+            dec = CDbl(ws.Cells(r, COL_SLIDE_DEC).value)
+        ElseIf IsNumeric(ws.Cells(r, COL_HRS).value) _
+            Or IsNumeric(ws.Cells(r, COL_MIN).value) Then
             dec = GetNum(ws.Cells(r, COL_HRS)) + GetNum(ws.Cells(r, COL_MIN)) / 60#
         End If
         tot = tot + dec
@@ -947,8 +1103,8 @@ Private Function SumSlideHoursDecimal(ByVal ws As Worksheet, _
 End Function
 
 Private Function GetNum(ByVal cell As Range) As Double
-    If IsNumeric(cell.Value) Then
-        GetNum = CDbl(cell.Value)
+    If IsNumeric(cell.value) Then
+        GetNum = CDbl(cell.value)
     Else
         GetNum = 0
     End If
@@ -956,7 +1112,7 @@ End Function
 
 Private Function CellBlank(ByVal cell As Range) As Boolean
     Dim v As Variant
-    v = cell.Value
+    v = cell.value
     If isError(v) Then
         CellBlank = True
     ElseIf IsNull(v) Then
@@ -969,6 +1125,10 @@ Private Function CellBlank(ByVal cell As Range) As Boolean
         CellBlank = False
     End If
 End Function
+
+
+
+
 
 
 

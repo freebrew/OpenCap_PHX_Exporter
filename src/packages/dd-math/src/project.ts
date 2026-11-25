@@ -576,13 +576,24 @@ export function contDiAim(part: unknown, survMd: unknown, survInc: unknown, surv
 }
 
 export function cumulative(previous: unknown, md1: unknown, inc1: unknown, azm1: unknown, md2: unknown, inc2: unknown, azm2: unknown, isFirst: unknown, axis: "n" | "e"): number | null {
-  if (num(md2) == null || num(inc2) == null || num(azm2) == null) return null;
-  if (isFirst === true || isFirst === 1 || String(isFirst).toUpperCase() === "TRUE") return 0;
+  const endMd = num(md2);
+  const endInc = num(inc2);
+  const endAzm = num(azm2);
+  if (endMd == null || endInc == null || endAzm == null) return null;
+  const prev = num(previous) ?? 0;
+  if (isFirst === true || isFirst === 1 || String(isFirst).toUpperCase() === "TRUE") {
+    const tieMd = num(md1);
+    const startMd = tieMd ?? 0;
+    const startInc = tieMd != null ? num(inc1) ?? 0 : 0;
+    const startAzm = tieMd != null ? num(azm1) ?? 0 : 0;
+    if (endMd <= startMd) return prev;
+    return prev + minCurveStep(startMd, startInc, startAzm, endMd, endInc, endAzm)[axis];
+  }
   const startMd = num(md1);
   const startInc = num(inc1);
   const startAzm = num(azm1);
   if (startMd == null || startInc == null || startAzm == null) return null;
-  return (num(previous) ?? 0) + minCurveStep(startMd, startInc, startAzm, num(md2) ?? 0, num(inc2) ?? 0, num(azm2) ?? 0)[axis];
+  return prev + minCurveStep(startMd, startInc, startAzm, endMd, endInc, endAzm)[axis];
 }
 
 export function incAtBit(survInc: unknown, dls: unknown, course: unknown, seen: unknown, below: unknown, tf: unknown, motorOut: unknown, context?: SurveyContext): number | null {
@@ -685,11 +696,13 @@ export function contDiTvdAtBit(bitMd: unknown, bitInc: unknown, bitAzm: unknown,
     const md = num(mds[i]);
     const inc = num(incs[i]);
     const azm = num(azms[i]);
-    if (md == null || inc == null || !(md > lastMd && md < bit)) continue;
-    const step = minCurveStep(lastMd, lastInc, lastAzm, md, inc, azm ?? lastAzm);
+    // A blank inclination or azimuth keeps the previous reading. The station
+    // still has to advance in measured depth.
+    if (md == null || !(md > lastMd && md < bit)) continue;
+    const step = minCurveStep(lastMd, lastInc, lastAzm, md, inc ?? lastInc, azm ?? lastAzm);
     tvd += step.tvd;
     lastMd = md;
-    lastInc = inc;
+    lastInc = inc ?? lastInc;
     lastAzm = azm ?? lastAzm;
   }
   const offset = num(pdOffset);

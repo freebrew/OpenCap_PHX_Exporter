@@ -1,4 +1,5 @@
 import { minCurveStep } from "../../dd-math/src/angles";
+import { integrateLocalNE } from "../../dd-math/src/plan";
 import { checkAcReport, interpPlan, stationInFrame, type AcPlanPoint } from "../../workbook-commands/src/acCheck";
 import { readAcDetail, wellsMatch, type AcDetailStation } from "../../workbook-commands/src/acDetail";
 import { compareHeaders, readDatum } from "../../workbook-commands/src/acHeader";
@@ -8,6 +9,7 @@ import { SURVEY_SHEET } from "../../workbook-commands/src/planImport";
 import { cellText, numeric, type SheetBook } from "../../workbook-commands/src/sheetBook";
 import { isGoodSurveyRow, loadNamedTargets, SS_SHEET } from "../../workbook-commands/src/slidesheet";
 import { loadFormations } from "../../corridor-3d/src/corridorScene";
+import { ringRadii } from "./ringLabel";
 
 // East, North, and up, in metres from the first plan station. Up is the opposite of TVD.
 // 1:1, so a metre of hole is a metre on every axis.
@@ -39,8 +41,9 @@ export interface OffsetPath extends PathArrays {
   wellhead: Wellhead | null;
   /**
    * Stations that start a new run. The report only gives the offset's closest point for each
-   * reference station, so where it gives nothing for a stretch of the offset the line is not drawn
-   * across it. Sorted, never 0.
+   * reference station. A normal survey step, and a longer step that is still one turn of the
+   * well, is drawn. A step whose straight line is much shorter than the measured depth is left
+   * open: that stretch was never surveyed, and a chord would cut the corner. Sorted, never 0.
    */
   breaks: number[];
 }
@@ -87,7 +90,7 @@ export interface WellTarget {
   x: number;
   y: number;
   z: number;
-  /** Outer ring radius, metres. The inner ring is 0.45 of this. */
+  /** Outer ring, 20 m. The inner ring is 10 m. */
   radius: number;
   outer: Float32Array;
   inner: Float32Array;
@@ -164,26 +167,87 @@ function pack(samples: Sample[], origin: AcPlanPoint): PathArrays {
 
 function readPlan(book: SheetBook): AcPlanPoint[] {
   if (!book.hasSheet(SURVEY_SHEET)) return [];
-  const last = book.lastUsedRow(SURVEY_SHEET, 1);
-  const out: AcPlanPoint[] = [];
-  for (let row = 3; row <= last; row += 1) {
-    const md = numeric(book.value(SURVEY_SHEET, row, 1));
-    const tvd = numeric(book.value(SURVEY_SHEET, row, 4));
-    const n = numeric(book.value(SURVEY_SHEET, row, 5));
-    const e = numeric(book.value(SURVEY_SHEET, row, 6));
-    if (md == null || tvd == null || n == null || e == null) continue;
-    out.push({ md, n, e, tvd });
+  const cols: Partial<Record<"md" | "inc" | "azi" | "tvd" | "ns" | "ew", number>> = {};
+  for (let c = 1; c <= 20; c += 1) {
+    const head = cellText(book.value(SURVEY_SHEET, 2, c)).toUpperCase();
+    if (head === "MD") cols.md = c;
+    else if (head === "INC") cols.inc = c;
+    else if (head === "AZI" || head === "AZM") cols.azi = c;
+    else if (head === "TVD") cols.tvd = c;
+    else if (head === "NS") cols.ns = c;
+    else if (head === "EW") cols.ew = c;
   }
-  return out;
+  const colMd = cols.md ?? 1;
+  const colInc = cols.inc ?? 2;
+  const colAzi = cols.azi ?? 3;
+  const colTvd = cols.tvd ?? 4;
+  const colNs = cols.ns ?? 5;
+  const colEw = cols.ew ?? 6;
+  const last = book.lastUsedRow(SURVEY_SHEET, colMd);
+  const rows: Array<AcPlanPoint & { inc: number | null; azi: number | null; missingNE: boolean }> = [];
+  for (let row = 3; row <= last; row += 1) {
+    const md = numeric(book.value(SURVEY_SHEET, row, colMd));
+    const tvd = numeric(book.value(SURVEY_SHEET, row, colTvd));
+    const inc = numeric(book.value(SURVEY_SHEET, row, colInc));
+    const azi = numeric(book.value(SURVEY_SHEET, row, colAzi));
+    const n = numeric(book.value(SURVEY_SHEET, row, colNs));
+    const e = numeric(book.value(SURVEY_SHEET, row, colEw));
+    if (md == null || tvd == null) continue;
+    if ((n == null || e == null) && (inc == null || azi == null)) continue;
+    if (rows.length > 0 && !(md > rows[rows.length - 1]!.md)) continue;
+    rows.push({ md, n: n ?? 0, e: e ?? 0, tvd, inc, azi, missingNE: n == null || e == null });
+  }
+  if (rows.length > 0 && rows.every((row) => row.inc != null && row.azi != null)) {
+    const startN = rows[0]!.md > 0.01 && !rows[0]!.missingNE ? rows[0]!.n : 0;
+    const startE = rows[0]!.md > 0.01 && !rows[0]!.missingNE ? rows[0]!.e : 0;
+    const ne = integrateLocalNE(
+      rows.map((row) => row.md),
+      rows.map((row) => row.inc!),
+      rows.map((row) => row.azi!),
+      startN,
+      startE,
+    );
+    let storedOk = !rows.some((row) => row.missingNE);
+    if (storedOk && rows[0]!.md <= 0.01 && (Math.abs(rows[0]!.n) > 0.1 || Math.abs(rows[0]!.e) > 0.1)) {
+      storedOk = false;
+    } else if (storedOk) {
+      let maxErr = 0;
+      for (let i = 0; i < rows.length; i += 1) {
+        const err = Math.hypot(rows[i]!.n - ne.ns[i]!, rows[i]!.e - ne.ew[i]!);
+        if (err > maxErr) maxErr = err;
+      }
+      if (maxErr > 2) storedOk = false;
+    }
+    if (!storedOk) {
+      for (let i = 0; i < rows.length; i += 1) {
+        rows[i]!.n = ne.ns[i]!;
+        rows[i]!.e = ne.ew[i]!;
+      }
+    }
+  }
+  return rows.map(({ md, n, e, tvd }) => ({ md, n, e, tvd }));
+}
+
+function cellNumOr(book: SheetBook, row: number, col: number, fallback = 0): number {
+  const value = book.value(SS_SHEET, row, col);
+  const parsed = value == null || value === "" ? null : numeric(value);
+  return parsed == null ? fallback : parsed;
 }
 
 function readDrilled(book: SheetBook): Sample[] {
   if (!book.hasSheet(SS_SHEET)) return [];
-  let prev = { md: 0, inc: 0, azi: 0 };
-  let n = 0;
-  let e = 0;
-  let tvd = 0;
+  const tieRow = SURVEY_FIRST - 1;
+  const tieMd = cellNumOr(book, tieRow, 5, 0);
+  let prev = {
+    md: tieMd,
+    inc: cellNumOr(book, tieRow, 6, 0),
+    azi: cellNumOr(book, tieRow, 7, 0),
+  };
+  let n = cellNumOr(book, tieRow, 38, 0);
+  let e = cellNumOr(book, tieRow, 39, 0);
+  let tvd = cellNumOr(book, tieRow, 8, tieMd);
   const out: Sample[] = [];
+  if (tieMd > 0) out.push({ md: tieMd, n, e, tvd, c2c: null, sf: null });
   for (let row = SURVEY_FIRST; row <= SURVEY_LAST; row += 1) {
     if (isSummaryRow(book, row) || !isGoodSurveyRow(book, row)) continue;
     const md = numeric(book.value(SS_SHEET, row, 5));
@@ -236,10 +300,13 @@ function hashScene(plan: PathArrays, drilled: PathArrays | null, offsets: Offset
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Stations this close along the offset have the offset between them, so the line may join them. */
-const KNOWN_STEP_M = 60;
-/** A longer step is still joined when the offset runs straight over it: chord within half a percent of the depth step. */
-const STRAIGHT_RATIO = 0.995;
+/** A normal survey interval. A step this short is one leg, even when the coordinates wander a little. */
+const KNOWN_STEP_M = 90;
+/**
+ * Chord divided by the measured step. 0.85 is about a 110° turn, which is still one leg
+ * between two known stations. A smaller ratio is a jump across hole the report never gave.
+ */
+const CURVE_RATIO = 0.85;
 function chordOf(a: AcDetailStation, b: AcDetailStation): number {
   return Math.hypot(b.n - a.n, b.e - a.e, b.offTvd - a.offTvd);
 }
@@ -265,13 +332,21 @@ function alongOffset(stations: AcDetailStation[]): AcDetailStation[] {
   });
 }
 
-/** Where the report gives no path for a stretch of the offset, and the stretch is not a straight run. */
+/** Where the report gives no path for a stretch of the offset, and the stretch is not one turn of the well. */
 function runBreaks(stations: AcDetailStation[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < stations.length; i += 1) {
-    const along = stations[i]!.offMd - stations[i - 1]!.offMd;
+    const previous = stations[i - 1]!;
+    const next = stations[i]!;
+    const along = next.offMd - previous.offMd;
+    const chord = chordOf(previous, next);
+    // Two reference rows can share a depth and still sit in different places. That spur is not a leg.
+    if (along < 1 && chord > 5) {
+      out.push(i);
+      continue;
+    }
     if (along <= KNOWN_STEP_M) continue;
-    if (chordOf(stations[i - 1]!, stations[i]!) >= along * STRAIGHT_RATIO - 1) continue;
+    if (chord >= along * CURVE_RATIO - 1) continue;
     out.push(i);
   }
   return out;
@@ -495,12 +570,7 @@ function ringPoints(center: Local, tangent: Local, radius: number): Float32Array
 }
 
 function planTargets(book: SheetBook, plan: AcPlanPoint[], origin: AcPlanPoint): WellTarget[] {
-  let reach = 1;
-  for (const point of plan) {
-    const at = localOf({ ...point, c2c: null, sf: null }, origin);
-    reach = Math.max(reach, Math.abs(at.x), Math.abs(at.y), Math.abs(at.z));
-  }
-  const radius = Math.max(8, reach * 0.035);
+  const { outer: radius, inner } = ringRadii();
   const out: WellTarget[] = [];
   for (const target of namedOnPlan(book)) {
     const at = interpPlan(plan, target.md);
@@ -522,7 +592,7 @@ function planTargets(book: SheetBook, plan: AcPlanPoint[], origin: AcPlanPoint):
       z: center.z,
       radius,
       outer: ringPoints(center, tangent, radius),
-      inner: ringPoints(center, tangent, radius * 0.45),
+      inner: ringPoints(center, tangent, inner),
     });
   }
   return out;

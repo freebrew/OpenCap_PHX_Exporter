@@ -26,6 +26,7 @@ import {
   pdfTextMime,
   sendOrder,
   splitAddresses,
+  toDraftMime,
   toMime,
   validateDraft,
   type MailDraft,
@@ -151,6 +152,13 @@ describe("validation", () => {
 describe("canonical mime", () => {
   it("matches the golden serializer", () => {
     expect(toMime(sample(), BOUNDARIES)).toBe(GOLDEN);
+  });
+
+  it("prepends X-Unsent: 1 for editable Classic and New Outlook drafts without Message-ID", () => {
+    const draftEml = toDraftMime(sample(), BOUNDARIES);
+    expect(draftEml.startsWith("X-Unsent: 1\r\n")).toBe(true);
+    expect(draftEml).toBe(`X-Unsent: 1\r\n${GOLDEN}`);
+    expect(draftEml).not.toMatch(/^Message-ID:/im);
   });
 
   it("encodes a non-ascii subject and keeps both png copies", () => {

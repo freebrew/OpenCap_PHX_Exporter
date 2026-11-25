@@ -55,8 +55,8 @@ Public Sub SortPdmConfTable()
     n = 0
     nInc = 0
     For r = PDM_FIRST To PDM_LAST
-        cTxt = Trim$(CStr(ws.Cells(r, COL_CONF).Value & ""))
-        vTxt = Trim$(CStr(ws.Cells(r, COL_REVL).Value & ""))
+        cTxt = Trim$(CStr(ws.Cells(r, COL_CONF).value & ""))
+        vTxt = Trim$(CStr(ws.Cells(r, COL_REVL).value & ""))
         If Len(cTxt) = 0 And Len(vTxt) = 0 Then GoTo NextRead
 
         If Len(cTxt) > 0 And Len(vTxt) > 0 Then
@@ -65,7 +65,7 @@ Public Sub SortPdmConfTable()
             If IsNumeric(vTxt) Then
                 revL(n) = CDbl(vTxt)
             Else
-                revL(n) = ws.Cells(r, COL_REVL).Value
+                revL(n) = ws.Cells(r, COL_REVL).value
             End If
             ParsePdmConf cTxt, lobe(n), stator(n), stage(n)
         Else
@@ -74,7 +74,7 @@ Public Sub SortPdmConfTable()
             If Len(vTxt) > 0 And IsNumeric(vTxt) Then
                 incRevl(nInc) = CDbl(vTxt)
             ElseIf Len(vTxt) > 0 Then
-                incRevl(nInc) = ws.Cells(r, COL_REVL).Value
+                incRevl(nInc) = ws.Cells(r, COL_REVL).value
             Else
                 incRevl(nInc) = Empty
             End If
@@ -120,14 +120,14 @@ NextRead:
     ws.Range(ws.Cells(PDM_FIRST, COL_CONF), ws.Cells(PDM_LAST, COL_REVL)).ClearContents
     For i = 1 To n
         r = PDM_FIRST + i - 1
-        ws.Cells(r, COL_CONF).Value = conf(i)
-        ws.Cells(r, COL_REVL).Value = revL(i)
+        ws.Cells(r, COL_CONF).value = conf(i)
+        ws.Cells(r, COL_REVL).value = revL(i)
     Next i
     For i = 1 To nInc
         r = PDM_FIRST + n + i - 1
         If r > PDM_LAST Then Exit For
-        If Len(incConf(i)) > 0 Then ws.Cells(r, COL_CONF).Value = incConf(i)
-        If Not IsEmpty(incRevl(i)) Then ws.Cells(r, COL_REVL).Value = incRevl(i)
+        If Len(incConf(i)) > 0 Then ws.Cells(r, COL_CONF).value = incConf(i)
+        If Not IsEmpty(incRevl(i)) Then ws.Cells(r, COL_REVL).value = incRevl(i)
     Next i
 
     SheetReprotectAfterVba ws, wasProt
@@ -212,9 +212,9 @@ Private Sub FillRevLForRow(ByVal ws As Worksheet, ByVal r As Long, _
     Dim v As Variant
 
     If r < PDM_FIRST Or r > PDM_LAST Then Exit Sub
-    cTxt = Trim$(CStr(ws.Cells(r, COL_CONF).Value & ""))
+    cTxt = Trim$(CStr(ws.Cells(r, COL_CONF).value & ""))
     If Len(cTxt) = 0 Then Exit Sub
-    vTxt = Trim$(CStr(ws.Cells(r, COL_REVL).Value & ""))
+    vTxt = Trim$(CStr(ws.Cells(r, COL_REVL).value & ""))
     If (Not overwrite) And Len(vTxt) > 0 Then Exit Sub
 
     ParsePdmConf cTxt, lobe, stator, stage
@@ -223,7 +223,7 @@ Private Sub FillRevLForRow(ByVal ws As Worksheet, ByVal r As Long, _
     v = ResolveRevL(lobe, stator, stage, odHint)
     If IsEmpty(v) Then Exit Sub
     ws.Cells(r, COL_REVL).numberFormat = "0.000"
-    ws.Cells(r, COL_REVL).Value = CDbl(v)
+    ws.Cells(r, COL_REVL).value = CDbl(v)
 End Sub
 
 Private Function ResolveRevL(ByVal lobe As Long, ByVal stator As Long, _
@@ -294,7 +294,7 @@ Private Function GuessMotorOdIn() As Double
     If lastR > 200 Then lastR = 200
 
     For r = lastR To 2 Step -1
-        desc = CStr(ws.Cells(r, 2).Value & "") & " " & CStr(ws.Cells(r, 3).Value & "")
+        desc = CStr(ws.Cells(r, 2).value & "") & " " & CStr(ws.Cells(r, 3).value & "")
         If InStr(1, desc, "motor", vbTextCompare) = 0 Then GoTo NextBha
         od = OdFromText(desc)
         If od > 0# Then

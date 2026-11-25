@@ -34,6 +34,7 @@ export {
   applyDayRoll,
   backfillDayBreakdown,
   checkDayRoll,
+  dayBreakdownWarning,
   DAY_FIRST,
   DAY_LAST,
   daySlideMetres,
@@ -60,9 +61,11 @@ export {
   onTrackerEdit,
   pageKey,
   parseDateTime,
+  previousIJ,
   refreshCommand,
   refreshFormIJ,
   settingLabel,
+  settingFormula,
   startEntry,
   successCodes,
   timeText,
@@ -89,6 +92,7 @@ export {
 export { bhaNumber, numOrZero, OcTable, vbaIsNumeric, vbaStr } from "./ocTable";
 export {
   applyOpenCap,
+  bindCostHeadline,
   costDateSerial,
   csvConv,
   readCostDays,
@@ -119,7 +123,7 @@ export {
   type OpenCapSource,
 } from "./openCap";
 export { bhaNumbers, bhaSummary, serialHours, writeSerialHoursTable, type BhaComponent, type BhaSummary, type SerialHoursRow } from "./bhaSelect";
-export { contDiTargetHit, followSlideTarget, pullLastSurvey, type ContDiPull } from "./contDi";
+export { applyContDiHeldReadings, contDiCalcFormula, contDiTargetHit, followSlideTarget, paintContDiColumnA, pullLastSurvey, type ContDiPull } from "./contDi";
 export { layoutText, type PdfTextItem } from "./pdfLayout";
 export { fingerprintTable, glyphLetters, packFingerprints, readGlyphFont, UNKNOWN_GLYPH, unpackFingerprints, type GlyphFont } from "./glyphShape";
 export {
@@ -134,10 +138,11 @@ export {
   type PdfPageLike,
   type PdfTextOps,
 } from "./glyphText";
-export { looksLikeSerial, normSerial, toolHoursSync, type ToolHoursResult } from "./toolHours";
+export { bindLiveToolHours, looksLikeSerial, normSerial, toolHoursSync, type ToolHoursResult } from "./toolHours";
 export {
   projectFieldCapDashboard,
   writeSurveyStations,
+  type DashboardOptions,
   type FieldCapDashboard,
   type SurveyDepthCoordinate,
   type SurveySyncOptions,
@@ -146,6 +151,18 @@ export {
 } from "./fieldcapDashboard";
 export { axisLabel, computePlanGauge, updateWellborePosition, type GaugeMode, type GaugeModel, type GaugeResult } from "./planGauge";
 export { repairSurveyFormulas, type RepairedCell } from "./surveyFormulaRepair";
+export {
+  applySurveySync,
+  auditSlidesheetSurveys,
+  formatSurveyAuditPrompt,
+  parseWellSeekerCsv,
+  parseWellSeekerGrid,
+  slidesheetTieThreshold,
+  type SurveyAuditResult,
+  type SurveyDiffItem,
+  type WellSeekerParseResult,
+  type WellSeekerStation,
+} from "./surveySync";
 export {
   csvParseLine,
   FORMATIONS_SHEET,
@@ -169,9 +186,12 @@ export {
   clearSlidesheetRanges,
   highlightActiveTarget,
   isGoodSurveyRow,
+  bindSurveyDepthMetres,
+  lastEnteredSurveyRow,
   lastSurveyRow,
   loadNamedTargets,
   prepareSlideComments,
+  syncLastSurveyStrip,
   refreshRotateMetres,
   highlightNewestSurvey,
   refreshSlideComments,

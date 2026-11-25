@@ -1,20 +1,5 @@
-import { directoryFromHandle, type StoredDirectory } from "./directory.js";
+import { directoryFromHandle, type DirectoryHandleLike, type StoredDirectory } from "./directory.js";
 import type { JobRegistry } from "./registry.js";
-
-interface DirectoryHandleLike {
-  getFileHandle(name: string, options?: { create?: boolean }): Promise<{
-    getFile(): Promise<Blob>;
-    createWritable(options: { mode?: "exclusive" | "siloed" }): Promise<{
-      write(data: BufferSource | Blob | string): Promise<void>;
-      close(): Promise<void>;
-      abort(): Promise<void>;
-    }>;
-  }>;
-  entries(): AsyncIterable<[string, { kind: string }]>;
-  queryPermission(descriptor: { mode: "readwrite" }): Promise<"granted" | "prompt" | "denied">;
-  requestPermission(descriptor: { mode: "readwrite" }): Promise<"granted" | "prompt" | "denied">;
-  removeEntry?(name: string): Promise<void>;
-}
 
 export async function grantJobFolder(
   requestHandle: () => Promise<DirectoryHandleLike>,

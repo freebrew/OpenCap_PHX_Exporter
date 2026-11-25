@@ -10,7 +10,7 @@ Public Sub GenerateMorningReport()
     ' EDIT THESE DAILY/AS NEEDED
     ' =========================
     
-    WELL_NUMBER = CStr(ThisWorkbook.Worksheets("Setup").Range("D4").Value)
+    WELL_NUMBER = CStr(ThisWorkbook.Worksheets("Setup").Range("D4").value)
     Const HOLE_SIZE As String = ""
     Const NEXT_24_TEXT As String = ""
     Const CURRENTLY_TEXT As String = "Drilling ahead no issues"
@@ -88,11 +88,11 @@ Public Sub GenerateMorningReport()
     Dim totalDist As Variant
     Dim planRef As String
     
-    lateralDist = ws.Range("E13").Value
-    lateralDir = ws.Range("F13").Value
-    vertDist = ws.Range("E14").Value
-    vertDir = ws.Range("F14").Value
-    totalDist = ws.Range("E15").Value
+    lateralDist = ws.Range("E13").value
+    lateralDir = ws.Range("F13").value
+    vertDist = ws.Range("E14").value
+    vertDir = ws.Range("F14").value
+    totalDist = ws.Range("E15").value
     planRef = "P1"
     
     ' Label fallbacks if direct cells are blank
@@ -195,14 +195,14 @@ Public Sub GenerateMorningSummaryMini()
     Dim depth24 As Variant
     Dim metersDrilledRaw As Variant
 
-    bhaNo = ws.Range("H3").Value
+    bhaNo = ws.Range("H3").value
     If Len(CleanText(bhaNo)) = 0 Then bhaNo = DEFAULT_BHA_NUMBER
 
     ' Prefer midnight-totals row on Data sheet after layout swap:
     ' I23 = Start Depth, J23 = End Depth, K23 = Total, L23 = Meters Sliding
-    depth00 = ws.Range("I23").Value
-    depth24 = ws.Range("J23").Value
-    metersDrilledRaw = ws.Range("K23").Value
+    depth00 = ws.Range("I23").value
+    depth24 = ws.Range("J23").value
+    metersDrilledRaw = ws.Range("K23").value
 
     ' =========================
     ' REQUIRED CELL ADDRESS VALUES
@@ -219,17 +219,17 @@ Public Sub GenerateMorningSummaryMini()
     Dim ewPositionRaw As Variant
     Dim nsPositionRaw As Variant
 
-    slidMetersRaw = ws.Range("L23").Value
-    bitHoursRaw = ws.Range("P23").Value
-    totalBitHoursRaw = ws.Range("P24").Value
-    motorHoursRaw = ws.Range("Q23").Value
-    totalMotorHoursRaw = ws.Range("Q24").Value
+    slidMetersRaw = ws.Range("L23").value
+    bitHoursRaw = ws.Range("P23").value
+    totalBitHoursRaw = ws.Range("P24").value
+    motorHoursRaw = ws.Range("Q23").value
+    totalMotorHoursRaw = ws.Range("Q24").value
 
-    lastSurveyRaw = ws.Range("E7").Value
-    incRaw = ws.Range("E8").Value
-    azRaw = ws.Range("E9").Value
-    ewPositionRaw = ws.Range("E13").Value
-    nsPositionRaw = ws.Range("E14").Value
+    lastSurveyRaw = ws.Range("E7").value
+    incRaw = ws.Range("E8").value
+    azRaw = ws.Range("E9").value
+    ewPositionRaw = ws.Range("E13").value
+    nsPositionRaw = ws.Range("E14").value
 
     ' =========================
     ' DEPTH MATH (I23 / J23 / K23)
@@ -249,7 +249,7 @@ Public Sub GenerateMorningSummaryMini()
     If haveDepth00 Then depth00 = n00
     If haveDepth24 Then depth24 = n24
 
-    If TryFirstNumber(ws.Range("K23").Value, nTotalCell) Then
+    If TryFirstNumber(ws.Range("K23").value, nTotalCell) Then
         totalDrilled = Abs(nTotalCell)
         haveTotalDrilled = True
     ElseIf haveDepth00 And haveDepth24 Then
@@ -842,7 +842,7 @@ Private Function TryFirstNumber(ByVal v As Variant, ByRef result As Double) As B
     
     If re.Test(s) Then
         Set matches = re.Execute(s)
-        result = CDbl(matches(0).Value)
+        result = CDbl(matches(0).value)
         TryFirstNumber = True
     End If
     

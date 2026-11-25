@@ -353,9 +353,9 @@ Public Function PngDownscale(ByVal pngPath As String, ByVal targetW As Long) As 
     On Error GoTo Fail
     Set img = CreateObject("WIA.ImageFile")
     img.LoadFile pngPath
-    If img.Width <= targetW Then PngDownscale = True: Exit Function
+    If img.width <= targetW Then PngDownscale = True: Exit Function
 
-    newH = CLng(img.Height * targetW / img.Width)
+    newH = CLng(img.Height * targetW / img.width)
     If newH < 1 Then newH = 1
 
     Set ip = CreateObject("WIA.ImageProcess")
@@ -3050,7 +3050,7 @@ Private Function MeasureTx(ByVal t As String, ByVal sz As Double, ByVal bold As 
             .Font.bold = IIf(bold, msoTrue, msoFalse)
         End With
     End With
-    MeasureTx = shp.Width
+    MeasureTx = shp.width
     shp.Delete
     Exit Function
 Fail:
@@ -3587,7 +3587,7 @@ Private Function ExportGroup(ByVal outPath As String) As String
     For i = 0 To mNameN - 1
         Set offShp = mWs.Shapes(mNames(i))
         If offShp.Left >= mExportW Or offShp.Top >= mCanvasH _
-           Or offShp.Left + offShp.Width <= 0# Or offShp.Top + offShp.Height <= 0# Then
+           Or offShp.Left + offShp.width <= 0# Or offShp.Top + offShp.Height <= 0# Then
             Trace "  dropped off-canvas shape " & offShp.name & " at " & _
                   Format$(offShp.Left, "0") & "," & Format$(offShp.Top, "0")
             offShp.Delete
@@ -3627,7 +3627,7 @@ Private Function ExportGroup(ByVal outPath As String) As String
 
     Dim grp As Shape
     Set grp = mWs.Shapes(current(1))
-    Trace "  grouped into " & grp.name & " " & Format$(grp.Width, "0") & "x" & Format$(grp.Height, "0") & " pt"
+    Trace "  grouped into " & grp.name & " " & Format$(grp.width, "0") & "x" & Format$(grp.Height, "0") & " pt"
 
     ' Activate the sheet/chart under ScreenUpdating=False so nothing paints.
     ' Only force the application visible when it was started invisible (automation);
@@ -3638,7 +3638,7 @@ Private Function ExportGroup(ByVal outPath As String) As String
     Dim exportW As Double, exportH As Double
     Dim pic As Shape
     prevVisible = Application.Visible
-    Set prevSheet = mWs.Parent.ActiveSheet
+    Set prevSheet = mWs.parent.ActiveSheet
     forcedVisible = False
     If Not prevVisible Then
         Application.Visible = True
@@ -3682,10 +3682,10 @@ Private Function ExportGroup(ByVal outPath As String) As String
     pic.LockAspectRatio = msoFalse
     pic.Left = -grp.Left
     pic.Top = -grp.Top
-    pic.Width = grp.Width
+    pic.width = grp.width
     pic.Height = grp.Height
 
-    co.Chart.Export Filename:=outPath, FilterName:="PNG"
+    co.Chart.Export fileName:=outPath, FilterName:="PNG"
     Trace "  exported " & outPath
 
     co.Delete

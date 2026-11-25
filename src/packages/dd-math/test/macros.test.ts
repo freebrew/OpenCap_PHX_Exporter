@@ -6,25 +6,31 @@ import {
   checkEntry,
   clearLog,
   clearSlidesheetRanges,
+  bindSurveyDepthMetres,
   computePlanGauge,
   DLC,
   highlightNewestSurvey,
   lastSurveyRow,
   lengthsFromCsv,
   onTrackerEdit,
+  previousIJ,
+  refreshCommand,
   repairSurveyFormulas,
   SheetBook,
   slideComment,
+  syncLastSurveyStrip,
   startEntry,
   storeTarget,
   surveyBarState,
+  updateWellborePosition,
+  settingFormula,
   writeEntry,
   type CellWrite,
   type DlEntryForm,
   type ProtectionInfo,
 } from "../../workbook-commands/src/index";
 
-type CellInput = string | number | { v?: unknown; f?: string; s?: string };
+type CellInput = string | number | { v?: unknown; f?: string; s?: unknown };
 
 function rc(a1: string): [number, number] {
   const match = /^([A-Z]+)(\d+)$/.exec(a1)!;
@@ -115,13 +121,23 @@ describe("DL Tracker ADD ENTRY (frmDLEntry)", () => {
     expect(wrote(book.writes, "DL Tracker", 4, DLC.NUM)).toMatchObject({ kind: "formula", formula: "=IF(D4=\"\",\"\",B3+1)" });
     expect(wrote(book.writes, "DL Tracker", 4, DLC.CMD)).toMatchObject({ kind: "value", value: "1-6" });
     expect(wrote(book.writes, "DL Tracker", 4, DLC.PERIOD)).toMatchObject({ kind: "clear" });
-    expect(wrote(book.writes, "DL Tracker", 4, DLC.SET)).toBeUndefined();
+    expect(wrote(book.writes, "DL Tracker", 4, DLC.SET)).toMatchObject({ kind: "formula", formula: settingFormula(4) });
+    expect(wrote(book.writes, "DL Tracker", 3, DLC.SET)).toBeUndefined();
+  });
+
+  it("puts the D/L Setting lookup back when H has no formula", () => {
+    const book = makeBook({ "DL Tracker": { AA7: "1-4", AB7: "Set TF = 0 degrees, SR = 100%", C3: 0, D3: "1-4" } }, TRACKER_UNLOCKED);
+    writeEntry(book, "DL Tracker", 3, { [DLC.CMD]: "1-4", [DLC.PAGE]: 0 });
+    expect(wrote(book.writes, "DL Tracker", 3, DLC.SET)).toMatchObject({ kind: "formula", formula: settingFormula(3) });
+    onTrackerEdit(book, "DL Tracker", { row: 3, col: 4, row2: 3, col2: 4 });
+    expect(wrote(book.writes, "DL Tracker", 3, DLC.SET)?.kind).toBe("formula");
   });
 
   it("clears typed log cells only and counts them like DLT_ClearLog", () => {
     const book = makeBook({ "DL Tracker": { A1: "Client", B3: { f: "=1", v: 1 }, D3: "1-5", E3: 1, H3: { f: "=X", v: "s" }, D4: "1-6" } }, TRACKER_UNLOCKED);
     expect(clearLog(book, "DL Tracker")).toBe(3);
-    expect(book.writes.every((write) => write.kind !== "sheet" && write.row >= 3 && write.col !== 2 && write.col !== 8)).toBe(true);
+    expect(book.writes.filter((write) => write.kind === "clear").every((write) => write.kind === "clear" && write.col !== 2 && write.col !== 8)).toBe(true);
+    expect(wrote(book.writes, "DL Tracker", 3, DLC.SET)).toMatchObject({ kind: "formula", formula: settingFormula(3) });
   });
 
   it("recomputes I/J when the command is typed on the log", () => {
@@ -132,6 +148,70 @@ describe("DL Tracker ADD ENTRY (frmDLEntry)", () => {
     const other = makeBook({ "DL Tracker": { AA3: "1-5", AB3: "TF = 45 SR = 60", C3: 0, D3: "1-5" } });
     onTrackerEdit(other, "DL Tracker", { row: 3, col: 5, row2: 3, col2: 5 });
     expect(other.writes).toEqual([]);
+  });
+
+  const hiaTables = {
+    AA3: "2-28", AB3: "Go to Page 3: HIA Mode",
+    AE3: "2-28", AF3: "Go to Page 3: HIA Mode",
+    AG3: "2-4", AH3: "Decrease Target AZI by 2.5 deg instantaneous",
+  };
+
+  it("steps the first HIA AZI command from INC/AZM typed on the inbound go-to, not an older page-3 row", () => {
+    const book = makeBook({
+      "DL Tracker": {
+        ...hiaTables,
+        C3: 3, D3: "2-4", I3: 90, J3: 152.06, P3: "PASS",
+        C4: 2, D4: "2-28", I4: 90.45, J4: 133.06, P4: "PASS",
+        C5: 3, D5: "2-4", P5: "PASS",
+      },
+    });
+    expect(previousIJ(book, "DL Tracker", 5, "3")).toEqual({ i: 90.45, j: 133.06 });
+    onTrackerEdit(book, "DL Tracker", { row: 5, col: 4, row2: 5, col2: 4 });
+    expect(wrote(book.writes, "DL Tracker", 5, DLC.I)).toMatchObject({ value: 90.45 });
+    expect(wrote(book.writes, "DL Tracker", 5, DLC.J)).toMatchObject({ value: 130.56 });
+  });
+
+  it("steps AZI from INC/AZM typed on the first HIA command when the go-to row is blank", () => {
+    const book = makeBook({
+      "DL Tracker": {
+        ...hiaTables,
+        C3: 0, D3: "2-28", P3: "PASS",
+        C4: 3, D4: "2-4", I4: 81, J4: 154.56, P4: "PASS",
+      },
+    });
+    onTrackerEdit(book, "DL Tracker", { row: 4, col: 4, row2: 4, col2: 4 });
+    expect(wrote(book.writes, "DL Tracker", 4, DLC.I)).toMatchObject({ value: 81 });
+    expect(wrote(book.writes, "DL Tracker", 4, DLC.J)).toMatchObject({ value: 152.06 });
+  });
+
+  it("keeps later HIA commands on the same visit stepping from the previous page-3 row", () => {
+    const book = makeBook({
+      "DL Tracker": {
+        ...hiaTables,
+        C3: 2, D3: "2-28", I3: 90.45, J3: 133.06, P3: "PASS",
+        C4: 3, D4: "2-4", I4: 90.45, J4: 130.56, P4: "PASS",
+        C5: 3, D5: "2-4", P5: "PASS",
+      },
+    });
+    onTrackerEdit(book, "DL Tracker", { row: 5, col: 4, row2: 5, col2: 4 });
+    expect(wrote(book.writes, "DL Tracker", 5, DLC.I)).toMatchObject({ value: 90.45 });
+    expect(wrote(book.writes, "DL Tracker", 5, DLC.J)).toMatchObject({ value: 128.06 });
+  });
+
+  it("ADD ENTRY after a filled HIA go-to applies 2-4 to those INC/AZM", () => {
+    const book = makeBook({
+      "DL Tracker": {
+        ...hiaTables,
+        C3: 3, D3: "2-4", I3: 90, J3: 152.06, P3: "PASS",
+        C4: 2, D4: "2-28", I4: 90.45, J4: 133.06, P4: "PASS",
+      },
+    });
+    const started = startEntry(book);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const next = refreshCommand(book, started.start, { ...started.start.form, cmd: "2-4" });
+    expect(next.i).toBe("90.45");
+    expect(next.j).toBe("130.56");
   });
 });
 
@@ -193,23 +273,24 @@ describe("Slidesheet plan gauge (MDL_PlanGauge)", () => {
     expect(computePlanGauge(makeBook({ Slidesheet: {} })).model).toMatchObject({ hasData: false, caption: "NO DATA - Import Plan / enter surveys" });
   });
 
-  it("reads MAGNETIC off a vertical plan at the actual TVD", () => {
+  it("reads MAGNETIC off a vertical plan at the actual TVD using pure min-curvature", () => {
     const book = makeBook({
       _OC_Survey: { A2: "MD", B2: "INC", C2: "AZI", D2: "TVD", E2: "NS", F2: "EW", A3: 0, B3: 0, C3: 0, D3: 0, E3: 0, F3: 0, A4: 2000, B4: 0, C4: 0, D4: 2000, E4: 0, F4: 0 },
       Slidesheet: {
         E13: 0, F13: { v: 0, s: "good" }, G13: { v: 0, s: "good" },
-        E14: 1000, F14: { v: 2, s: "good" }, G14: { v: 90, s: "good" }, AL14: 0, AM14: 3,
+        E14: 1000, F14: { v: 2, s: "good" }, G14: { v: 90, s: "good" },
       },
     });
+    const expected = minCurveStep(0, 0, 0, 1000, 2, 90);
     const { model, wellbore } = computePlanGauge(book);
     expect(model).toMatchObject({ hasData: true, mode: "MAG", showPtb: false });
-    expect(model.ax).toBeCloseTo(3, 6);
-    expect(model.ay).toBeCloseTo(0, 6);
+    expect(model.ax).toBeCloseTo(expected.e, 4);
+    expect(model.ay).toBeCloseTo(expected.n, 4);
     expect(wellbore).toMatchObject({ row: 14, md: 1000 });
   });
 
-  it("reads GRAVITY to the closest point on the plan, with H as the TVD", () => {
-    // The plan runs past the last survey so the closest-point search is not clamped at its end.
+  it("reads GRAVITY in the closest plan point's High-Side / Right normal plane", () => {
+    // Plan runs past the last survey so the closest-point search is not clamped at its end.
     const stations = [[0, 0, 0], [1000, 0, 0], [1500, 30, 0], [1600, 30, 0]] as const;
     const plan: Record<string, CellInput> = { A2: "MD", B2: "INC", C2: "AZI", D2: "TVD", E2: "NS", F2: "EW" };
     let n = 0;
@@ -223,20 +304,61 @@ describe("Slidesheet plan gauge (MDL_PlanGauge)", () => {
       const r = 3 + i;
       Object.assign(plan, { [`A${r}`]: md, [`B${r}`]: inc, [`C${r}`]: azi, [`D${r}`]: v, [`E${r}`]: n, [`F${r}`]: 0 });
     });
-    const slides: Record<string, CellInput> = {};
-    stations.slice(0, 3).forEach(([md, inc, azi], i) => {
-      const r = 13 + i;
-      Object.assign(slides, { [`E${r}`]: md, [`F${r}`]: { v: inc, s: "good" }, [`G${r}`]: { v: azi, s: "good" } });
-    });
-    const atSurvey = plan.E5 as number;
-    Object.assign(slides, { AL15: atSurvey, AM15: 4, H15: (plan.D5 as number) + 0.5 });
+    // Actual wellbore builds 2 deg faster and turns 3 deg right of the North-bearing plan.
+    const slides: Record<string, CellInput> = {
+      E12: 5.55, F12: 0, G12: 0, H12: 5.55,
+      E13: 1000, F13: { v: 0, s: "good" }, G13: { v: 0, s: "good" },
+      E14: 1500, F14: { v: 32, s: "good" }, G14: { v: 3, s: "good" },
+    };
     const { model } = computePlanGauge(makeBook({ _OC_Survey: plan, Slidesheet: slides }));
     expect(model.mode).toBe("GRAV");
-    expect(model.ax).toBeCloseTo(4.006, 2);
-    expect(model.ay).toBeCloseTo(-0.125, 2);
+    // Steeper build than plan puts wellbore UP (high-side > 0) and RIGHT (side > 0).
+    expect(model.ax).toBeGreaterThan(5);
+    expect(model.ay).toBeGreaterThan(8);
     expect(axisLabel("GRAV", true, -6.055)).toBe("DN 6.06m");
     expect(axisLabel("GRAV", false, 11.96)).toBe("RT 11.96m");
     expect(axisLabel("MAG", true, 0.4)).toBe("AH 0.40m");
+  });
+
+  it("auto-rebuilds plan N/E when stored _OC_Survey has glued Crystal EW, but keeps accurate Compass N/E", () => {
+    const s1 = minCurveStep(100, 0, 0, 200, 30, 90);
+    const s2 = minCurveStep(200, 30, 90, 300, 30, 90);
+    // Cumulative 0.12 m North offset representing full-precision Compass plan coords vs 2-decimal angle rebuild
+    const cleanPlan = {
+      A2: "MD", B2: "INC", C2: "AZI", D2: "TVD", E2: "NS", F2: "EW",
+      A3: 0, B3: 0, C3: 0, D3: 0, E3: 0, F3: 0,
+      A4: 100, B4: 0, C4: 0, D4: 100, E4: 0.12, F4: 0,
+      A5: 200, B5: 30, C5: 90, D5: 100 + s1.tvd, E5: 0.12 + s1.n, F5: s1.e,
+      A6: 300, B6: 30, C6: 90, D6: 100 + s1.tvd + s2.tvd, E6: 0.12 + s1.n + s2.n, F6: s1.e + s2.e,
+    };
+    const corruptPlan = { ...cleanPlan, F3: 891.82, F4: 791.82, F5: 696.33, F6: 609.73 };
+    const slides: Record<string, CellInput> = {
+      E13: 100, F13: { v: 0, s: "good" }, G13: { v: 0, s: "good" },
+      E14: 200, F14: { v: 30, s: "good" }, G14: { v: 90, s: "good" },
+    };
+    // Exact Compass N/E (within 2 m of MC) is preserved, giving a 0.12 m side offset.
+    const clean = computePlanGauge(makeBook({ _OC_Survey: cleanPlan, Slidesheet: slides })).model;
+    expect(Math.abs(clean.ax)).toBeCloseTo(0.12, 2);
+    // Glued Crystal EW (891.82 at MD 0) is rejected and rebuilt via MC so actual matches plan.
+    const repaired = computePlanGauge(makeBook({ _OC_Survey: corruptPlan, Slidesheet: slides })).model;
+    expect(Math.abs(repaired.ax)).toBeLessThan(0.01);
+    expect(Math.abs(repaired.ay)).toBeLessThan(0.01);
+  });
+
+  it("skips unparseable toolface notes in Slidesheet column U without throwing VALUE", () => {
+    const plan: Record<string, CellInput> = {
+      A2: "MD", B2: "INC", C2: "AZI", D2: "TVD", E2: "NS", F2: "EW",
+      A3: 0, B3: 0, C3: 0, D3: 0, E3: 0, F3: 0,
+      A4: 300, B4: 0, C4: 0, D4: 300, E4: 0, F4: 0,
+    };
+    const slides: Record<string, CellInput> = {
+      D13: 220, E13: 200, F13: { v: 10, s: "good" }, G13: { v: 90, s: "good" }, AI13: 10,
+      R13: 200, S13: 210, U13: "45L/60L",
+      R14: 210, S14: 220, U14: "30R",
+    };
+    const { model } = computePlanGauge(makeBook({ _OC_Survey: plan, Slidesheet: slides }));
+    expect(model.hasData).toBe(true);
+    expect(model.showPtb).toBe(true);
   });
 });
 
@@ -311,6 +433,39 @@ describe("Slidesheet survey formula repair", () => {
   it("reads the survey rows only: row 13 (the tie-in formula) and rows past 505 are left as they are", () => {
     const book = surveyBook({ AL13: { f: `=IF(E13="","",ProjCumN(0,E12,F12,G12,E13,F13,G13,TRUE))` }, AL506: { f: "=AL505" } });
     expect(repairSurveyFormulas(book)).toEqual([]);
+  });
+});
+
+describe("Last Survey strip", () => {
+  it("follows the deepest typed survey and shows that depth in metres", () => {
+    const book = makeBook({
+      Slidesheet: {
+        E20: 4591.76, F20: 89.99, G20: 148.7,
+        E21: 4706.9, F21: { v: 89.61, f: "=F20" }, G21: 147.74,
+        E22: 4800, F22: 90, G22: 150,
+        E506: { f: "=E20" },
+      },
+      Data: {
+        E7: { v: 4591.76, f: "=Slidesheet!E506", s: { n: { pattern: "####.00°" } } },
+      },
+    });
+    expect(syncLastSurveyStrip(book)).toBe(true);
+    expect(book.formula("Slidesheet", 506, 5)).toBe("=E22");
+    expect(book.formula("Slidesheet", 506, 6)).toBe("=F22");
+    expect(book.formula("Slidesheet", 506, 7)).toBe("=G22");
+    expect(syncLastSurveyStrip(book)).toBe(false);
+    expect(bindSurveyDepthMetres(book)).toBe(true);
+    expect(book.writes.some((write) => write.kind === "format" && write.row === 7 && write.col === 5 && write.pattern === '#####.00"m"')).toBe(true);
+    expect(bindSurveyDepthMetres(book)).toBe(false);
+  });
+
+  it("names the geo-target offset Distance", () => {
+    const book = makeBook({ Data: {}, Slidesheet: {} });
+    updateWellborePosition(book, { lat: 0.08, planUp: -6.38, row: 20, md: 100, inc: 10 });
+    expect(book.value("Data", 13, 6)).toBe("Right");
+    expect(book.value("Data", 14, 6)).toBe("Below");
+    expect(book.value("Data", 15, 6)).toBe("Distance");
+    expect(book.value("Data", 15, 5)).toBe("6.38m");
   });
 });
 

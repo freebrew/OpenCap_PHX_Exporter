@@ -14,7 +14,7 @@ export {
   type AttachmentSize,
   type GraphRequest,
 } from "./graph";
-export { toMime, type MimeBoundaries } from "./mime";
+export { toDraftMime, toMime, type MimeBoundaries } from "./mime";
 export {
   buildAuthorizeUrl,
   codeChallenge,

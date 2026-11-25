@@ -682,7 +682,7 @@ Private Function WalkUnseenToBit(ByVal survMd As Double, ByVal survInc As Double
     Dim tf As Double, dB As Double, i2 As Double, a2 As Double
     Dim sdt As Double, sdn As Double, sde As Double
     Dim bestRow As Long, parsed As Variant
-    Dim va As Variant, vb As Variant, vu As Variant
+    Dim vA As Variant, vb As Variant, vu As Variant
     Dim cA() As Double, cB() As Double, cTf() As Double, cRow() As Long
     Dim brk() As Double
     Dim inc As Double, azm As Double
@@ -701,10 +701,10 @@ Private Function WalkUnseenToBit(ByVal survMd As Double, ByVal survInc As Double
     ReDim cRow(1 To nr)
     nc = 0
     For i = 1 To nr
-        va = slideFrom.Cells(i, 1).Value2
+        vA = slideFrom.Cells(i, 1).Value2
         vb = slideTo.Cells(i, 1).Value2
-        If Not HasNum(va) Or Not HasNum(vb) Then GoTo NextClip
-        a = CDbl(va): b = CDbl(vb)
+        If Not HasNum(vA) Or Not HasNum(vb) Then GoTo NextClip
+        a = CDbl(vA): b = CDbl(vb)
         If b <= a + 0.001 Then GoTo NextClip
         If a < survMd Then a = survMd
         If b > bitMd Then b = bitMd
@@ -783,7 +783,7 @@ Private Function TryWalkFromCaller(ByVal motorOut As Double, _
     TryWalkFromCaller = False
     Set c = Application.Caller
     If c Is Nothing Then Exit Function
-    Set ws = c.Parent
+    Set ws = c.parent
     r = c.row
     If Not HasNum(ws.Cells(r, 5).Value2) Or Not HasNum(ws.Cells(r, 4).Value2) Then Exit Function
     If Not HasNum(ws.Cells(r, 6).Value2) Or Not HasNum(ws.Cells(r, 7).Value2) Then Exit Function
@@ -904,15 +904,28 @@ Fail:
     ProjTvdAtBit = ""
 End Function
 
-' Cumulative N from prior N + min-curve ΔN between surveys (first survey → 0)
+' Cumulative N from prior N + min-curve ΔN between surveys.
+' On the first survey row (isFirst = True), integrate from Row 12 tie-on
+' (md1/i1/a1) or surface (0,0,0) when blank — matching Well Seeker X tie-on.
 Public Function ProjCumN(ByVal prevN As Variant, ByVal md1 As Variant, ByVal i1 As Variant, _
                          ByVal a1 As Variant, ByVal md2 As Variant, ByVal i2 As Variant, _
                          ByVal a2 As Variant, ByVal isFirst As Variant) As Variant
     Dim dt As Double, dN As Double, dE As Double
+    Dim m1 As Double, inc1 As Double, az1 As Double
     On Error GoTo Fail
     If Not HasNum(md2) Or Not HasNum(i2) Or Not HasNum(a2) Then ProjCumN = "": Exit Function
     If CBool(isFirst) Then
-        ProjCumN = 0#
+        If HasNum(md1) Then
+            m1 = CDbl(md1): inc1 = SafeNum(i1, 0#): az1 = SafeNum(a1, 0#)
+        Else
+            m1 = 0#: inc1 = 0#: az1 = 0#
+        End If
+        If CDbl(md2) <= m1 Then
+            ProjCumN = SafeNum(prevN)
+            Exit Function
+        End If
+        MinCurveStep m1, inc1, az1, CDbl(md2), CDbl(i2), CDbl(a2), dt, dN, dE
+        ProjCumN = SafeNum(prevN) + dN
         Exit Function
     End If
     If Not HasNum(md1) Or Not HasNum(i1) Or Not HasNum(a1) Then ProjCumN = "": Exit Function
@@ -927,10 +940,21 @@ Public Function ProjCumE(ByVal prevE As Variant, ByVal md1 As Variant, ByVal i1 
                          ByVal a1 As Variant, ByVal md2 As Variant, ByVal i2 As Variant, _
                          ByVal a2 As Variant, ByVal isFirst As Variant) As Variant
     Dim dt As Double, dN As Double, dE As Double
+    Dim m1 As Double, inc1 As Double, az1 As Double
     On Error GoTo Fail
     If Not HasNum(md2) Or Not HasNum(i2) Or Not HasNum(a2) Then ProjCumE = "": Exit Function
     If CBool(isFirst) Then
-        ProjCumE = 0#
+        If HasNum(md1) Then
+            m1 = CDbl(md1): inc1 = SafeNum(i1, 0#): az1 = SafeNum(a1, 0#)
+        Else
+            m1 = 0#: inc1 = 0#: az1 = 0#
+        End If
+        If CDbl(md2) <= m1 Then
+            ProjCumE = SafeNum(prevE)
+            Exit Function
+        End If
+        MinCurveStep m1, inc1, az1, CDbl(md2), CDbl(i2), CDbl(a2), dt, dN, dE
+        ProjCumE = SafeNum(prevE) + dE
         Exit Function
     End If
     If Not HasNum(md1) Or Not HasNum(i1) Or Not HasNum(a1) Then ProjCumE = "": Exit Function
@@ -996,14 +1020,14 @@ Private Function LoadTargets(ByVal mdR As Range, ByVal incR As Range, ByVal azmR
     ReDim a(1 To 100)
     ReDim tv(1 To 100)
     For r = 1 To mdR.rows.Count
-        v = mdR.Cells(r, 1).Value
+        v = mdR.Cells(r, 1).value
         If HasNum(v) Then
             n = n + 1
             If n > 100 Then Exit For
             m(n) = CDbl(v)
-            i(n) = SafeNum(incR.Cells(r, 1).Value)
-            a(n) = SafeNum(azmR.Cells(r, 1).Value)
-            tv(n) = SafeNum(tvdR.Cells(r, 1).Value)
+            i(n) = SafeNum(incR.Cells(r, 1).value)
+            a(n) = SafeNum(azmR.Cells(r, 1).value)
+            tv(n) = SafeNum(tvdR.Cells(r, 1).value)
         End If
     Next r
     If n > 0 Then
@@ -1091,7 +1115,7 @@ Public Function ProjActiveTargetMd(ByVal bitMd As Variant, ByVal tgtMd As Range)
     If Not HasNum(bitMd) Then ProjActiveTargetMd = "": Exit Function
     bm = CDbl(bitMd)
     For r = 1 To tgtMd.rows.Count
-        v = tgtMd.Cells(r, 1).Value
+        v = tgtMd.Cells(r, 1).value
         If HasNum(v) Then
             If CDbl(v) > bm Then
                 ProjActiveTargetMd = CDbl(v)
@@ -1811,7 +1835,7 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
                                        Optional ByVal tfDep As Variant) As Variant
     Dim lo As Double, hi As Double, tot As Double
     Dim r As Long, a As Double, b As Double
-    Dim va As Variant, vb As Variant
+    Dim vA As Variant, vb As Variant
     On Error GoTo Fail
     TouchTfDep tfDep
     If Not HasNum(fromMd) Or Not HasNum(toMd) Then
@@ -1826,10 +1850,10 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
     End If
     tot = 0#
     For r = 1 To slideFrom.rows.Count
-        va = slideFrom.Cells(r, 1).Value
-        vb = slideTo.Cells(r, 1).Value
-        If HasNum(va) And HasNum(vb) Then
-            a = CDbl(va)
+        vA = slideFrom.Cells(r, 1).value
+        vb = slideTo.Cells(r, 1).value
+        If HasNum(vA) And HasNum(vb) Then
+            a = CDbl(vA)
             b = CDbl(vb)
             If a < lo Then a = lo
             If b > hi Then b = hi
@@ -1841,6 +1865,8 @@ Public Function ProjSlideMetersBetween(ByVal fromMd As Variant, ByVal toMd As Va
 Fail:
     ProjSlideMetersBetween = CVErr(xlErrNum)
 End Function
+
+
 
 
 

@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import "fake-indexeddb/auto";
+import { BACKUP_DIR, BACKUP_FILE } from "../src/backups.ts";
 import { nodeDirectory } from "../src/nodeDirectory.ts";
 import { openRegistry } from "../src/registry.ts";
 import { openJob } from "../src/session.ts";
@@ -59,11 +60,14 @@ async function main(): Promise<void> {
     const mirrorOpen = await openJob({ jobId: "mirror", label: "Mirror", fileName: "mirror.phx.json", directory: mirrorDir, registry });
     if (mirrorOpen.result.recovery.kind !== "mirror-newer") throw new Error("newer mirror was not offered");
 
-    const names = await restarted.list();
-    const recent = names.filter((name) => name.includes("-recent-")).length;
-    const daily = names.filter((name) => name.includes("-daily-")).length;
-    const weekly = names.filter((name) => name.includes("-weekly-")).length;
-    if (recent < 1 || daily < 1 || weekly < 1) throw new Error(`tiered backups missing recent=${recent} daily=${daily} weekly=${weekly}`);
+    const rootNames = await restarted.list();
+    if (rootNames.some((name) => name.includes("backup"))) throw new Error(`unexpected root backup clutter: ${rootNames.join(", ")}`);
+    const openCap = await restarted.getDirectory(BACKUP_DIR, false);
+    if (!openCap) throw new Error(`${BACKUP_DIR} folder missing`);
+    const openCapNames = await openCap.list();
+    if (openCapNames.length !== 1 || openCapNames[0] !== BACKUP_FILE) {
+      throw new Error(`expected single ${BACKUP_DIR}/${BACKUP_FILE}, got: ${openCapNames.join(", ")}`);
+    }
     process.stdout.write(`folder smoke ok ${root}\n`);
   } finally {
     await rm(root, { recursive: true, force: true });

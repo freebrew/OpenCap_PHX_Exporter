@@ -14,7 +14,7 @@ Sub NEWWWW()
     ActiveWindow.ScrollRow = 59
     ActiveWindow.ScrollRow = 65
     ActiveWindow.ScrollRow = 79
-    Application.Width = 1388.25
+    Application.width = 1388.25
     Application.Height = 626.25
     ActiveWindow.ScrollRow = 84
     ActiveWindow.ScrollRow = 90

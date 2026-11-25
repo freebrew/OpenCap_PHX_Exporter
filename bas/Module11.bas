@@ -603,7 +603,7 @@ Public Sub StoreAttachPath(ByVal cell As Range, ByVal fullPath As String)
     dest.Hyperlinks.Delete
     On Error GoTo 0
 
-    dest.Value = leaf
+    dest.value = leaf
     If Len(fullPath) > 0 Then
         On Error Resume Next
         dest.AddComment fullPath
@@ -697,27 +697,27 @@ Public Sub ApplyDataMailPanel()
     body = RGB(255, 255, 255)
     toFill = RGB(232, 244, 248)
 
-    ws.Range("H28").Value = "File"
-    ws.Range("I28").Value = "Attachment"
-    ws.Range("K28").Value = "Send"
-    ws.Range("L28").Value = "Email"
+    ws.Range("H28").value = "File"
+    ws.Range("I28").value = "Attachment"
+    ws.Range("K28").value = "Send"
+    ws.Range("L28").value = "Email"
     StyleMailHeader ws.Range("H28:I28"), hdr
     StyleMailHeader ws.Range("K28:M28"), hdr
 
     For r = 29 To 33
-        ws.Cells(r, "H").Value = "Attach " & CStr(r - 28)
+        ws.Cells(r, "H").value = "Attach " & CStr(r - 28)
         ws.Cells(r, "H").Font.size = 8
         ws.Cells(r, "H").Font.bold = True
         ws.Cells(r, "H").Interior.Color = hdr
         ws.Cells(r, "H").Font.Color = RGB(0, 0, 0)
 
         If r = 29 Then
-            ws.Cells(r, "K").Value = "To"
+            ws.Cells(r, "K").value = "To"
             ws.Cells(r, "K").Interior.Color = toFill
             ws.Cells(r, "L").Interior.Color = toFill
             ws.Cells(r, "M").Interior.Color = toFill
         Else
-            ws.Cells(r, "K").Value = "CC"
+            ws.Cells(r, "K").value = "CC"
             ws.Cells(r, "K").Interior.Color = body
             ws.Cells(r, "L").Interior.Color = body
             ws.Cells(r, "M").Interior.Color = body
@@ -766,7 +766,7 @@ Private Sub SeedMailAddressesIfEmpty(ByVal ws As Worksheet)
     Dim dest As Long
     If Trim$(CStr(ws.Cells(29, "L").Value2 & "")) <> "" Then Exit Sub
     On Error Resume Next
-    ws.Cells(29, "L").Value = Trim$(MDL_Setup.OcJobField("CompanyManEmail"))
+    ws.Cells(29, "L").value = Trim$(MDL_Setup.OcJobField("CompanyManEmail"))
     raw = MDL_Setup.OcJobField("ClientEmail")
     On Error GoTo 0
     If Len(raw) = 0 Then Exit Sub
@@ -779,7 +779,7 @@ Private Sub SeedMailAddressesIfEmpty(ByVal ws As Worksheet)
         If em = "" Then GoTo NextSeed
         If InStr(em, "@") < 2 Then GoTo NextSeed
         If InStr(em, "phxtech.com") > 0 Then GoTo NextSeed
-        ws.Cells(dest, "L").Value = Trim$(parts(i))
+        ws.Cells(dest, "L").value = Trim$(parts(i))
         dest = dest + 1
 NextSeed:
     Next i

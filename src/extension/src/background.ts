@@ -1,5 +1,6 @@
 import { startOpenCapExporter } from "virtual:opencap-exporter";
 import { metadataEntities, odataRows, stationFields, surveyStations, type StationFields, type SurveyStation } from "../../packages/fieldcap-sync/src/index";
+import { fieldCapGet } from "./fieldcapFetch";
 
 // The OpenCap exporter's service worker runs here unchanged: FETCH_ALL on the "fieldcap-fetch"
 // port, its content script on FieldCap tabs, and its CSVs in chrome.storage.local. It only reads.
@@ -76,9 +77,9 @@ async function fieldCapJobs(): Promise<
   // Same expand as the exporter's job details: with a $select FieldCap drops the JobStatus name.
   const filter = encodeURIComponent("null eq DeletedBy");
   try {
-    const response = await fetch(`${ODATA}/ClientJobs?$expand=JobStatus&$filter=${filter}&$orderby=ClientJobId desc&$top=${JOBS_TOP}`, { credentials: "include", headers: { accept: "application/json" } });
-    if (!response.ok) return { ok: false, error: `FieldCap returned ${response.status}. Sign in to FieldCap in a Chrome tab.` };
-    const body = await response.json() as { value?: Array<{ ClientJobId?: unknown; JobCode?: unknown; ClientJobName?: unknown; EndDate?: unknown; JobStatus?: { JobStatusName?: unknown } | null }> };
+    const response = await fieldCapGet(`${ODATA}/ClientJobs?$expand=JobStatus&$filter=${filter}&$orderby=ClientJobId desc&$top=${JOBS_TOP}`, "application/json");
+    if (!response.ok) return { ok: false, error: `FieldCap returned ${response.status}. Open FieldCap in a browser tab and sign in.` };
+    const body = JSON.parse(response.text) as { value?: Array<{ ClientJobId?: unknown; JobCode?: unknown; ClientJobName?: unknown; EndDate?: unknown; JobStatus?: { JobStatusName?: unknown } | null }> };
     const jobs = (body.value ?? []).map((row) => ({
       clientJobId: String(row.ClientJobId ?? "").trim(),
       jobNumber: String(row.JobCode ?? "").trim(),
@@ -98,9 +99,9 @@ async function fieldCapFields(): Promise<
   | { ok: false; error: string }
 > {
   try {
-    const response = await fetch(`${ODATA}/$metadata`, { credentials: "include", headers: { accept: "application/xml" } });
+    const response = await fieldCapGet(`${ODATA}/$metadata`, "application/xml");
     if (!response.ok) return { ok: false, error: `FieldCap returned ${response.status}. Sign in to FieldCap in a tab, then check again.` };
-    const entities = metadataEntities(await response.text());
+    const entities = metadataEntities(response.text);
     return {
       ok: true,
       survey: entities.filter((entry) => SURVEY_ENTITIES.test(entry.entity)).map((entry) => ({ ...entry, station: stationFields(entry.fields) })),
@@ -125,9 +126,9 @@ function fieldCapUrl(url: string): boolean {
 async function fieldCapSurveys(clientJobId: string): Promise<{ ok: true; stations: SurveyStation[] } | { ok: false; error: string }> {
   if (!/^\d+$/.test(clientJobId)) return { ok: false, error: "FieldCap job id is not numeric." };
   try {
-    const meta = await fetch(`${ODATA}/$metadata`, { credentials: "include", headers: { accept: "application/xml" } });
-    if (!meta.ok) return { ok: false, error: `FieldCap returned ${meta.status}. Sign in to FieldCap in a Chrome tab.` };
-    const entity = metadataEntities(await meta.text()).find((entry) => /^SurveySheetEntr/i.test(entry.entity));
+    const meta = await fieldCapGet(`${ODATA}/$metadata`, "application/xml");
+    if (!meta.ok) return { ok: false, error: `FieldCap returned ${meta.status}. Open FieldCap in a browser tab and sign in.` };
+    const entity = metadataEntities(meta.text).find((entry) => /^SurveySheetEntr/i.test(entry.entity));
     const fields: StationFields = stationFields(entity?.fields ?? []);
     if (!fields.md || !fields.inc || !fields.azm) return { ok: true, stations: [] };
     const names = [fields.md, fields.inc, fields.azm, fields.tvd, fields.bit].filter((name): name is string => name != null);
@@ -151,7 +152,7 @@ async function fieldCapSurveys(clientJobId: string): Promise<{ ok: true; station
       }
       if (empty) break;
     }
-    return empty ? { ok: true, stations: [] } : { ok: false, error: "FieldCap did not return survey stations. Sign in to FieldCap in a Chrome tab." };
+    return empty ? { ok: true, stations: [] } : { ok: false, error: "FieldCap did not return survey stations. Open FieldCap in a browser tab and sign in." };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -163,10 +164,10 @@ async function surveyPages(start: string): Promise<{ status: number; rows: Recor
   let status = 0;
   for (let page = 0; page < 8 && url; page += 1) {
     if (!fieldCapUrl(url)) break;
-    const response = await fetch(url, { credentials: "include", headers: { accept: "application/json" } });
+    const response = await fieldCapGet(url, "application/json");
     status = response.status;
     if (!response.ok) return { status, rows: [] };
-    const body = await response.json() as { "@odata.nextLink"?: unknown };
+    const body = JSON.parse(response.text) as { "@odata.nextLink"?: unknown };
     rows.push(...odataRows(body));
     const next = body["@odata.nextLink"];
     url = typeof next === "string" && fieldCapUrl(next) ? next : null;

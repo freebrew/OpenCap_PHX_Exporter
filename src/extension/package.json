@@ -1,6 +1,6 @@
 {
   "name": "@phx/extension",
-  "version": "0.1.66",
+  "version": "0.1.103",
   "private": true,
   "type": "module",
   "scripts": {

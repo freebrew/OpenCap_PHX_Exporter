@@ -57,14 +57,14 @@ function planDistance2(md: number, n: number, e: number, tvd: number, plan: Plan
   return (n - point.n) ** 2 + (e - point.e) ** 2 + (tvd - point.tvd) ** 2;
 }
 
-/** Closest plan point within 60 m of md, then a ternary refine. */
+/** Closest plan point within 150 m of md, then a ternary refine. */
 export function closestPlanPoint(md: number, n: number, e: number, tvd: number, plan: PlanStation[]): PlanPoint | null {
   if (plan.length < 2) return null;
   const first = plan[0];
   const last = plan[plan.length - 1];
   if (!first || !last) return null;
-  let lo = Math.max(first.md, md - 60);
-  let hi = Math.min(last.md, md + 60);
+  let lo = Math.max(first.md, md - 150);
+  let hi = Math.min(last.md, md + 150);
   let bestMd = lo;
   let best = -1;
   for (let q = lo; q <= hi + 1e-9; q += 1) {
@@ -86,21 +86,20 @@ export function closestPlanPoint(md: number, n: number, e: number, tvd: number, 
 }
 
 export interface GaugeOffset {
-  /** Horizontal metres. Positive is right of the plan azimuth. */
+  /** Left (-)/Right (+) in the plan's normal plane (East when plan is vertical). */
   side: number;
-  /** Plan TVD minus actual TVD. Positive is up. */
+  /** Up (+)/Down (-) along the plan's high-side axis (North when plan is vertical). */
   vertical: number;
   total: number;
 }
 
 /**
- * Wellhead-relative N/E from MD / Inc / Azm (minimum curvature).
- * Crystal Planned Survey lines glue Subsea (KB − TVD) into the +E/−W
- * column, so PDF N/E cannot be trusted — always rebuild from the angles.
+ * Wellhead-relative N/E from MD / Inc / Azm (minimum curvature), optionally
+ * starting from a non-zero tie-on (startN, startE).
  */
-export function integrateLocalNE(md: number[], inc: number[], azm: number[]): { ns: number[]; ew: number[] } {
-  const ns = md.map(() => 0);
-  const ew = md.map(() => 0);
+export function integrateLocalNE(md: number[], inc: number[], azm: number[], startN = 0, startE = 0): { ns: number[]; ew: number[] } {
+  const ns = md.map(() => startN);
+  const ew = md.map(() => startE);
   for (let i = 1; i < md.length; i += 1) {
     const step = minCurveStep(md[i - 1]!, inc[i - 1]!, azm[i - 1]!, md[i]!, inc[i]!, azm[i]!);
     ns[i] = ns[i - 1]! + step.n;
@@ -109,15 +108,24 @@ export function integrateLocalNE(md: number[], inc: number[], azm: number[]): { 
   return { ns, ew };
 }
 
+/**
+ * Well Seeker X 3D closest-approach proximity in the plan's orthogonal
+ * High-Side / Right normal plane (or North-referenced when the closest plan
+ * point is vertical).
+ */
 export function closestOffset(md: number, n: number, e: number, tvd: number, plan: PlanStation[]): GaugeOffset | null {
   const point = closestPlanPoint(md, n, e, tvd, plan);
   if (!point) return null;
   const dN = n - point.n;
   const dE = e - point.e;
-  const az = point.azm * Math.PI / 180;
-  const right = dE * Math.cos(az) - dN * Math.sin(az);
-  const horizontal = Math.sqrt(dN * dN + dE * dE);
-  const side = right < 0 ? -horizontal : horizontal;
-  const vertical = point.tvd - tvd;
-  return { side, vertical, total: Math.hypot(side, vertical) };
+  const dTvdUp = point.tvd - tvd;
+  if (point.inc > 0.001) {
+    const az = point.azm * Math.PI / 180;
+    const inc = point.inc * Math.PI / 180;
+    const side = dE * Math.cos(az) - dN * Math.sin(az);
+    const along = dN * Math.cos(az) + dE * Math.sin(az);
+    const vertical = along * Math.cos(inc) + dTvdUp * Math.sin(inc);
+    return { side, vertical, total: Math.hypot(side, vertical) };
+  }
+  return { side: dE, vertical: dN, total: Math.hypot(dE, dN) };
 }

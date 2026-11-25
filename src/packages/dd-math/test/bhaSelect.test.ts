@@ -74,6 +74,21 @@ describe("serialHours (CollectBhaTabSerialRows + BuildDataSerialHoursTable)", ()
     expect(built.value("Data", 4, 24)).toBeNull();
   });
 
+  it("bands each BHA and writes the hours as 0.00", () => {
+    const rows = serialHours(built);
+    writeSerialHoursTable(built, rows);
+    expect(built.fill("Data", 2, 24)).toBe("#D9D9D9");
+    expect(built.fill("Data", 3, 26)).toBeNull();
+    expect(built.fill("Data", 5, 26)).toBe("#E2EFDA");
+    expect(built.writes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "format", row: 3, col: 26, pattern: "0.00" }),
+      expect.objectContaining({ kind: "format", row: 3, col: 27, pattern: "0.00" }),
+      expect.objectContaining({ kind: "format", row: 3, col: 28, pattern: "0" }),
+      expect.objectContaining({ kind: "look", row: 3, col: 25, look: expect.objectContaining({ hAlign: "left", wrap: "clip" }) }),
+      expect.objectContaining({ kind: "width", col: 25, px: 360 }),
+    ]));
+  });
+
   it("reads a BHA number out of the same CSV the refresh loads", () => {
     const [header, row] = parseOpenCapCsv("BHA #,Serial #,Category\r\n1,MOT-1,DD\r\n");
     expect(header?.[0]).toBe("BHA #");

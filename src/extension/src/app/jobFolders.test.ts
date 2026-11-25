@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appJobIdOf, folderWorkbooks, snapshotLabel, staleEntriesFor } from "./jobFolders";
+import { appJobIdOf, folderWorkbooks, matchingWorkbook, snapshotLabel, staleEntriesFor } from "./jobFolders";
 
 describe("folderWorkbooks", () => {
   it("finds nothing in a new job folder", () => {
@@ -29,7 +29,14 @@ describe("folderWorkbooks", () => {
   });
 
   it("ignores restore points", () => {
-    expect(folderWorkbooks([".phx-backup-daily-2026-01-02.json", "backup of job.phx.json"]).snapshot).toBeNull();
+    expect(folderWorkbooks([".phx-backup.json", ".phx-backup-daily-2026-01-02.json", "backup of job.phx.json"]).snapshot).toBeNull();
+  });
+
+  it("matches the workbook for the active snapshot or job number in a multi-workbook folder", () => {
+    const files = ["~$Slide Sheet - 35784.xlsm", "Slide Sheet - 35782.xlsm", "Slide Sheet - Demo.xlsm", "Slide Sheet - 35784.xlsm"];
+    expect(matchingWorkbook(files, "Slide Sheet - 35784.phx.json")).toBe("Slide Sheet - 35784.xlsm");
+    expect(matchingWorkbook(files, "other.phx.json", "35784")).toBe("Slide Sheet - 35784.xlsm");
+    expect(matchingWorkbook(files, "Slide Sheet - Demo.phx.json")).toBe("Slide Sheet - Demo.xlsm");
   });
 });
 

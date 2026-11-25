@@ -14,10 +14,31 @@ const isWorkbook = (name: string) => name.toLowerCase().endsWith(".xlsm") && !na
 
 /** The snapshot and workbook among a folder's file names. `expected` is the snapshot the job list has on record. */
 export function folderWorkbooks(names: readonly string[], expected = ""): FolderWorkbooks {
+  const snapshot = (expected !== "" && names.includes(expected) ? expected : names.find(isSnapshot)) ?? null;
   return {
-    snapshot: (expected !== "" && names.includes(expected) ? expected : names.find(isSnapshot)) ?? null,
-    xlsm: names.find(isWorkbook) ?? null,
+    snapshot,
+    xlsm: matchingWorkbook(names, snapshot ?? expected),
   };
+}
+
+/**
+ * Pick the .xlsm belonging to this snapshot/job (never a ~$ Excel lock file).
+ * Matches `<snapshot stem>.xlsm` first, then a workbook containing `jobNumber`, else the first `.xlsm`.
+ */
+export function matchingWorkbook(names: readonly string[], snapshotFileName = "", jobNumber = ""): string | null {
+  const workbooks = names.filter(isWorkbook);
+  if (workbooks.length === 0) return null;
+  if (snapshotFileName) {
+    const wanted = `${snapshotLabel(snapshotFileName)}.xlsm`.toLowerCase();
+    const exact = workbooks.find((name) => name.toLowerCase() === wanted);
+    if (exact) return exact;
+  }
+  const token = jobNumber.trim();
+  if (token) {
+    const byJob = workbooks.find((name) => name.toLowerCase().includes(token.toLowerCase()));
+    if (byJob) return byJob;
+  }
+  return workbooks[0] ?? null;
 }
 
 export interface ListedFolder {

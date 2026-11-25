@@ -323,6 +323,8 @@ export interface HandoffBundleInput {
   createdAt: string;
   exporter: string;
   ops: HandoffOp[];
+  /** `visible-data` is a visible-tab scalar bundle. Omitted on a full bundle. */
+  mode?: string;
 }
 
 /** Payload files only. READY is a separate last step from commitPlan. */
@@ -367,6 +369,7 @@ export async function buildBundleFiles(input: HandoffBundleInput): Promise<Recor
     ["createdAt", input.createdAt],
     ["exporter", input.exporter],
   ];
+  if (input.mode) manifestRows.push(["mode", input.mode]);
   for (const [name, hash, rows] of hashes) {
     manifestRows.push([name, hash]);
     manifestRows.push([`${name}Rows`, rows]);

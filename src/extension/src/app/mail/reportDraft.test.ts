@@ -47,7 +47,8 @@ describe("report draft", () => {
     expect(draft.html).toContain("font-weight:bold");
     expect(draft.html).toContain("#FFF2CC");
     expect(draft.html).toContain('colspan="2"');
-    expect(draft.html).toContain("text-align:right");
+    expect(draft.html).toContain("text-align:left");
+    expect(draft.html).not.toContain("text-align:right");
     expect(draft.html).toContain("cid:daily_report.png");
     expect(draft.html).toContain("Not in the job folder: missing.pdf");
     expect(draft.inline.map((part) => part.contentId)).toEqual(["daily_report.png"]);

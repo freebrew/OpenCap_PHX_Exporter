@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cameraFromOrbit, dragOrbit, fitOrbit, wheelOrbit, type Bounds } from "../../wells-3d/src/orbit";
+import { cameraFromOrbit, dragOrbit, fitOrbit, leashOrbit, wheelOrbit, type Bounds } from "../../wells-3d/src/orbit";
 import { closestOnPath, pickHover, type PickPath, type PickPoint } from "../../wells-3d/src/wellPick";
 
 function point(x: number, y: number, z: number, md: number, tvd = 0, c2c: number | null = null, sf: number | null = null): PickPoint {
@@ -80,5 +80,23 @@ describe("orbit", () => {
     expect(panned.targetX).not.toBeCloseTo(orbit.targetX);
     expect(wheelOrbit(orbit, 100).radius).toBeGreaterThan(orbit.radius);
     expect(wheelOrbit(orbit, -100).radius).toBeLessThan(orbit.radius);
+  });
+
+  it("lets a pan travel along the active well and stops it walking off", () => {
+    const path = new Float32Array([0, 0, 0, 100, 0, 0]);
+    const along = leashOrbit({ targetX: 70, targetY: 4, targetZ: 0, theta: 0, phi: 1, radius: 100 }, [path], 10);
+    expect(along.targetX).toBeCloseTo(70);
+    expect(along.targetY).toBeCloseTo(4);
+    const away = leashOrbit({ targetX: 40, targetY: 80, targetZ: 0, theta: 0, phi: 1, radius: 100 }, [path], 10);
+    expect(away.targetX).toBeCloseTo(40);
+    expect(away.targetY).toBeCloseTo(10);
+    expect(away.targetZ).toBeCloseTo(0);
+  });
+
+  it("keeps the orbit from tumbling past the pole", () => {
+    const orbit = fitOrbit(bounds);
+    const turned = dragOrbit(orbit, 0, 10_000, false);
+    expect(turned.phi).toBeGreaterThan(0.1);
+    expect(turned.phi).toBeLessThan(Math.PI - 0.1);
   });
 });

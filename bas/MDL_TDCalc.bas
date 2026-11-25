@@ -218,11 +218,11 @@ Public Sub RefreshTdPlannedFromPlan()
     wasProt = SheetUnprotectForVba(ws)
     On Error GoTo PlannedDone
 
-    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 0).Value = PlanNum(plan, lastR, cmd)
-    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 1).Value = PlanNum(plan, lastR, cInc)
-    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 2).Value = PlanNum(plan, lastR, cAzi)
-    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 3).Value = PlanNum(plan, lastR, cNS)
-    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 4).Value = PlanNum(plan, lastR, cEW)
+    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 0).value = PlanNum(plan, lastR, cmd)
+    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 1).value = PlanNum(plan, lastR, cInc)
+    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 2).value = PlanNum(plan, lastR, cAzi)
+    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 3).value = PlanNum(plan, lastR, cNS)
+    ws.Cells(TD_ROW_PLANNED, TD_COL_FIRST + 4).value = PlanNum(plan, lastR, cEW)
 
 PlannedDone:
     On Error Resume Next

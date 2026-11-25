@@ -1,5 +1,5 @@
 export { grantJobFolder, reopenStoredFolder } from "./connect.js";
-export { createRestorePoint, listBackups } from "./backups.js";
+export { BACKUP_DIR, BACKUP_FILE, createRestorePoint, listBackups, migrateLegacyBackups } from "./backups.js";
 export { directoryFromHandle, MemoryDirectory } from "./directory.js";
 export type { StoredDirectory, StoredFile } from "./directory.js";
 export { mirrorSnapshot, packMirror } from "./mirror.js";

@@ -15,6 +15,7 @@ export interface StoredFile {
 /** Narrow folder operations. Callers never receive the browser directory handle. */
 export interface StoredDirectory {
   getFile(name: string, create: boolean): Promise<StoredFile | null>;
+  getDirectory(name: string, create: boolean): Promise<StoredDirectory | null>;
   list(): Promise<string[]>;
   queryPermission(): Promise<"granted" | "prompt" | "denied">;
   requestPermission(): Promise<"granted" | "denied">;
@@ -22,6 +23,7 @@ export interface StoredDirectory {
 
 export class MemoryDirectory implements StoredDirectory {
   private readonly files = new Map<string, Uint8Array>();
+  private readonly dirs = new Map<string, MemoryDirectory>();
   private readonly locks = new Set<string>();
   permission: "granted" | "prompt" | "denied" = "granted";
 
@@ -60,6 +62,16 @@ export class MemoryDirectory implements StoredDirectory {
     };
   }
 
+  async getDirectory(name: string, create: boolean): Promise<StoredDirectory | null> {
+    const existing = this.dirs.get(name);
+    if (existing) return existing;
+    if (!create) return null;
+    const child = new MemoryDirectory();
+    child.permission = this.permission;
+    this.dirs.set(name, child);
+    return child;
+  }
+
   async list(): Promise<string[]> {
     return [...this.files.keys()];
   }
@@ -85,8 +97,9 @@ interface FileHandleLike {
   remove?(): Promise<void>;
 }
 
-interface DirectoryHandleLike {
+export interface DirectoryHandleLike {
   getFileHandle(name: string, options?: { create?: boolean }): Promise<FileHandleLike>;
+  getDirectoryHandle?(name: string, options?: { create?: boolean }): Promise<DirectoryHandleLike>;
   entries(): AsyncIterable<[string, { kind: string }]>;
   queryPermission(descriptor: { mode: "readwrite" }): Promise<"granted" | "prompt" | "denied">;
   requestPermission(descriptor: { mode: "readwrite" }): Promise<"granted" | "prompt" | "denied">;
@@ -127,7 +140,18 @@ export function directoryFromHandle(handle: DirectoryHandleLike): StoredDirector
           },
         };
       } catch (error) {
-        if (error instanceof DOMException && error.name === "NotFoundError") return null;
+        if (!create && error instanceof DOMException && error.name === "NotFoundError") return null;
+        if (!create && error instanceof Error && /not found/i.test(error.message)) return null;
+        throw error;
+      }
+    },
+    async getDirectory(name, create) {
+      if (!handle.getDirectoryHandle) return null;
+      try {
+        const child = await handle.getDirectoryHandle(name, { create });
+        return directoryFromHandle(child);
+      } catch (error) {
+        if (!create && error instanceof DOMException && error.name === "NotFoundError") return null;
         if (!create && error instanceof Error && /not found/i.test(error.message)) return null;
         throw error;
       }

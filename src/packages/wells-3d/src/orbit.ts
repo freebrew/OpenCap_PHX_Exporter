@@ -61,9 +61,15 @@ export function cameraFromOrbit(orbit: Orbit): { x: number; y: number; z: number
   };
 }
 
-/** Left drag orbits. A pan drag (right button or shift) slides the target. */
+/** Left drag orbits. A pan drag (right button or shift) slides the target. Phi stays off the poles so the view cannot tumble through them. */
 export function dragOrbit(orbit: Orbit, dx: number, dy: number, pan: boolean): Orbit {
-  if (!pan) return { ...orbit, theta: orbit.theta - dx * 0.005, phi: orbit.phi - dy * 0.005 };
+  if (!pan) {
+    return {
+      ...orbit,
+      theta: orbit.theta - dx * 0.005,
+      phi: Math.min(Math.PI - 0.12, Math.max(0.12, orbit.phi - dy * 0.005)),
+    };
+  }
   const eye = cameraFromOrbit(orbit);
   let fx = orbit.targetX - eye.x;
   let fy = orbit.targetY - eye.y;
@@ -91,4 +97,66 @@ export function dragOrbit(orbit: Orbit, dx: number, dy: number, pan: boolean): O
 
 export function wheelOrbit(orbit: Orbit, deltaY: number): Orbit {
   return { ...orbit, radius: Math.min(1_000_000, Math.max(1, orbit.radius * Math.exp(deltaY * 0.001))) };
+}
+
+function nearestOnPath(xyz: ArrayLike<number>, x: number, y: number, z: number): { x: number; y: number; z: number; d2: number } | null {
+  const count = Math.floor(xyz.length / 3);
+  if (count < 1) return null;
+  let bestX = xyz[0]!;
+  let bestY = xyz[1]!;
+  let bestZ = xyz[2]!;
+  let best = Infinity;
+  const consider = (px: number, py: number, pz: number) => {
+    const d2 = (px - x) ** 2 + (py - y) ** 2 + (pz - z) ** 2;
+    if (d2 < best) {
+      best = d2;
+      bestX = px;
+      bestY = py;
+      bestZ = pz;
+    }
+  };
+  if (count === 1) consider(bestX, bestY, bestZ);
+  for (let i = 0; i < count - 1; i += 1) {
+    const ax = xyz[i * 3]!;
+    const ay = xyz[i * 3 + 1]!;
+    const az = xyz[i * 3 + 2]!;
+    const bx = xyz[(i + 1) * 3]!;
+    const by = xyz[(i + 1) * 3 + 1]!;
+    const bz = xyz[(i + 1) * 3 + 2]!;
+    const abx = bx - ax;
+    const aby = by - ay;
+    const abz = bz - az;
+    const ab2 = abx * abx + aby * aby + abz * abz;
+    let t = 0;
+    if (ab2 > 1e-8) {
+      t = ((x - ax) * abx + (y - ay) * aby + (z - az) * abz) / ab2;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+    }
+    consider(ax + abx * t, ay + aby * t, az + abz * t);
+  }
+  return { x: bestX, y: bestY, z: bestZ, d2: best };
+}
+
+/**
+ * Hold the look-at within `leash` metres of the active well. Sliding along the well is free.
+ * Sliding away stops at the leash, so a pan cannot walk the well out of the frame.
+ * A leash of 0 sits the look-at on the well.
+ */
+export function leashOrbit(orbit: Orbit, paths: readonly ArrayLike<number>[], leash: number): Orbit {
+  let near: { x: number; y: number; z: number; d2: number } | null = null;
+  for (const path of paths) {
+    const hit = nearestOnPath(path, orbit.targetX, orbit.targetY, orbit.targetZ);
+    if (hit && (!near || hit.d2 < near.d2)) near = hit;
+  }
+  if (!near) return orbit;
+  const dist = Math.sqrt(near.d2);
+  if (dist <= leash) return orbit;
+  const scale = leash <= 0 || dist === 0 ? 0 : leash / dist;
+  return {
+    ...orbit,
+    targetX: near.x + (orbit.targetX - near.x) * scale,
+    targetY: near.y + (orbit.targetY - near.y) * scale,
+    targetZ: near.z + (orbit.targetZ - near.z) * scale,
+  };
 }

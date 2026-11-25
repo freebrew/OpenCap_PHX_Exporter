@@ -28,6 +28,7 @@ interface DlEntryDialogProps {
 export function DlEntryDialog(props: DlEntryDialogProps) {
   const { book, start } = props;
   const [form, setForm] = useState<DlEntryForm>(start.form);
+  const [seed, setSeed] = useState({ i: start.form.i, j: start.form.j });
   const [at, setAt] = useState<Date>(() => parseDateTime(start.form.date, start.form.time) ?? new Date());
   const [status, setStatus] = useState<{ text: string; error: boolean }>({ text: start.status, error: false });
   const setting = settingLabel(book, start, form);
@@ -37,8 +38,14 @@ export function DlEntryDialog(props: DlEntryDialogProps) {
 
   function change(field: keyof DlEntryForm, value: string) {
     const next = { ...form, [field]: value };
-    if (field === "page" || field === "cmd") setForm(refreshCommand(book, start, next));
-    else if (field === "pass") setForm({ ...refreshFormIJ(book, start, next), code: codeChoices(next, start.high).code });
+    if (field === "i" || field === "j") {
+      setSeed({ i: field === "i" ? value : seed.i, j: field === "j" ? value : seed.j });
+      setForm(next);
+      return;
+    }
+    const fromSeed = { ...next, i: seed.i, j: seed.j };
+    if (field === "page" || field === "cmd") setForm(refreshCommand(book, start, fromSeed));
+    else if (field === "pass") setForm({ ...refreshFormIJ(book, start, fromSeed), code: codeChoices(fromSeed, start.high).code });
     else {
       if (field === "date" || field === "time") {
         const parsed = parseDateTime(next.date, next.time);

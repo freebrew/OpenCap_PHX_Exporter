@@ -88,9 +88,24 @@ export function loadPlan(book: SheetBook): Plan | null {
     plan.ew.push(vbaVal(book.value(PLAN_SHEET, r, ew)));
   }
   if (plan.md.length > 0) {
-    const ne = integrateLocalNE(plan.md, plan.inc, plan.azi);
-    plan.ns = ne.ns;
-    plan.ew = ne.ew;
+    const startN = plan.md[0]! > 0.01 ? plan.ns[0]! : 0;
+    const startE = plan.md[0]! > 0.01 ? plan.ew[0]! : 0;
+    const ne = integrateLocalNE(plan.md, plan.inc, plan.azi, startN, startE);
+    let storedOk = true;
+    if (plan.md[0]! <= 0.01 && (Math.abs(plan.ns[0]!) > 0.1 || Math.abs(plan.ew[0]!) > 0.1)) {
+      storedOk = false;
+    } else {
+      let maxErr = 0;
+      for (let i = 0; i < plan.md.length; i += 1) {
+        const err = Math.hypot(plan.ns[i]! - ne.ns[i]!, plan.ew[i]! - ne.ew[i]!);
+        if (err > maxErr) maxErr = err;
+      }
+      if (maxErr > 2) storedOk = false;
+    }
+    if (!storedOk) {
+      plan.ns = ne.ns;
+      plan.ew = ne.ew;
+    }
   }
   return plan;
 }
@@ -225,11 +240,23 @@ function surveyStation(book: SheetBook, r: number): { md: number; inc: number; a
   return { md: values[0]!, inc: values[1]!, azi: values[2]! };
 }
 
+function cellNumOr(book: SheetBook, r: number, c: number, fallback = 0): number {
+  const v = book.value(SS_SHEET, r, c);
+  const n = v == null || v === "" ? null : numeric(v);
+  return n == null ? fallback : n;
+}
+
 function actualAtLastSurvey(book: SheetBook): { count: number; md: number; inc: number; azi: number; n: number; e: number; v: number; row: number } {
-  let prev = { md: 0, inc: 0, azi: 0 };
-  let n = 0;
-  let e = 0;
-  let v = 0;
+  const tieRow = SURV_FIRST - 1;
+  const tieMd = cellNumOr(book, tieRow, 5, 0);
+  let prev = {
+    md: tieMd,
+    inc: cellNumOr(book, tieRow, 6, 0),
+    azi: cellNumOr(book, tieRow, 7, 0),
+  };
+  let n = cellNumOr(book, tieRow, 38, 0);
+  let e = cellNumOr(book, tieRow, 39, 0);
+  let v = cellNumOr(book, tieRow, 8, tieMd);
   let row = 0;
   let count = 0;
   for (let r = SURV_FIRST; r <= SURV_LAST; r += 1) {
@@ -270,10 +297,10 @@ function planDist2(plan: Plan, q: number, n: number, e: number, v: number): numb
   return (n - c.n) ** 2 + (e - c.e) ** 2 + (v - c.v) ** 2;
 }
 
-/** Closest point on the plan to (n, e, v), searched within +-60 m MD of md0. */
+/** Closest point on the plan to (n, e, v), searched within +-150 m MD of md0. */
 function closestPlanPoint(plan: Plan, md0: number, n: number, e: number, v: number): PlanPoint {
-  const lo = Math.max(md0 - 60, plan.md[0]!);
-  const hi = Math.min(md0 + 60, plan.md[plan.md.length - 1]!);
+  const lo = Math.max(md0 - 150, plan.md[0]!);
+  const hi = Math.min(md0 + 150, plan.md[plan.md.length - 1]!);
   let bestD = -1;
   let bestQ = lo;
   for (let q = lo; q <= hi; q += 1) {
@@ -294,22 +321,18 @@ function closestPlanPoint(plan: Plan, md0: number, n: number, e: number, v: numb
   return planAt(plan, (a + b) / 2);
 }
 
-/** y = plan TVD - actual TVD there (UP +); x = horizontal distance, RT + / LT - of plan azimuth. */
+/**
+ * Gravity marker from the closest 3D plan point (Well Seeker X convention):
+ * project into the plan's orthogonal High-Side / Right normal plane at C,
+ * or North-referenced (dN, dE) when C is vertical (inc <= 0.001 deg).
+ */
 function closestComponents(plan: Plan, md0: number, n: number, e: number, v: number): { x: number; y: number } {
   const c = closestPlanPoint(plan, md0, n, e, v);
   const dN = n - c.n;
   const dE = e - c.e;
-  const rt = dE * Math.cos(rad(c.azi)) - dN * Math.sin(rad(c.azi));
-  let x = Math.sqrt(dN * dN + dE * dE);
-  if (rt < 0) x = -x;
-  return { x, y: c.v - v };
-}
-
-function actualTvdForGauge(book: SheetBook, row: number, integrated: number): number {
-  const h = book.value(SS_SHEET, row, 8);
-  const n = h == null || h === "" ? null : numeric(h);
-  if (n == null) return integrated;
-  return Math.abs(n - integrated) > 1 ? integrated : n;
+  const dTvdUp = c.v - v;
+  if (c.inc > 0.001) return frameComponents(true, c.azi, dN, dE, dTvdUp, c.inc);
+  return { x: dE, y: dN };
 }
 
 export function slideIntervals(book: SheetBook): SlideInterval[] {
@@ -318,7 +341,12 @@ export function slideIntervals(book: SheetBook): SlideInterval[] {
     const from = numeric(book.value(SS_SHEET, r, 18));
     const to = numeric(book.value(SS_SHEET, r, 19));
     if (from == null || to == null) continue;
-    const tf = parseToolface(book.value(SS_SHEET, r, 21));
+    let tf: number | null;
+    try {
+      tf = parseToolface(book.value(SS_SHEET, r, 21));
+    } catch {
+      continue;
+    }
     if (tf == null) continue;
     out.push({ from, to, tf, row: r - 12 });
   }
@@ -338,15 +366,9 @@ export function computePlanGauge(book: SheetBook): GaugeResult {
   const plan = loadPlan(book);
   const surv = actualAtLastSurvey(book);
   if (!plan || plan.md.length < 2 || surv.count < 1) return { model: NO_DATA, wellbore: null };
-  let sN = surv.n;
-  let sE = surv.e;
-  const vN = book.value(SS_SHEET, surv.row, 38);
-  const vE = book.value(SS_SHEET, surv.row, 39);
-  if (isNumber(vN) && isNumber(vE)) {
-    sN = vN;
-    sE = vE;
-  }
-  const actTvd = actualTvdForGauge(book, surv.row, surv.v);
+  const sN = surv.n;
+  const sE = surv.e;
+  const actTvd = surv.v;
   const gravity = surv.inc >= CROSSOVER_INC;
   const pl = gravity ? planAt(plan, surv.md) : planAtTvd(plan, actTvd);
   const halfW = waypointHalfWidth(book);
@@ -465,6 +487,6 @@ export function updateWellborePosition(book: SheetBook, wellbore: NonNullable<Ga
   put(14, 6, planUp < 0 ? "Below" : "Above");
   if (geo != null) {
     put(15, 5, `${fixed2(Math.abs(geo))}m`);
-    put(15, 6, geo < 0 ? "Below" : "Above");
+    put(15, 6, "Distance");
   }
 }

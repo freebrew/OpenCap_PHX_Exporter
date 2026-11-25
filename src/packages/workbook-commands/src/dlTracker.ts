@@ -126,9 +126,30 @@ export function lastSurveyBitDepth(book: SheetBook): number | null {
   return isNumber(v) ? v : null;
 }
 
-/** Nearest row above on the same DL page with numeric I and J. */
+/** "Go to Page 3: HIA Mode" -> "3". */
+function goToPage(setting: string): string {
+  if (!setting.startsWith("Go to Page ")) return "";
+  const ch = setting.charAt(11);
+  return /[0-9]/.test(ch) ? ch : "";
+}
+
+function rowSetting(book: SheetBook, sheet: string, r: number): string {
+  const looked = lookupSetting(book, sheet, pageKey(book.value(sheet, r, DLC.PAGE)), cellText(book.value(sheet, r, DLC.CMD)));
+  return looked || cellText(book.value(sheet, r, DLC.SET));
+}
+
+/** Baseline I/J: last same-page row, or INC/AZM on the inbound "Go to Page N" row. */
 export function previousIJ(book: SheetBook, sheet: string, beforeRow: number, key: string): { i: number; j: number } | null {
   for (let r = beforeRow - 1; r >= DLT_FIRST; r -= 1) {
+    const dest = goToPage(rowSetting(book, sheet, r));
+    if (dest !== "") {
+      if (dest === key) {
+        const i = book.value(sheet, r, DLC.I);
+        const j = book.value(sheet, r, DLC.J);
+        if (isNumber(i) && isNumber(j)) return { i, j };
+      }
+      return null;
+    }
     if (pageKey(book.value(sheet, r, DLC.PAGE)) !== key) continue;
     const i = book.value(sheet, r, DLC.I);
     const j = book.value(sheet, r, DLC.J);
@@ -193,10 +214,15 @@ export function refreshIJ(book: SheetBook, sheet: string, r: number): void {
   const cmd = cellText(book.value(sheet, r, DLC.CMD));
   if (cmd === "") return;
   const key = pageKey(book.value(sheet, r, DLC.PAGE));
-  const prev = previousIJ(book, sheet, r, key);
+  let prev = previousIJ(book, sheet, r, key);
   if (cellText(book.value(sheet, r, DLC.PASS)).toUpperCase() === "FAIL") {
     if (prev) writeIJ(book, sheet, r, prev.i, prev.j);
     return;
+  }
+  if (!prev) {
+    const i = book.value(sheet, r, DLC.I);
+    const j = book.value(sheet, r, DLC.J);
+    if (isNumber(i) && isNumber(j)) prev = { i, j };
   }
   const result = computeIJ(lookupSetting(book, sheet, key, cmd), prev);
   switch (result.kind) {
@@ -235,7 +261,10 @@ export function onTrackerEdit(book: SheetBook, sheet: string, area: { row: numbe
     if (hit) rows.push(r);
   }
   if (cells === 0 || cells > 60) return;
-  for (const r of rows) refreshIJ(book, sheet, r);
+  for (const r of rows) {
+    ensureSettingFormula(book, sheet, r);
+    refreshIJ(book, sheet, r);
+  }
 }
 
 /** DLT_ClearLog: unlocked, non-formula, non-empty cells in A3:U674. Returns the count. */
@@ -250,6 +279,7 @@ export function clearLog(book: SheetBook, sheet: string): number {
       n += 1;
     }
   }
+  for (let r = DLT_FIRST; r <= DLT_LAST; r += 1) ensureSettingFormula(book, sheet, r);
   return n;
 }
 
@@ -257,9 +287,27 @@ function counterFormula(r: number): string {
   return r === DLT_FIRST ? `=IF(D${r}="","",1)` : `=IF(D${r}="","",B${r - 1}+1)`;
 }
 
-/** DLT_WriteEntry: columns 1-21 except B and H; locked and formula cells are skipped; null clears. */
+/** Template H formula: VLOOKUP the command on that DL page (MDL_DownlinkTracker.SettingFormula). */
+export function settingFormula(r: number): string {
+  const inner =
+    `IF(C${r}=0,VLOOKUP(D${r},$AA$3:$AB$66,2,FALSE),` +
+    `IF(C${r}=1,VLOOKUP(D${r},$AC$3:$AD$66,2,FALSE),` +
+    `IF(C${r}=2,VLOOKUP(D${r},$AE$3:$AF$66,2,FALSE),` +
+    `IF(C${r}=3,VLOOKUP(D${r},$AG$3:$AH$66,2,FALSE),` +
+    `IF(C${r}=7,VLOOKUP(D${r},$AI$3:$AJ$66,2,FALSE),` +
+    `IF(C${r}="S",VLOOKUP(D${r},$AK$3:$AL$66,2,FALSE),""))))))`;
+  return `=IF(C${r}="","",IF(IFERROR(${inner},"")=0,"",IFERROR(${inner},"")))`;
+}
+
+function ensureSettingFormula(book: SheetBook, sheet: string, r: number): void {
+  if (book.formula(sheet, r, DLC.SET) === settingFormula(r)) return;
+  book.setFormula(sheet, r, DLC.SET, settingFormula(r));
+}
+
+/** DLT_WriteEntry: columns 1-21 except B and H values; locked and formula cells are skipped; null clears. H is restored as the lookup formula when missing. */
 export function writeEntry(book: SheetBook, sheet: string, r: number, vals: Partial<Record<number, string | number | null>>): void {
   if (!book.hasFormula(sheet, r, DLC.NUM)) book.setFormula(sheet, r, DLC.NUM, counterFormula(r));
+  ensureSettingFormula(book, sheet, r);
   for (let c: number = DLC.RUN; c <= DLC.NOTE; c += 1) {
     if (c === DLC.NUM || c === DLC.SET) continue;
     if (book.locked(sheet, r, c) || book.hasFormula(sheet, r, c)) continue;
@@ -326,13 +374,6 @@ function pctText(v: unknown): string {
 export function depthText(v: unknown): string {
   const n = v == null || v === "" ? null : numeric(v);
   return n == null ? "" : String(Math.floor(n + 0.5));
-}
-
-/** "Go to Page 3: HIA Mode" -> "3". */
-function goToPage(setting: string): string {
-  if (!setting.startsWith("Go to Page ")) return "";
-  const ch = setting.charAt(11);
-  return /[0-9]/.test(ch) ? ch : "";
 }
 
 function pad(n: number): string {
@@ -431,9 +472,14 @@ export function settingLabel(book: SheetBook, start: DlEntryStart, form: DlEntry
 /** RefreshIJ on the form. */
 export function refreshFormIJ(book: SheetBook, start: DlEntryStart, form: DlEntryForm): DlEntryForm {
   const key = pageKey(form.page);
-  const prev = previousIJ(book, start.sheet, start.row, key);
+  let prev = previousIJ(book, start.sheet, start.row, key);
   if (form.pass.toUpperCase() === "FAIL") {
     return prev ? { ...form, i: numText(prev.i), j: numText(prev.j) } : form;
+  }
+  if (!prev) {
+    const i = numeric(form.i);
+    const j = numeric(form.j);
+    if (i != null && j != null) prev = { i, j };
   }
   const result = computeIJ(lookupSetting(book, start.sheet, key, form.cmd.trim()), prev);
   switch (result.kind) {

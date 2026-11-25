@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AC_SHEET,
+  applySurveySync,
+  auditSlidesheetSurveys,
   buildAcTable,
   csvParseLine,
   FORMATIONS_SHEET,
+  formatSurveyAuditPrompt,
   importAntiCollision,
   importSurveyPlan,
   layoutText,
@@ -13,7 +16,10 @@ import {
   parseFormations,
   parsePlannedSurveys,
   parsePlanSections,
+  parseWellSeekerCsv,
+  parseWellSeekerGrid,
   SheetBook,
+  slidesheetTieThreshold,
   sortAcRows,
   SURVEY_SHEET,
   writeAcConcerns,
@@ -85,22 +91,22 @@ describe("Import Plan (MDL_Setup ImportSurveyPlan)", () => {
     expect(lithologyFor("Montney Fm")).toBe("silt / shale");
   });
 
-  it("rebuilds N/E from the angles when Crystal glues Subsea into EW", () => {
+  it("splits glued Crystal Subsea tokens and preserves exact Compass N/E (falling back to MC when absent)", () => {
     const glued = [
       "Planned Survey",
       "0.00 0.00 0.00 0.00 0.00 0.000891.820.00 0.00 0.000 0.000",
       "30.00 0.00 0.00 30.00 0.00 0.000861.820.00 0.00 0.000 0.000",
       "100.00 0.00 0.00 100.00 0.00 0.000791.820.00 0.00 0.000 0.000",
-      "200.00 30.00 90.00 196.59 0.00 0.000691.2325.88 0.00 0.000 0.000",
+      "200.00 30.00 90.00 195.49 12.00 4.500696.330.08 26.02 9.000 0.000",
     ].join("\n");
     const planned = parsePlannedSurveys(glued);
     expect(planned).toHaveLength(4);
     expect(planned[0]).toMatchObject({ md: 0, inc: 0, ns: 0, ew: 0 });
     expect(planned[1]!.ew).toBeCloseTo(0, 5);
     expect(planned[1]!.ns).toBeCloseTo(0, 5);
-    expect(planned[3]!.ew).toBeGreaterThan(20);
-    expect(planned[3]!.ew).toBeLessThan(40);
-    expect(Math.abs(planned[3]!.ns)).toBeLessThan(0.05);
+    // Exact Compass NS=0.08 / EW=26.02 extracted after splitting "4.500696.330.08"
+    expect(planned[3]!.ns).toBeCloseTo(0.08, 4);
+    expect(planned[3]!.ew).toBeCloseTo(26.02, 4);
   });
 
   it("splits CSV fields the way CsvParseLine does", () => {
@@ -220,5 +226,75 @@ describe("PDF text layout (PDF.js items to pdftotext -layout lines)", () => {
     expect(lines[0]).toMatch(/^MD {2,}Inc$/);
     expect(lines[1]).toMatch(/^600\.00 +0\.00$/);
     expect(second).toBe("Summary");
+  });
+});
+
+describe("Sync Surveys (MDL_SurveySync)", () => {
+  it("parses Well Seeker X Survey Report grids, skipping tie-ons, interpolated blank-DLS markers, and PTB rows", () => {
+    const grid: unknown[][] = [
+      ["Well Seeker X"],
+      ["MD", "INC", "AZI", "TVD", "NS", "EW", "VS", "DLS"],
+      ["m", "deg", "deg", "m", "m", "m", "m", "deg/30m"],
+      [0, 0, 0, 0, 0, 0, 0, 0],
+      [5.55, 0, 0, 5.55, 0, 0, 0, 0],
+      [636.0, 2.21, 268.99, 635.85, -4.11, -6.07, 2.9, ""],
+      [2035.79, 36.86, 263.86, 1790.0, -100, -600, 0, 1.5],
+      [2054.97, 39.21, 261.9, 1805.0, -102, -612, 0, 3.8],
+      [2074.17, 38.03, 261.36, 1820.0, -104, -624, 0, 1.9],
+      [2093.36, 36.57, 259.67, 1835.0, -106, -636, 0, 2.5],
+      [2112.56, 35.6, 259.41, 1850.0, -108, -648, 0, 1.5],
+      [2130.0, 35.6, 259.41, 1864.0, -110, -660, 0, 0, "Projected to Bit"],
+    ];
+    const parsed = parseWellSeekerGrid(grid, 5.6);
+    expect(parsed.tieMd).toBeCloseTo(5.55, 2);
+    expect(parsed.interpSkipped).toBe(1);
+    expect(parsed.stations.map((s) => s.md)).toEqual([2035.79, 2054.97, 2074.17, 2093.36, 2112.56]);
+  });
+
+  it("detects 1-row paste shifts, blocks wrong-well files, and writes only E/F/G on matched rows", () => {
+    const csv = [
+      "MD,INC,AZI,DLS",
+      "5.55,0,0,0",
+      "2035.79,36.86,263.86,1.5",
+      "2054.97,39.21,261.90,3.8",
+      "2074.17,38.03,261.36,1.9",
+      "2093.36,36.57,259.67,2.5",
+      "2112.56,35.60,259.41,1.5",
+    ].join("\n");
+    // Slidesheet has rows 14..16 shifted down by 1 station (matching 35784 R117..121)
+    const book = makeBook({
+      Setup: {},
+      Slidesheet: {
+        11: { 4: { v: 5.55 }, 5: { v: 0 }, 6: { v: 0 } },
+        12: { 4: { v: 2035.79 }, 5: { v: 36.86 }, 6: { v: 267.61 }, 7: { f: "=H12+15" } },
+        13: { 4: { v: 2054.97 }, 5: { v: 36.86 }, 6: { v: 263.86 } },
+        14: { 4: { v: 2074.17 }, 5: { v: 39.21 }, 6: { v: 261.9 } },
+        15: { 4: { v: 2093.36 }, 5: { v: 38.03 }, 6: { v: 261.36 } },
+      },
+    });
+    const parsed = parseWellSeekerCsv(csv, slidesheetTieThreshold(book));
+    const audit = auditSlidesheetSurveys(book, parsed);
+    expect(audit.ok).toBe(true);
+    expect(audit.matched).toBe(4);
+    expect(audit.diffs).toHaveLength(4);
+    expect(audit.shiftHits).toBe(3);
+    expect(audit.shiftRange).toEqual([14, 16]);
+    expect(audit.deeperInWellSeeker).toBe(1);
+    expect(formatSurveyAuditPrompt("35784 Surveys.xlsx", audit)).toContain("Paste-shift detected");
+
+    const updated = applySurveySync(book, audit, "35784 Surveys.xlsx [Synced 4 rows]");
+    expect(updated).toBe(4);
+    // Only F/G updated on matched rows; formula in col H untouched
+    expect(valueAt(book.writes, "Slidesheet", 13, 7)).toBe(263.86);
+    expect(valueAt(book.writes, "Slidesheet", 14, 6)).toBe(39.21);
+    expect(valueAt(book.writes, "Slidesheet", 14, 7)).toBe(261.9);
+    expect(book.writes.some((w) => w.sheet === "Slidesheet" && w.col === 8)).toBe(false);
+    expect(valueAt(book.writes, "Setup", 31, 13)).toBe("35784 Surveys.xlsx [Synced 4 rows]");
+
+    // Wrong-well guard refuses sync when < 50% of MDs match
+    const wrongWell = parseWellSeekerCsv("MD,INC,AZI\n500,1,10\n530,2,20\n560,3,30\n", 10);
+    const blocked = auditSlidesheetSurveys(book, wrongWell);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.blocked).toBe(true);
   });
 });

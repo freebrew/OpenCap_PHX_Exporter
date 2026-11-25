@@ -643,6 +643,32 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.modal.sync-conflicts {
+  width: min(860px, 94vw);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+}
+
+.sync-conflicts table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.sync-conflicts th,
+.sync-conflicts td {
+  border-bottom: 1px solid #d5dee6;
+  text-align: left;
+  padding: 4px 6px;
+  vertical-align: top;
+}
+
+.sync-conflicts .tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .status-line {
   color: #404040;
 }
@@ -733,6 +759,13 @@ button:disabled {
 
 .swatch.plan { background: #17324d; }
 .swatch.drilled { background: #0e7490; }
+.swatch.station {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #17324d;
+  box-shadow: 0 0 0 2px #0e7490;
+}
 .swatch.shadow { background: #7a848c; }
 .swatch.formation { background: #6b4f2a; }
 .swatch.target {

@@ -164,10 +164,19 @@ function rowsOf(book: SheetBook): MirrorRow[] {
   return [...grouped.values()].sort((a, b) => a.bha - b.bha).slice(0, MIRROR_LAST - MIRROR_FIRST + 1);
 }
 
-function activeBha(rows: MirrorRow[], current: number): number {
-  if (rows.some((row) => row.bha === current)) return current;
-  const running = rows.find((row) => /active/i.test(row.status) && !/complete/i.test(row.status));
-  return running?.bha ?? rows[rows.length - 1]?.bha ?? 0;
+export interface DashboardOptions {
+  /** Honor the BHA currently typed on Data!H3 when it exists in the mirror (manual BHA switch). */
+  preserveSelection?: boolean;
+  /** Never downgrade Data!H3 to a lower BHA # than it already holds (protects against stale CSVs). */
+  noDowngrade?: boolean;
+}
+
+function activeBha(rows: MirrorRow[], current: number, options?: DashboardOptions): number {
+  if (options?.preserveSelection && rows.some((row) => row.bha === current)) return current;
+  const running = [...rows].reverse().find((row) => /active/i.test(row.status) && !/complete/i.test(row.status));
+  const candidate = running?.bha ?? rows[rows.length - 1]?.bha ?? 0;
+  if (options?.noDowngrade && current > 0 && candidate < current) return current;
+  return candidate;
 }
 
 function motorSerial(row: MirrorRow | undefined): string {
@@ -210,12 +219,12 @@ function writeComponents(book: SheetBook, row: MirrorRow | undefined): void {
  * Project the loaded FieldCap BHA onto DD Tools, Data!H3 and Data!C22, then the
  * serial-hours tables. Data!H35:M47 stay formulas. Returns null when Data is missing.
  */
-export function projectFieldCapDashboard(book: SheetBook): FieldCapDashboard | null {
+export function projectFieldCapDashboard(book: SheetBook, options?: DashboardOptions): FieldCapDashboard | null {
   if (!book.hasSheet(DATA)) return null;
   const rows = rowsOf(book);
   writeMirror(book, rows);
   const header = bhaNumber(book.value(DATA, 3, 8));
-  const active = activeBha(rows, header);
+  const active = activeBha(rows, header, options);
   if (active > 0 && !book.hasFormula(DATA, 3, 8) && header !== active) book.setValue(DATA, 3, 8, active);
   const chosen = rows.find((row) => row.bha === (active || header));
   const motor = motorSerial(chosen);

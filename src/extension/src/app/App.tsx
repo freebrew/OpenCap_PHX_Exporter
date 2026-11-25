@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createEnvelope, directoryFromHandle, grantJobFolder, JobSession, MemoryDirectory, mirrorSnapshot, openJob, openRegistry, parseEnvelope, reopenStoredFolder, sha256, type JobRegistry, type PhxEnvelope, type Recovery, type SaveState, type StoredDirectory } from "@phx/job-store";
-import { buildBundleFiles, canonicalize, diffHandoff, isCanonBook, macroButtonsFromWorkbook, readWorkbook, restyleWorkbook, STYLE_VERSION, type ImportLog, type MacroButton, type MappedWorkbook } from "@phx/xlsx-bridge";
+import { buildBundleFiles, canonicalize, diffVisibleUserData, isCanonBook, macroButtonsFromWorkbook, mergeVisibleUserData, readWorkbook, restyleWorkbook, STYLE_VERSION, type CanonBook, type ImportLog, type MacroButton, type MappedWorkbook, type VisibleMerge } from "@phx/xlsx-bridge";
 import { authorityOf } from "../../../packages/cutover/src/index";
 import type { SurveyStation } from "../../../packages/fieldcap-sync/src/index";
 import {
   applyDayRoll,
   applyOpenCap,
   backfillDayBreakdown,
+  dayBreakdownWarning,
   projectFieldCapDashboard,
   clearTallyInputs,
   computePlanGauge,
@@ -15,6 +16,8 @@ import {
   isTrackerSheetName,
   jobField,
   onTrackerEdit,
+  applyContDiHeldReadings,
+  paintContDiColumnA,
   parseArea,
   readJobFields,
   readTally,
@@ -27,6 +30,11 @@ import {
   storeTarget,
   surveyBarState,
   syncPlanTargetWindow,
+  bindCostHeadline,
+  bindLiveToolHours,
+  bindSurveyDepthMetres,
+  syncLastSurveyStrip,
+  toolHoursSync,
   trackerSheet,
   updateWellborePosition,
   writeEntry,
@@ -47,7 +55,7 @@ import type { WorkbookHost } from "../workbook/facade";
 import { preserveActiveSheet } from "../workbook/preserveActiveSheet";
 import { DayRollDialog } from "./DayRollDialog";
 import { DlEntryDialog } from "./DlEntryDialog";
-import { appJobIdOf, folderWorkbooks, snapshotLabel, staleEntriesFor } from "./jobFolders";
+import { appJobIdOf, folderWorkbooks, matchingWorkbook, snapshotLabel, staleEntriesFor } from "./jobFolders";
 import { JobPicker, jobInFolder } from "./JobPicker";
 import { NoWorkbook, noWorkbookReason } from "./NoWorkbook";
 import { cachedPull, cachePull, fieldCapJobs, fieldCapSurveys, findFolderCsvs, jobMap, moveJobLinks, pullFromFieldCap, rememberJob, sourcesFromPull, writeFolderCsvs, type FieldCapJob, type FolderCsvs } from "./openCapFiles";
@@ -60,11 +68,22 @@ import { TargetsDialog, type TargetEdit } from "./TargetsDialog";
 import { Tools, TOOLS_DOCK_ID } from "./Tools";
 import { WellsView } from "./WellsView";
 import { commitHandoff, latestReceipt, pendingHandoffs, workbookToken } from "./handoffFolder";
+import { SyncConflictDialog } from "./SyncConflictDialog";
+import { opWrites, scalarWrites } from "./syncWrites";
 import { PREVIEW_VERSION } from "../version";
 
 interface StagedImport {
   mapped: MappedWorkbook;
   fileName: string;
+}
+
+interface SyncReview {
+  fileName: string;
+  jobLabel: string;
+  hash: string;
+  excel: CanonBook;
+  merge: VisibleMerge;
+  preferBrowserMachine: boolean;
 }
 
 interface FolderHandle {
@@ -76,6 +95,7 @@ interface FolderHandle {
       abort(): Promise<void>;
     }>;
   }>;
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FolderHandle>;
   entries(): AsyncIterable<[string, { kind: string }]>;
   queryPermission(descriptor: { mode: "readwrite" }): Promise<"granted" | "prompt" | "denied">;
   requestPermission(descriptor: { mode: "readwrite" }): Promise<"granted" | "prompt" | "denied">;
@@ -83,7 +103,7 @@ interface FolderHandle {
 
 function pickedDirectoryHandle(): Promise<FolderHandle> {
   const picker = (window as Window & { showDirectoryPicker?: (options: { mode: "readwrite"; startIn: "desktop" }) => Promise<FolderHandle> }).showDirectoryPicker;
-  if (!picker) return Promise.reject(new Error("This Chrome build cannot grant a job folder."));
+  if (!picker) return Promise.reject(new Error("This browser cannot grant a job folder."));
   return picker({ mode: "readwrite", startIn: "desktop" });
 }
 
@@ -159,7 +179,13 @@ export function App() {
   const [handoffNote, setHandoffNote] = useState("");
   const [pendingHandoff, setPendingHandoff] = useState("");
   const [driftFile, setDriftFile] = useState("");
-  const [driftKept, setDriftKept] = useState(false);
+  const [syncReview, setSyncReview] = useState<SyncReview | null>(null);
+  const dismissedDrift = useRef("");
+  const inboundLock = useRef(false);
+  const snapshotFileRef = useRef("");
+  /** True after a FieldCap pull or survey poll wrote this shift. Machine-written conflicts then default to the browser. */
+  const machinePreferBrowser = useRef(false);
+  const refreshHandoffRef = useRef<(folder: StoredDirectory, force?: boolean) => Promise<boolean>>(async () => false);
   /** A workbook is on the grid. When none is, NoWorkbook says why in its place. */
   const [bookOpen, setBookOpen] = useState(false);
   /** The .xlsm in the open folder that has no snapshot yet. */
@@ -219,6 +245,15 @@ export function App() {
       window.clearInterval(timer);
       window.removeEventListener("focus", poll);
     };
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => {
+      const folder = directory.current;
+      if (folder) void refreshHandoffRef.current(folder, false);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   useEffect(() => {
@@ -362,7 +397,26 @@ export function App() {
   }, []);
 
   function writeData(writes: DayWrite[]) {
-    for (const write of writes) host.current?.setCell("Data", write.a1, write.value);
+    for (const write of writes) {
+      if ("formula" in write) {
+        const area = parseArea(write.a1);
+        if (area) host.current?.applyWrites([{ kind: "formula", sheet: "Data", row: area.row, col: area.col, formula: write.formula }]);
+      } else if ("format" in write) {
+        const area = parseArea(write.a1);
+        if (area) host.current?.applyWrites([{ kind: "format", sheet: "Data", row: area.row, col: area.col, pattern: write.format }]);
+      } else {
+        host.current?.setCell("Data", write.a1, write.value);
+      }
+    }
+  }
+
+  /** RefreshData's closing check: the day rows against FieldCap's days, after they recalculate. */
+  async function checkDayBreakdown(): Promise<string> {
+    const created = host.current;
+    if (!created) return "";
+    await created.flushCalculation();
+    const snap = created.snapshot() as SnapshotBook | null;
+    return snap ? dayBreakdownWarning(snap) : "";
   }
 
   /** Locked / unlocked cells as the import recorded them; macros skip locked cells like the VBA. */
@@ -403,9 +457,19 @@ export function App() {
     const created = host.current;
     const book = freshBook();
     if (!created || !book) return "";
+    const painted = paintContDiColumnA(book);
+    const held = applyContDiHeldReadings(book);
+    const circ = bindLiveToolHours(book);
+    const strip = syncLastSurveyStrip(book);
+    const depth = bindSurveyDepthMetres(book);
+    const costs = bindCostHeadline(book);
     const fixed = repairSurveyFormulas(book);
-    if (fixed.length === 0) return "";
+    if (!painted && !held && !circ && !strip && !depth && !costs && fixed.length === 0) return "";
     created.applyWrites(book.writes);
+    if (fixed.length === 0) {
+      if (held || circ || strip || depth || costs) await created.flushCalculation();
+      return "";
+    }
     await macroContext(created).redrawAfterSurvey();
     const rows = [...new Set(fixed.map((cell) => cell.row))].sort((a, b) => a - b);
     return ` Repaired ${fixed.length} damaged survey formula${fixed.length === 1 ? "" : "s"} on Slidesheet row${rows.length === 1 ? "" : "s"} ${rows.slice(0, 12).join(", ")}${rows.length > 12 ? ", …" : ""} (a cell deleted in Excel).`;
@@ -460,17 +524,20 @@ export function App() {
         crewTop: namedCell("OC_CrewTop")?.row,
         crewBottom: namedCell("OC_CrewBot")?.row,
       });
-      const dash = projectFieldCapDashboard(book);
+      // Advance to the newest/active BHA from FieldCap, but never downgrade a higher BHA already on the same job.
+      const dash = projectFieldCapDashboard(book, { noDowngrade: !result.newJob });
       created.applyWrites(book.writes);
       await created.flushCalculation();
       const snap = created.snapshot() as SnapshotBook | null;
       if (snap) writeData(backfillDayBreakdown(snap));
+      const dayWarning = await checkDayBreakdown();
       if (result.jobId) setNamedText("OC_LastJobId", result.jobId);
       setOcJobId(result.jobId);
       refreshGauge(created.snapshot());
       const bhaNote = dash && dash.bhas > 0 ? ` BHA ${dash.activeBha || "—"} on H3, motor ${dash.motor || "—"} on C22. Day rows follow that BHA.` : "";
       setMessage(`${result.status}${bhaNote}`);
       if (result.alert) window.alert(result.alert);
+      if (dayWarning) window.alert(dayWarning);
       return result.jobId;
     } finally {
       syncing.current = outer;
@@ -514,6 +581,7 @@ export function App() {
     }
     if (book.writes.length > 0) {
       host.current?.applyWrites(book.writes);
+      machinePreferBrowser.current = true;
     }
     // Slide the T2:Y5 window and light the active target for the last survey, as when a survey is
     // typed by hand (Sheet48's redraw). It runs even when this pull wrote nothing, so a sheet whose
@@ -566,7 +634,7 @@ export function App() {
     if (!created || !book) return;
     syncing.current = true;
     try {
-      const dash = projectFieldCapDashboard(book);
+      const dash = projectFieldCapDashboard(book, { preserveSelection: true });
       if (!dash || dash.bhas === 0) return;
       created.applyWrites(book.writes);
       await created.flushCalculation();
@@ -608,7 +676,7 @@ export function App() {
       setMessage(`Job ${jobNumber}: pulling FieldCap.`);
       const csvs = await pullFromFieldCap(job.clientJobId, (progress) => setMessage(`FieldCap job ${jobNumber}: ${progress.label} ${progress.pct}%`));
       if (Object.keys(csvs).length === 0) {
-        setMessage(`FieldCap returned no files for job ${jobNumber}. Sign in to FieldCap in a Chrome tab.`);
+        setMessage(`FieldCap returned no files for job ${jobNumber}. Open FieldCap in a browser tab and sign in.`);
         return;
       }
       await cachePull(jobNumber, csvs);
@@ -653,7 +721,7 @@ export function App() {
       await preserveActiveSheet(pullHost, async () => {
         const csvs = await pullFromFieldCap(clientJobId, (progress) => setMessage(`FieldCap job ${jobNumber}: ${progress.label} ${progress.pct}%`));
         if (Object.keys(csvs).length === 0) {
-          window.alert(`FieldCap returned no data for job ${jobNumber}. Sign in to FieldCap in a Chrome tab, then pull again.`);
+          window.alert(`FieldCap returned no data for job ${jobNumber}. Open FieldCap in a browser tab and sign in, then pull again.`);
           return;
         }
         await cachePull(jobNumber, csvs);
@@ -671,6 +739,7 @@ export function App() {
           return;
         }
         await loadOpenCap(await writeFolderCsvs(root, jobNumber, csvs));
+        machinePreferBrowser.current = true;
         await linkJob(jobNumber, jobId);
         const stations = await fieldCapSurveys(clientJobId);
         await applyFieldCapSurveys(jobNumber, stations);
@@ -739,10 +808,10 @@ export function App() {
       }
       const result = computePlanGauge(book);
       setGauge(result.model);
-      if (result.wellbore) {
-        updateWellborePosition(book, result.wellbore);
-        if (book.writes.length > 0) host.current?.applyWrites(book.writes);
-      }
+      if (result.wellbore) updateWellborePosition(book, result.wellbore);
+      syncLastSurveyStrip(book);
+      bindCostHeadline(book);
+      if (book.writes.length > 0) host.current?.applyWrites(book.writes);
     } catch (error) {
       console.error("Plan gauge", error);
     }
@@ -794,6 +863,7 @@ export function App() {
           if (book.writes.length > 0) created.applyWrites(book.writes);
         }
         refreshGauge(created.snapshot());
+        await created.flushCalculation();
       },
     };
   }
@@ -942,11 +1012,12 @@ export function App() {
     setShiftReady(false);
     setPendingHandoff("");
     setDriftFile("");
-    setDriftKept(false);
+    setSyncReview(null);
   }
 
   async function bind(next: StoredDirectory, label: string, fileName: string): Promise<string> {
     directory.current = next;
+    snapshotFileRef.current = fileName;
     // An import left waiting belongs to the folder that was open before.
     setStaged(null);
     const registry = await openRegistry();
@@ -956,11 +1027,18 @@ export function App() {
     const opened = await openJob({ jobId, label, fileName, directory: next, registry });
     session.current?.dispose();
     session.current = opened.session;
+    opened.session.onStateChange = (nextState, error) => {
+      if (session.current !== opened.session) return;
+      setStatus(nextState);
+      if (error !== undefined) {
+        setMessage(folderGone(error) ? missingFolderText(label) : error instanceof Error ? error.message : String(error));
+      }
+    };
     setRecovery(opened.result.recovery);
     setStatus(opened.result.state);
     setBackups(opened.result.recovery.kind === "corrupt" || opened.result.recovery.kind === "future" ? opened.result.recovery.backups.length : 0);
     if (opened.result.envelope) {
-      const withButtons = await refreshFromSource(next, opened.result.envelope);
+      const withButtons = await refreshFromSource(next, opened.result.envelope, fileName);
       host.current?.load(withButtons.workbook);
       setBookOpen(true);
       refreshGauge(host.current?.snapshot());
@@ -970,10 +1048,11 @@ export function App() {
       setAuthority(authorityOf(withButtons.sidecar as { authority?: unknown }));
       handoffBlocks.current = Array.isArray(withButtons.handoffBlocks) ? withButtons.handoffBlocks : [];
       setShiftReady(isCanonBook(withButtons.importBaseline));
-      void refreshHandoff(next);
       const repaired = await repairDamagedSurveyFormulas();
       setMessage(`${label} opened from the folder snapshot.${repaired}`);
-      void autosyncOpenJob(jobId);
+      // Check Excel drift BEFORE autosyncOpenJob mutates Data/Setup/Slidesheet.
+      const hasConflictPrompt = await refreshHandoff(next, false);
+      if (!hasConflictPrompt) void autosyncOpenJob(jobId);
     } else {
       closeBook();
       setMessage(opened.result.recovery.kind === "none"
@@ -987,12 +1066,12 @@ export function App() {
   }
 
   /** Backfill buttons and cell formatting from the folder .xlsm (read-only) when the snapshot predates them. */
-  async function refreshFromSource(folder: StoredDirectory, envelope: PhxEnvelope): Promise<PhxEnvelope> {
+  async function refreshFromSource(folder: StoredDirectory, envelope: PhxEnvelope, fileName = ""): Promise<PhxEnvelope> {
     const sidecar = envelope.sidecar && typeof envelope.sidecar === "object" ? envelope.sidecar as Record<string, unknown> : {};
     const needButtons = buttonsOf(sidecar).length === 0;
     const needStyles = sidecar.styleVersion !== STYLE_VERSION;
     if (!needButtons && !needStyles) return envelope;
-    const xlsm = (await folder.list()).find((name) => name.toLowerCase().endsWith(".xlsm"));
+    const xlsm = matchingWorkbook(await folder.list(), fileName || snapshotFileRef.current, ocJobId);
     if (!xlsm) return envelope;
     const file = await folder.getFile(xlsm, false);
     const bytes = file ? await file.read() : null;
@@ -1027,8 +1106,13 @@ export function App() {
       setMessage(`${record.label} needs the folder grant again. The mirror is still in this browser.`);
       return;
     }
-    const permission = await folder.queryPermission();
+    let permission = await folder.queryPermission();
     directory.current = folder;
+    if (permission === "prompt") {
+      // Choosing the job in the list is the click that lets the browser ask for the folder again.
+      // Chrome often keeps the grant between sessions; Edge asks after a restart.
+      permission = await folder.requestPermission().catch(() => "prompt" as const);
+    }
     if (permission !== "granted") {
       setRecovery({ kind: "permission", jobId: nextJobId, label: record.label });
       setStatus("permission-blocked");
@@ -1138,7 +1222,14 @@ export function App() {
       baseline: canonicalize(snap),
       blocks: [],
     });
-    await session.current.replace(envelope, { backup: true });
+    try {
+      await session.current.replace(envelope, { backup: true });
+    } catch (error) {
+      const label = session.current.label || jobs.find((job) => job.jobId === jobId)?.label || "this job";
+      setStatus(session.current.state);
+      setMessage(folderGone(error) ? missingFolderText(label) : error instanceof Error ? error.message : String(error));
+      return;
+    }
     refreshGauge(envelope.workbook);
     setOcJobId(workbookOcJobId());
     setStatus(session.current.state);
@@ -1147,7 +1238,9 @@ export function App() {
     setStaged(null);
     setShiftReady(true);
     setDriftFile("");
-    setDriftKept(false);
+    setSyncReview(null);
+    dismissedDrift.current = "";
+    machinePreferBrowser.current = false;
     setPendingHandoff("");
     setHandoffNote("Browser shift started. Excel stays the authority until Export handoff is applied there.");
     const repaired = await repairDamagedSurveyFormulas();
@@ -1173,35 +1266,129 @@ export function App() {
     setMessage("This folder snapshot is now the job record. The Excel file was not changed. Mark that file read-only on disk.");
   }
 
-  async function refreshHandoff(folder: StoredDirectory) {
+  function syncJobLabel(browserBook: CanonBook, excelBook: CanonBook): string {
+    const cellVal = (book: CanonBook, sheetName: string, a1: string) =>
+      book.sheets.find((sheet) => sheet.name === sheetName)?.cells[a1]?.v ?? "";
+    const jobNo = cellVal(browserBook, "Setup", "D4") || cellVal(excelBook, "Setup", "D4") || workbookOcJobId();
+    const excelBha = cellVal(excelBook, "Data", "H3");
+    const browserBha = cellVal(browserBook, "Data", "H3");
+    const parts: string[] = [];
+    if (jobNo) parts.push(`Job ${jobNo}`);
+    if (excelBha || browserBha) {
+      parts.push(excelBha === browserBha
+        ? `BHA #${excelBha}`
+        : `Excel BHA #${excelBha || "?"} vs Browser BHA #${browserBha || "?"}`);
+    }
+    return parts.join(" · ");
+  }
+
+  async function commitInbound(review: SyncReview, picks: Record<string, "excel" | "browser">) {
+    const created = host.current;
+    const current = session.current?.current;
+    if (!created || !current || !session.current) return;
+    const writes = review.merge.fromExcel.flatMap((op) => opWrites(op));
+    for (const conflict of review.merge.conflicts) {
+      const key = `${conflict.sheet}!${conflict.a1}`;
+      if ((picks[key] ?? "excel") === "excel") writes.push(...scalarWrites(conflict.sheet, conflict.a1, conflict.excel));
+    }
+    if (writes.length > 0) created.applyWrites(writes);
+    await created.flushCalculation();
+    if (writes.some((write) => write.sheet === "Data")) {
+      const book = freshBook();
+      if (book) {
+        toolHoursSync(book);
+        if (book.writes.length > 0) {
+          created.applyWrites(book.writes);
+          await created.flushCalculation();
+        }
+      }
+    }
+    const snap = created.snapshot();
+    if (!snap) return;
+    refreshGauge(snap);
+    const sidecar = current.sidecar && typeof current.sidecar === "object" ? current.sidecar : {};
+    session.current.noteEdit(stamp(snap, sidecar, { hash: review.hash, baseline: review.excel }));
+    await session.current.flushFolder();
+    const kept = review.merge.keepBrowser.length + review.merge.conflicts.filter((conflict) => (picks[`${conflict.sheet}!${conflict.a1}`] ?? "excel") === "browser").length;
+    machinePreferBrowser.current = false;
+    dismissedDrift.current = "";
+    setDriftFile("");
+    setSyncReview(null);
+    setShiftReady(true);
+    setStatus(session.current.state);
+    setHandoffNote(kept > 0
+      ? `Synced ${review.fileName}. ${writes.length} cell(s) came from Excel. Setup & Slidesheet stay from browser (${kept} ready for Export handoff).`
+      : `Synced ${review.fileName}. ${writes.length} cell(s) came from Excel.`);
+  }
+
+  /** Returns true when a conflict review dialog is open for Data / Cont DI / DL Tracker. */
+  async function refreshHandoff(folder: StoredDirectory, force = false): Promise<boolean> {
     const handle = await jobFolder();
     if (handle) {
       const pending = await pendingHandoffs(handle).catch(() => []);
       setPendingHandoff(pending[0] ?? "");
       const receipt = await latestReceipt(handle).catch(() => null);
-      if (receipt?.status) {
+      if (receipt?.status && !force) {
         setHandoffNote(receipt.status === "applied"
           ? `Excel applied handoff ${receipt.handoffId}.`
           : `Excel reported ${receipt.status} for handoff ${receipt.handoffId}. ${receipt.message}`);
       }
     }
     const current = session.current?.current;
-    if (!current?.sourceWorkbookHash || !isCanonBook(current.importBaseline)) {
+    if (!current?.sourceWorkbookHash || !isCanonBook(current.importBaseline) || !host.current) {
       setDriftFile("");
-      return;
+      return false;
     }
-    const xlsm = (await folder.list()).find((name) => name.toLowerCase().endsWith(".xlsm"));
+    const xlsm = matchingWorkbook(await folder.list(), snapshotFileRef.current, workbookOcJobId() || ocJobId);
     if (!xlsm) {
       setDriftFile("");
-      return;
+      return false;
     }
     const file = await folder.getFile(xlsm, false);
     const bytes = file ? await file.read() : null;
-    if (!bytes) return;
+    if (!bytes) return false;
     const hash = await sha256(bytes);
-    setDriftFile(hash === current.sourceWorkbookHash ? "" : xlsm);
-    if (hash === current.sourceWorkbookHash) setDriftKept(false);
+    if (hash === current.sourceWorkbookHash) {
+      setDriftFile("");
+      dismissedDrift.current = "";
+      if (force) setHandoffNote("The saved workbook matches this shift. Save Excel first if you just edited it.");
+      return false;
+    }
+    setDriftFile(xlsm);
+    if (!force && (dismissedDrift.current === hash || syncReview)) return Boolean(syncReview);
+    if ((busy || session.current?.folderUnsafe()) && !force) return false;
+    if (inboundLock.current) return Boolean(syncReview);
+    const snap = host.current.snapshot();
+    if (!snap) return false;
+    inboundLock.current = true;
+    try {
+      const mapped = await readWorkbook(bytes);
+      const browserCanon = canonicalize(snap);
+      const excel = canonicalize(mapped.workbook);
+      const merge = mergeVisibleUserData(current.importBaseline, browserCanon, excel);
+      const review: SyncReview = {
+        fileName: xlsm,
+        jobLabel: syncJobLabel(browserCanon, excel),
+        hash,
+        excel,
+        merge,
+        preferBrowserMachine: machinePreferBrowser.current,
+      };
+      // Setup & Slidesheet are strictly Browser-authoritative. Auto-merge whenever Data/Cont DI/DL Tracker have zero conflicts.
+      if (merge.conflicts.length === 0) {
+        await commitInbound(review, {});
+        return false;
+      }
+      setSyncReview(review);
+      return true;
+    } catch (error) {
+      setHandoffNote(error instanceof Error ? error.message : String(error));
+      return false;
+    } finally {
+      inboundLock.current = false;
+    }
   }
+  refreshHandoffRef.current = refreshHandoff;
 
   async function exportHandoff() {
     const current = session.current?.current;
@@ -1215,6 +1402,10 @@ export function App() {
       setHandoffNote("Import the workbook to start a browser shift. Excel stays the authority.");
       return;
     }
+    if (driftFile) {
+      setHandoffNote("Excel has changed. Save the workbook in Excel, then Sync with Excel, before exporting.");
+      return;
+    }
     if (session.current?.folderUnsafe()) {
       setHandoffNote("The snapshot is still saving.");
       return;
@@ -1225,16 +1416,12 @@ export function App() {
       setHandoffNote(`Handoff ${pending[0]} is already waiting for Excel.`);
       return;
     }
-    const diff = diffHandoff(current.importBaseline, canonicalize(snap), handoffBlocks.current);
-    if (diff.blocked.length > 0) {
-      setHandoffNote(diff.blocked.join("\n"));
-      return;
-    }
-    if (diff.ops.length === 0) {
+    const ops = diffVisibleUserData(current.importBaseline, canonicalize(snap));
+    if (ops.length === 0) {
       setHandoffNote("Nothing in this shift needs to go back to Excel.");
       return;
     }
-    const xlsm = (await directory.current.list()).find((name) => name.toLowerCase().endsWith(".xlsm")) ?? "";
+    const xlsm = matchingWorkbook(await directory.current.list(), snapshotFileRef.current, workbookOcJobId() || ocJobId) ?? "";
     const token = workbookToken(xlsm);
     if (!token) {
       setHandoffNote("The workbook file name has no job token Excel can check.");
@@ -1249,11 +1436,12 @@ export function App() {
         sourceWorkbookHash: current.sourceWorkbookHash,
         createdAt: new Date().toISOString(),
         exporter: "browser shift",
-        ops: diff.ops,
+        mode: "visible-data",
+        ops,
       });
       await commitHandoff(folder, id, files);
       setPendingHandoff(id);
-      setHandoffNote(`Handoff ${id} is ready (${diff.ops.length} operations). Open the workbook in Excel and choose Apply handoff.`);
+      setHandoffNote(`Handoff ${id} is ready (${ops.length} cells). Open the workbook in Excel and choose Sync from Browser.`);
     } catch (error) {
       setPendingHandoff("");
       setHandoffNote(error instanceof Error ? error.message : String(error));
@@ -1268,8 +1456,9 @@ export function App() {
       setStatus(session.current?.state ?? "folder-safe");
       setMessage(`Folder snapshot saved.${safetyCopyNote()}`);
     } catch (error) {
+      const label = session.current?.label || jobs.find((job) => job.jobId === jobId)?.label || "this job";
       setStatus(session.current?.state ?? "save-error");
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage(folderGone(error) ? missingFolderText(label) : error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1299,7 +1488,14 @@ export function App() {
     const envelope = parseEnvelope(await mirrorSnapshot(mirror));
     host.current.load(envelope.workbook);
     setBookOpen(true);
-    await session.current.replace(envelope, { backup: true });
+    try {
+      await session.current.replace(envelope, { backup: true });
+    } catch (error) {
+      const label = session.current.label || jobs.find((job) => job.jobId === jobId)?.label || "this job";
+      setStatus(session.current.state);
+      setMessage(folderGone(error) ? missingFolderText(label) : error instanceof Error ? error.message : String(error));
+      return;
+    }
     setRecovery({ kind: "none" });
     setStatus(session.current.state);
     const repaired = await repairDamagedSurveyFormulas();
@@ -1327,7 +1523,9 @@ export function App() {
           onPick={(job) => {
             setPickedJob(job);
             const open = jobs.find((folder) => folder.jobId === jobId)?.label;
-            setMessage(`Job ${job.jobNumber} has no folder yet. Pull from FieldCap and Publish to StrapSheets work without one.${open ? ` The workbook below is still ${open}.` : ""}`);
+            setMessage(`Job ${job.jobNumber} has no folder in this browser yet. Choose its job folder; Cancel keeps the job selected, and Pull from FieldCap and Publish to StrapSheets still work without one.${open ? ` The workbook below is still ${open}.` : ""}`);
+            // A browser can only open a disk folder after the user picks it once, so the pick starts here, from the same click.
+            void chooseFolder(job);
           }}
           onChooseFolder={(job) => void chooseFolder(job)}
         />
@@ -1345,11 +1543,23 @@ export function App() {
         </button>
         <button
           type="button"
-          disabled={busy || !shiftReady || status === "saving-folder" || status === "saving-mirror" || pendingHandoff !== "" || (driftFile !== "" && !driftKept)}
+          disabled={busy || !shiftReady || status === "saving-folder" || status === "saving-mirror" || pendingHandoff !== "" || driftFile !== ""}
           onClick={() => void exportHandoff()}
-          title="Writes a handoff Excel applies the next time this workbook opens. This does not edit the .xlsm."
+          title="Writes a handoff Excel applies the next time this workbook opens. Save Excel and sync first if the file on disk has changed. This does not edit the .xlsm."
         >
           Export handoff
+        </button>
+        <button
+          type="button"
+          disabled={busy || !shiftReady}
+          onClick={() => {
+            const folder = directory.current;
+            if (folder) void refreshHandoff(folder, true);
+            else setHandoffNote("Open a job folder first. Save the workbook in Excel before syncing.");
+          }}
+          title="Reads the last saved .xlsm. Save Excel first."
+        >
+          Sync with Excel
         </button>
         <button
           type="button"
@@ -1400,13 +1610,26 @@ export function App() {
           <button type="button" onClick={() => void keepFolder()}>Keep folder</button>
         </section>
       ) : null}
-      {driftFile && !driftKept ? (
+      {driftFile && !syncReview ? (
         <section className="panel">
           <h1>{driftFile} changed in Excel</h1>
-          <p>Review and re-import starts a new browser shift and replaces browser-only edits. Keep current browser shift leaves those edits here.</p>
-          <button type="button" onClick={() => directory.current && void stageFile(directory.current, driftFile)}>Review and re-import</button>
-          <button type="button" onClick={() => { setDriftKept(true); setHandoffNote("Keeping this browser shift."); }}>Keep current browser shift</button>
+          <p>Save the workbook in Excel first. Sync with Excel merges this shift. Export handoff stays off until that merge has run.</p>
+          <button type="button" onClick={() => directory.current && void refreshHandoff(directory.current, true)}>Sync with Excel</button>
         </section>
+      ) : null}
+      {syncReview ? (
+        <SyncConflictDialog
+          fileName={syncReview.fileName}
+          jobLabel={syncReview.jobLabel}
+          merge={syncReview.merge}
+          preferBrowserMachine={syncReview.preferBrowserMachine}
+          onApply={(picks) => void commitInbound(syncReview, picks)}
+          onCancel={() => {
+            dismissedDrift.current = syncReview.hash;
+            setSyncReview(null);
+            setHandoffNote("Excel has changed. Export handoff stays off until Sync with Excel merges this shift.");
+          }}
+        />
       ) : null}
       {staged ? (
         <section className="panel">
@@ -1470,7 +1693,7 @@ export function App() {
         <span>{status}</span>
         <span>{message}</span>
         <span>{handoffNote}</span>
-        <span>{backups} restore points</span>
+        <span>{backups === 1 ? "1 restore point" : `${backups} restore points`}</span>
       </div>
     </div>
   );

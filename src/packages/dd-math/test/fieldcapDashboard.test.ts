@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { surveyStations } from "../../fieldcap-sync/src/index";
-import { backfillDayBreakdown, projectFieldCapDashboard, SheetBook, writeSurveyStations, type SnapshotBook } from "../../workbook-commands/src/index";
+import { backfillDayBreakdown, dayBreakdownWarning, projectFieldCapDashboard, SheetBook, writeSurveyStations, type SnapshotBook } from "../../workbook-commands/src/index";
 
 function makeBook(sheets: Record<string, Record<number, Record<number, unknown>>>): SheetBook {
   const out: Record<string, { id: string; name: string; cellData: Record<number, Record<number, unknown>> }> = {};
@@ -85,6 +85,43 @@ describe("FieldCap dashboard", () => {
     });
     expect(projectFieldCapDashboard(book)?.activeBha).toBe(2);
     expect(book.value("Data", 22, 3)).toBe("PHX-200");
+  });
+
+  it("advances from completed BHA #1 to active BHA #3 on pull, preserves manual selection, and refuses stale downgrade", () => {
+    const makeThreeBhaBook = (h3: number) => makeBook({
+      Data: { 2: { 7: { v: h3 } } },
+      "DD Tools": {},
+      _OC_BHA: {
+        0: headerRow(),
+        1: bhaRow([1, "Complete", "24X-19722-PTS", 600, 31, 569, 5, 8, 13, 13, 0, "24X-19722-PTS", "MOT", "Mud Motor"]),
+        2: bhaRow([2, "Complete", "PHX-725031-PTS", 2500, 100, 2400, 10, 30, 40, 40, 0, "PHX-725031-PTS", "MOT", "Mud Motor"]),
+        3: bhaRow([3, "Active", "PHX-576039-PTS", 300, 10, 290, 2, 4, 6, 6, 0, "PHX-576039-PTS", "MOT", "Mud Motor"]),
+      },
+    });
+
+    // Fresh OpenCap pull advances stale H3=1 -> active BHA #3
+    const pullBook = makeThreeBhaBook(1);
+    expect(projectFieldCapDashboard(pullBook, { noDowngrade: true })).toMatchObject({ activeBha: 3, motor: "PHX-576039-PTS" });
+    expect(pullBook.value("Data", 3, 8)).toBe(3);
+    expect(pullBook.value("Data", 22, 3)).toBe("PHX-576039-PTS");
+
+    // Manual H3 edit (preserveSelection: true) lets user inspect BHA #1
+    const inspectBook = makeThreeBhaBook(1);
+    expect(projectFieldCapDashboard(inspectBook, { preserveSelection: true })).toMatchObject({ activeBha: 1, motor: "24X-19722-PTS" });
+
+    // Stale CSV (only BHA #1 & #2) with noDowngrade: true never downgrades Excel's BHA #3
+    const staleBook = makeBook({
+      Data: { 2: { 7: { v: 3 } }, 21: { 2: { v: "PHX-576039-PTS" } } },
+      "DD Tools": {},
+      _OC_BHA: {
+        0: headerRow(),
+        1: bhaRow([1, "Complete", "24X-19722-PTS", 600, 31, 569, 5, 8, 13, 13, 0, "24X-19722-PTS", "MOT", "Mud Motor"]),
+        2: bhaRow([2, "Active", "PHX-725031-PTS", 2500, 100, 2400, 10, 30, 40, 40, 0, "PHX-725031-PTS", "MOT", "Mud Motor"]),
+      },
+    });
+    expect(projectFieldCapDashboard(staleBook, { noDowngrade: true })?.activeBha).toBe(3);
+    expect(staleBook.value("Data", 3, 8)).toBe(3);
+    expect(staleBook.value("Data", 22, 3)).toBe("PHX-576039-PTS");
   });
 
   it("fills only a matching pre-existing bit-depth row", () => {
@@ -409,6 +446,120 @@ describe("day breakdown follows H3", () => {
     const writes = backfillDayBreakdown(book);
     expect(writes).toContainEqual({ a1: "L4", value: 10 });
     expect(writes).toContainEqual({ a1: "M4", value: 2 });
+  });
+});
+
+describe("day breakdown is FieldCap's day", () => {
+  const slideCsv = (): Record<number, Record<number, { v: unknown }>> => {
+    const rows: Array<Array<unknown>> = [
+      ["Job ID", "Date", "BHA #", "Slide Metres", "Rotate Metres", "Slide Hours", "Rotate Hours", "Survey Course Sum"],
+      [21786, "2026-11-10", 1, 31, 605, 0.68, 5.5, 636],
+      [21786, "2026-11-12", 2, 137, 858, 4.25, 10.98, 995],
+      [21786, "2026-11-13", 2, 125, 489.78, 6.5, 10.85, 614.78],
+    ];
+    return Object.fromEntries(rows.map((line, r) => [r, Object.fromEntries(line.map((v, c) => [c, { v }]))]));
+  };
+  const dataRow = (period: string, start: number, end: number, bit: number, extra: Record<number, unknown> = {}) => ({
+    7: { v: period }, 8: { v: start }, 9: { v: end }, 15: { v: bit },
+    ...Object.fromEntries(Object.entries(extra).map(([c, v]) => [c, { v }])),
+  });
+  const dayBook = (row5: Record<number, unknown> = {}): SnapshotBook => ({
+    sheets: {
+      data: {
+        id: "data",
+        name: "Data",
+        cellData: {
+          2: { 7: { v: 2 } },
+          3: dataRow("Midnight", 636, 1631, 11.25),
+          4: dataRow("Midnight", 1631, 2245, 13.25, row5),
+          35: { 7: { v: 2 } },
+        },
+      },
+      slide: { id: "slide", name: "_OC_Slide", cellData: slideCsv() },
+    },
+  }) as SnapshotBook;
+
+  it("writes FieldCap's slide metres and time as logged, past the bit hours", () => {
+    const writes = backfillDayBreakdown(dayBook());
+    for (const expected of [
+      { a1: "L4", value: 137 }, { a1: "M4", value: 4 }, { a1: "N4", value: 15 },
+      { a1: "L5", value: 125 }, { a1: "M5", value: 6 }, { a1: "N5", value: 30 },
+    ]) expect(writes).toContainEqual(expected);
+    expect(writes.filter((write) => /^A[J-M]\d+$/i.test(write.a1))).toEqual([]);
+    expect(writes).toContainEqual({ a1: "K5", formula: '=IFERROR(IF(ISBLANK(J5),"",J5-I5),"")' });
+    expect(writes).toContainEqual({ a1: "O5", formula: '=IFERROR(IF(ISBLANK(J5),"",J5-I5-L5),"")' });
+    expect(writes).toContainEqual({ a1: "C10", formula: '=IFERROR(IF(U23=0,"0Hrs",ROUND(P23-V23,2)&"Hrs / "&ROUND(U23,4)*100&"% / "&ROUND(S23,2)&"m/hr"),"")' });
+    expect(writes).toContainEqual({ a1: "C17", formula: '=IFERROR(IF(U24=0,"0Hrs",ROUND(P24-V24,2)&"Hrs / "&ROUND(U24,4)*100&"% / "&ROUND(S24,2)&"m/hr"),"")' });
+    expect(writes).toContainEqual({ a1: "S24", formula: '=IFERROR(ROUND(O24/(P24-V24),2),"")' });
+    expect(writes).toContainEqual({ a1: "C16", formula: '=IFERROR(IF(IFERROR(N(V24),0)=0,"0Hrs",ROUND(V24,2)&"Hrs / "&ROUND(T24,4)*100&"% / "&ROUND(R24,2)&"m/hr"),"")' });
+    expect(writes).toContainEqual({ a1: "C18", formula: '=IFERROR(IF(U24=0,"0Hrs",ROUND(K24/P24,2)&"m/hr"),"")' });
+    expect(writes).toContainEqual({ a1: "C19", formula: '=IFERROR(P24,"")' });
+    expect(writes).toContainEqual({ a1: "C20", formula: '=IFERROR(Q24,"")' });
+  });
+
+  it("fills FieldCap's day when the DD Tools mirror is empty", () => {
+    const book = dayBook();
+    const data = (book.sheets as Record<string, { cellData: Record<number, unknown> }>).data!;
+    delete data.cellData[35];
+    const writes = backfillDayBreakdown(book);
+    expect(writes).toContainEqual({ a1: "L5", value: 125 });
+    expect(writes.some((write) => write.a1.startsWith("AL"))).toBe(false);
+    expect(writes.some((write) => write.a1 === "H3")).toBe(false);
+  });
+
+  it("flags a day row that does not match FieldCap's day", () => {
+    const matching = { 11: 125, 12: 6, 13: 30 };
+    expect(dayBreakdownWarning(dayBook(matching))).not.toContain("Row 5");
+    const warning = dayBreakdownWarning(dayBook({ ...matching, 11: 133, 12: 4, 13: 58 }));
+    expect(warning).toContain("Row 5 (Midnight): slide m, slide time");
+  });
+
+  it("prints slide metres whole and takes rotated metres from total less slide", () => {
+    const writes = backfillDayBreakdown(dayBook());
+    expect(writes).toContainEqual({ a1: "C7", formula: '=IFERROR(ROUND(IF(ISERROR(L23),0,L23),0),"")' });
+    expect(writes).toContainEqual({ a1: "C8", formula: '=IFERROR(ROUND(O23,2),"")' });
+    expect(writes).toContainEqual({ a1: "C14", formula: '=IFERROR(ROUND(L24,0),"")' });
+    expect(writes).toContainEqual({ a1: "C15", formula: '=IFERROR(ROUND(O24,2),"")' });
+    expect(writes).toContainEqual({ a1: "C7", format: '0"m"' });
+    expect(writes).toContainEqual({ a1: "L4", format: "0" });
+    expect(writes).toContainEqual({ a1: "L24", format: "0" });
+    expect(writes).toContainEqual({ a1: "N24", formula: '=IFERROR(MOD(ROUND(V24*60,0),60),"")' });
+    // The stored value stays FieldCap's, so slide % and ROP are not rounded.
+    expect(writes).toContainEqual({ a1: "L5", value: 125 });
+  });
+
+  it("keeps later days on their own rows when a by-day file skips a day with no drilling", () => {
+    const csv = slideCsv();
+    // 11-13: in the hole, nothing drilled, no row in an older export.
+    csv[3] = Object.fromEntries([21786, "2026-11-14", 2, 51, 390.27, 4.47, 14.1, 441.27].map((v, c) => [c, { v }]));
+    const book = {
+      sheets: {
+        data: {
+          id: "data",
+          name: "Data",
+          cellData: {
+            2: { 7: { v: 2 } },
+            3: dataRow("Midnight", 636, 1631, 11.25),
+            4: dataRow("Midnight", 1631, 1631, 0),
+            5: dataRow("Midnight", 1631, 2072, 14),
+          },
+        },
+        slide: { id: "slide", name: "_OC_Slide", cellData: csv },
+      },
+    } as SnapshotBook;
+    const writes = backfillDayBreakdown(book);
+    expect(writes).toContainEqual({ a1: "L5", value: 0 });
+    expect(writes).toContainEqual({ a1: "L6", value: 51 });
+    expect(writes.some((write) => write.a1.startsWith("AJ") || write.a1.startsWith("AK"))).toBe(false);
+  });
+
+  it("wipes retired AJ:AM helper cells so they cannot override K or O", () => {
+    const writes = backfillDayBreakdown(dayBook({ 35: 999, 36: 888, 37: 1.5, 38: 18 }));
+    expect(writes).toContainEqual({ a1: "AJ5", value: "" });
+    expect(writes).toContainEqual({ a1: "AK5", value: "" });
+    expect(writes).toContainEqual({ a1: "AL5", value: "" });
+    expect(writes).toContainEqual({ a1: "AM5", value: "" });
+    expect(writes).toContainEqual({ a1: "K5", formula: '=IFERROR(IF(ISBLANK(J5),"",J5-I5),"")' });
   });
 });
 

@@ -227,6 +227,7 @@ export function WellsView(props: WellsViewProps) {
           <div className="wells-legend">
             <p><i className="swatch plan" /> Planned Path</p>
             <p><i className="swatch drilled" /> Drilled Path</p>
+            <p><i className="swatch station" /> Station</p>
             <p><i className="swatch target" /> Target</p>
             <p><i className="swatch red" /> Below 1.5</p>
             <p><i className="swatch yellow" /> Below 2.0</p>

@@ -126,7 +126,7 @@ Public Sub ScreenCalcStaggered()
 
     activeName = ""
     If Not ActiveSheet Is Nothing Then
-        If ActiveSheet.Parent Is ThisWorkbook Then
+        If ActiveSheet.parent Is ThisWorkbook Then
             activeName = ActiveSheet.name
             ActiveSheet.Calculate
         End If
@@ -213,7 +213,7 @@ Public Sub PlaceFormOnExcel(ByVal frm As Object)
 Points:
     On Error Resume Next
     frm.StartUpPosition = 0
-    frm.Left = Application.Left + (Application.Width - frm.Width) / 2
+    frm.Left = Application.Left + (Application.width - frm.width) / 2
     frm.Top = Application.Top + (Application.Height - frm.Height) / 2
     If frm.Top < Application.Top Then frm.Top = Application.Top + 12
     If frm.Left < Application.Left Then frm.Left = Application.Left + 12

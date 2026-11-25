@@ -390,9 +390,20 @@ function planNums(line: string): number[] {
   return out;
 }
 
+function splitGluedNums(line: string): string {
+  let cur = line;
+  let prev = "";
+  while (cur !== prev) {
+    prev = cur;
+    cur = cur.replace(/(\.\d{2,3})(-?\d{1,6}(?:,\d{3})*\.\d{2,3})/g, "$1 $2");
+  }
+  return cur;
+}
+
 /** ParsePlannedSurveys: the dense Planned Survey stations, one per text line. */
 export function parsePlannedSurveys(text: string): PlannedStation[] {
   const out: PlannedStation[] = [];
+  const rowNums: number[][] = [];
   let lastMd = -1;
   let inSurvey = false;
   for (const line of text.split("\n")) {
@@ -405,20 +416,35 @@ export function parsePlannedSurveys(text: string): PlannedStation[] {
       continue;
     }
     if (!inSurvey) continue;
-    const nums = planNums(line);
+    const nums = planNums(splitGluedNums(line));
     if (nums.length < 8) continue;
     if (nums[0]! + 0.001 < lastMd) continue;
     if (nums[1]! < -0.01 || nums[1]! > 180.01) continue;
     if (nums[3]! < -50 || nums[3]! > 12000) continue;
     if (out.length > MAX_PLANNED) break;
     out.push({ md: nums[0]!, inc: nums[1]!, azm: nums[2]!, tvd: nums[3]!, ns: 0, ew: 0 });
+    rowNums.push(nums);
     lastMd = nums[0]!;
   }
   if (out.length > 0) {
     const ne = integrateLocalNE(out.map((s) => s.md), out.map((s) => s.inc), out.map((s) => s.azm));
     for (let i = 0; i < out.length; i += 1) {
-      out[i]!.ns = ne.ns[i]!;
-      out[i]!.ew = ne.ew[i]!;
+      const nums = rowNums[i]!;
+      const mcN = ne.ns[i]!;
+      const mcE = ne.ew[i]!;
+      let bestD = Number.POSITIVE_INFINITY;
+      let bestN = mcN;
+      let bestE = mcE;
+      for (let k = 4; k <= nums.length - 2; k += 1) {
+        const d = Math.hypot(nums[k]! - mcN, nums[k + 1]! - mcE);
+        if (d < bestD) {
+          bestD = d;
+          bestN = nums[k]!;
+          bestE = nums[k + 1]!;
+        }
+      }
+      out[i]!.ns = bestD <= 1 ? bestN : mcN;
+      out[i]!.ew = bestD <= 1 ? bestE : mcE;
     }
   }
   return out;

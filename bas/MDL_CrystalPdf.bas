@@ -29,15 +29,15 @@ End Function
 ' True when the text is glyph numbers (control characters), which is what pdftotext gives for
 ' a Crystal Reports PDF. Used to say so when the decoder could not run.
 Public Function PdfTextIsGlyphNumbers(ByVal pdfText As String) As Boolean
-    Dim n As Long, bad As Long, i As Long, c As Long
+    Dim n As Long, Bad As Long, i As Long, c As Long
     n = Len(pdfText): If n > 4000 Then n = 4000
     For i = 1 To n
         c = AscW(mid$(pdfText, i, 1))
         If c >= 0 And c < 32 Then
-            If c <> 9 And c <> 10 And c <> 12 And c <> 13 Then bad = bad + 1
+            If c <> 9 And c <> 10 And c <> 12 And c <> 13 Then Bad = Bad + 1
         End If
     Next i
-    PdfTextIsGlyphNumbers = (n > 0 And bad * 20 > n)
+    PdfTextIsGlyphNumbers = (n > 0 And Bad * 20 > n)
 End Function
 
 Private Sub CrystalDeleteQuiet(ByVal path As String)

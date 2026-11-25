@@ -198,7 +198,7 @@ ErrHandler:
     ScreenForceReset
     mBusy = False
     On Error Resume Next
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "INIT ERR " & en & ": " & ed
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).value = "INIT ERR " & en & ": " & ed
     On Error GoTo 0
 End Sub
 
@@ -220,6 +220,7 @@ Public Sub RefreshAllCsvData()
         Exit Sub
     End If
 
+    ShowWorkbookWindow
     ScreenBeginBusy "OpenCap: scanning for CSV files..."
 
     On Error GoTo ErrHandler
@@ -268,9 +269,61 @@ ErrHandler:
     ScreenForceReset
     mBusy = False
     On Error Resume Next
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "REFRESH ERR " & errNum & ": " & errMsg
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).value = "REFRESH ERR " & errNum & ": " & errMsg
     MsgBox "Refresh failed:" & vbCrLf & vbCrLf & errNum & " - " & errMsg, vbExclamation, "OpenCap Refresh"
     On Error GoTo 0
+End Sub
+
+' Silent in-place sync of local <workbook>\OpenCap\ CSVs into hidden _OC_* / _FC_* sheets,
+' Costs, Data Motors on Location, DD Tools mirror, ToolHours, and Data!X2:AB serial hours.
+' Does NOT call BuildSetupUI (preserves Setup layout, notes, AC table, and buttons).
+' Only loads CSVs in <workbook>\OpenCap\ whose job matches the current workbook job.
+Public Sub SyncOpenCapCsvsInPlace()
+    Dim wbPath As String
+    Dim ocDir As String
+    Dim fJob As String, fCrew As String, fBha As String
+    Dim fSlide As String, fInv As String, fCosts As String
+    Dim curJobId As String, curJobCode As String
+
+    On Error GoTo Done
+    wbPath = ThisWorkbook.path
+    If wbPath = "" Then Exit Sub
+    ocDir = wbPath & Application.PathSeparator & "OpenCap"
+    If Dir(ocDir, vbDirectory) = "" Then Exit Sub
+
+    fJob = FindCsvByTokenInFolder(ocDir, TOK_JOB)
+    fCrew = FindCsvByTokenInFolder(ocDir, TOK_CREW)
+    fBha = FindCsvByTokenInFolder(ocDir, TOK_BHA)
+    fSlide = FindCsvByTokenInFolder(ocDir, TOK_SLIDE)
+    fInv = FindCsvByTokenInFolder(ocDir, TOK_INVENTORY)
+    fCosts = FindCsvByTokenInFolder(ocDir, TOK_COSTS)
+    If fJob = "" And fCrew = "" And fBha = "" And fSlide = "" And fInv = "" And fCosts = "" Then Exit Sub
+
+    ' Safety guard: if this workbook already holds a job, only load CSVs whose filename matches
+    ' either its Job Code (e.g. 35784) or FieldCap Job ID (e.g. 21786).
+    curJobId = CurrentOcJobId()
+    curJobCode = Trim$(GF(ReadJobFields(), "Job Code"))
+    If Len(fJob) > 0 And (Len(curJobId) > 0 Or Len(curJobCode) > 0) Then
+        Dim matched As Boolean
+        matched = False
+        If Len(curJobCode) > 0 And InStr(1, fJob, curJobCode, vbTextCompare) > 0 Then matched = True
+        If Len(curJobId) > 0 And InStr(1, fJob, curJobId, vbTextCompare) > 0 Then matched = True
+        If Not matched Then Exit Sub
+    End If
+
+    SetupDataSheets
+    If fJob <> "" Then LoadCsv fJob, SH_JOB
+    If fCrew <> "" Then LoadCsv fCrew, SH_CREW
+    If fBha <> "" Then LoadCsv fBha, SH_BHA
+    If fSlide <> "" Then LoadCsv fSlide, SH_SLIDE
+    If fInv <> "" Then LoadCsv fInv, SH_INVENTORY
+    If fCosts <> "" Then LoadCsv fCosts, SH_COSTS
+
+    DetectNewJob
+    SyncCostsFromOpenCap
+    SyncMudMotorsFromBha
+    Module23.SyncDDToolsFromCsvs fJob, fCrew, fBha
+Done:
 End Sub
 
 ' Load latest OpenCap CSVs and sync Costs / motors / Setup view.
@@ -342,7 +395,7 @@ ErrHandler:
     mBusy = False
     On Error Resume Next
     SheetReprotectAfterVba ThisWorkbook.Worksheets(SH_SETUP), wasProt
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = "REBUILD ERR " & er & ": " & em
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).value = "REBUILD ERR " & er & ": " & em
     On Error GoTo 0
 End Sub
 
@@ -440,6 +493,16 @@ Fail:
     SheetReprotectAfterVba ws, wasProt
 End Sub
 
+' Setup and DD Tools draw through the workbook window. Minimized, those calls
+' raise 1004 halfway through the rebuild and leave Setup without its buttons.
+Public Sub ShowWorkbookWindow()
+    On Error Resume Next
+    With ThisWorkbook.Windows(1)
+        If .WindowState = xlMinimized Then .WindowState = xlNormal
+    End With
+    On Error GoTo 0
+End Sub
+
 ' Unfreeze, jump to A1, then freeze only the title/divider (rows 1-2).
 ' A stale freeze at col H / row 21 plus ScrollColumn=M clips the header to "E & SETUP".
 Private Sub ResetSetupWindow(ws As Worksheet)
@@ -519,7 +582,7 @@ Private Sub DrawHeader(ws As Worksheet)
     ' Full-width title (A-R). AC summary title band removed (table lives at J9).
     With ws.Range(ws.Cells(R_HDR, 1), ws.Cells(R_HDR, C_LAST))
         .Merge
-        .Value = "  OPENCAP  |  WELL DATABASE & SETUP"
+        .value = "  OPENCAP  |  WELL DATABASE & SETUP"
         .Interior.Color = cTeal()
         .Font.Color = cBlk()
         .Font.size = 14
@@ -868,7 +931,7 @@ Public Sub SortCrewByRole()
         If (idx - 1) Mod 2 = 0 Then bg = cWh() Else bg = cBg()
 
         With ws.Cells(ro, C_CRL)
-            .Value = aRole(idx)
+            .value = aRole(idx)
             .Interior.Color = bg
             .Font.Color = cDk(): .Font.bold = True: .Font.size = 7
             .Font.name = "Consolas"
@@ -885,19 +948,19 @@ Public Sub SortCrewByRole()
 
         Dim mrg As Range
         Set mrg = ws.Range(ws.Cells(ro, C_CRL + 1), ws.Cells(ro, C_CRL + 2))
-        mrg.Cells(1, 1).Value = aName(idx)
+        mrg.Cells(1, 1).value = aName(idx)
         mrg.Interior.Color = bg: mrg.Font.Color = cBlk()
         mrg.Font.bold = (aName(idx) <> ""): mrg.Font.size = 8
         mrg.Font.name = "Consolas"
 
         Set mrg = ws.Range(ws.Cells(ro, C_CRL + 3), ws.Cells(ro, C_CRL + 5))
-        mrg.Cells(1, 1).Value = aEmail(idx)
+        mrg.Cells(1, 1).value = aEmail(idx)
         mrg.Interior.Color = bg: mrg.Font.Color = cDk()
         mrg.Font.size = 7: mrg.Font.name = "Consolas"
         ApplyMailtoLink mrg
 
         Set mrg = ws.Range(ws.Cells(ro, C_CRL + 6), ws.Cells(ro, C_LAST))
-        mrg.Cells(1, 1).Value = aPhone(idx)
+        mrg.Cells(1, 1).value = aPhone(idx)
         mrg.Interior.Color = bg: mrg.Font.Color = cDk()
         mrg.Font.size = 7: mrg.Font.name = "Consolas"
     Next idx
@@ -1077,8 +1140,22 @@ Private Sub DrawImportFilesPanel(ws As Worksheet, startRow As Long)
     ws.rows(r).rowHeight = 22
     MrgCell ws, r, cL, cBtnEnd, "", cBg(), cBlk(), False, 8, xlHAlignCenter
     MrgCell ws, r, cPath, cR, acPath, cBg(), cDk(), False, 7, xlHAlignLeft
+    With ws.Range(ws.Cells(r, cL), ws.Cells(r, cR)).Borders(xlEdgeBottom)
+        .LineStyle = xlContinuous: .Color = RGB(230, 230, 230): .Weight = xlHairline
+    End With
     On Error Resume Next: ws.names("OC_ImpAcRow").Delete: On Error GoTo 0
     ws.names.Add name:="OC_ImpAcRow", RefersToR1C1:="=R" & r & "C" & cL
+    r = r + 1
+
+    ' Row 31: Sync Surveys (J:L) and Sync from Browser (M:O). Above EOW / JOB NOTES on Row 32.
+    ws.rows(r).rowHeight = 20
+    MrgCell ws, r, cL, cBtnEnd, "", cWh(), cBlk(), False, 8, xlHAlignCenter
+    MrgCell ws, r, cPath, cPath + 2, "", cWh(), cBlk(), False, 8, xlHAlignCenter
+    If cPath + 3 <= cR Then MrgCell ws, r, cPath + 3, cR, "", cWh(), cDk(), False, 7, xlHAlignLeft
+    On Error Resume Next: ws.names("OC_ImpSurvRow").Delete: On Error GoTo 0
+    ws.names.Add name:="OC_ImpSurvRow", RefersToR1C1:="=R" & r & "C" & cL
+    On Error Resume Next: ws.names("OC_BrowserSyncRow").Delete: On Error GoTo 0
+    ws.names.Add name:="OC_BrowserSyncRow", RefersToR1C1:="=R" & r & "C" & cPath
 
     With ws.Range(ws.Cells(startRow, cL), ws.Cells(r, cR))
         .Borders(xlEdgeLeft).LineStyle = xlContinuous: .Borders(xlEdgeLeft).Color = cMed()
@@ -1091,7 +1168,7 @@ Private Function GetImportPath(shName As String) As String
     GetImportPath = ""
     If Not SheetExists(shName) Then Exit Function
     On Error Resume Next
-    Dim v As String: v = Trim(CStr(Worksheets(shName).Cells(1, 1).Value))
+    Dim v As String: v = Trim(CStr(Worksheets(shName).Cells(1, 1).value))
     If Err.Number = 0 And Len(v) > 0 Then GetImportPath = v
     On Error GoTo 0
 End Function
@@ -1107,7 +1184,7 @@ Private Sub AttachButtons(ws As Worksheet)
     ' REFRESH CSVs (right side of title bar)
     Dim rc As Range: Set rc = ws.Cells(R_HDR, C_LAST - 3)
     Dim bR As Button
-    Set bR = ws.Buttons.Add(rc.Left, rc.Top + 4, rc.Width * 3.5, rc.Height - 8)
+    Set bR = ws.Buttons.Add(rc.Left, rc.Top + 4, rc.width * 3.5, rc.Height - 8)
     bR.name = "BtnOCRefresh"
     bR.OnAction = "'" & ThisWorkbook.name & "'!RefreshSetup"
     bR.Placement = xlMoveAndSize
@@ -1116,7 +1193,7 @@ Private Sub AttachButtons(ws As Worksheet)
     ' REBUILD (a bit further left)
     Dim rB As Range: Set rB = ws.Cells(R_HDR, C_LAST - 7)
     Dim bB As Button
-    Set bB = ws.Buttons.Add(rB.Left, rB.Top + 4, rB.Width * 3, rB.Height - 8)
+    Set bB = ws.Buttons.Add(rB.Left, rB.Top + 4, rB.width * 3, rB.Height - 8)
     bB.name = "BtnOCRebuild"
     bB.OnAction = "'" & ThisWorkbook.name & "'!RebuildSetup"
     bB.Placement = xlMoveAndSize
@@ -1127,7 +1204,7 @@ Private Sub AttachButtons(ws As Worksheet)
     On Error Resume Next: Set planCell = ws.Range("OC_ImpPlanRow").MergeArea: On Error GoTo 0
     If Not planCell Is Nothing Then
         Dim bIP As Button
-        Set bIP = ws.Buttons.Add(planCell.Left, planCell.Top, planCell.Width, planCell.Height)
+        Set bIP = ws.Buttons.Add(planCell.Left, planCell.Top, planCell.width, planCell.Height)
         bIP.name = "BtnImportPlan"
         bIP.OnAction = "'" & ThisWorkbook.name & "'!ImportSurveyPlan"
         bIP.Placement = xlMoveAndSize
@@ -1138,11 +1215,33 @@ Private Sub AttachButtons(ws As Worksheet)
     On Error Resume Next: Set acCell = ws.Range("OC_ImpAcRow").MergeArea: On Error GoTo 0
     If Not acCell Is Nothing Then
         Dim bAC As Button
-        Set bAC = ws.Buttons.Add(acCell.Left, acCell.Top, acCell.Width, acCell.Height)
+        Set bAC = ws.Buttons.Add(acCell.Left, acCell.Top, acCell.width, acCell.Height)
         bAC.name = "BtnImportAC"
         bAC.OnAction = "'" & ThisWorkbook.name & "'!ImportAntiCollision"
         bAC.Placement = xlMoveAndSize
         StyleBtn bAC, "Import AC", cBg(), cMed(), cBlk(), False
+    End If
+
+    Dim survCell As Range
+    On Error Resume Next: Set survCell = ws.Range("OC_ImpSurvRow").MergeArea: On Error GoTo 0
+    If Not survCell Is Nothing Then
+        Dim bSV As Button
+        Set bSV = ws.Buttons.Add(survCell.Left, survCell.Top, survCell.width, survCell.Height)
+        bSV.name = "BtnSyncSurveys"
+        bSV.OnAction = "'" & ThisWorkbook.name & "'!SyncWellSeekerSurveys"
+        bSV.Placement = xlMoveAndSize
+        StyleBtn bSV, "Sync Surveys", cWh(), cMed(), cBlk(), False
+    End If
+
+    Dim syncCell As Range
+    On Error Resume Next: Set syncCell = ws.Range("OC_BrowserSyncRow").MergeArea: On Error GoTo 0
+    If Not syncCell Is Nothing Then
+        Dim bHO As Button
+        Set bHO = ws.Buttons.Add(syncCell.Left, syncCell.Top, syncCell.width, syncCell.Height)
+        bHO.name = "BtnBrowserSync"
+        bHO.OnAction = "'" & ThisWorkbook.name & "'!BrowserHandoff_ApplyPending"
+        bHO.Placement = xlMoveAndSize
+        StyleBtn bHO, "Sync from Browser", cWh(), cMed(), cBlk(), False
     End If
 End Sub
 
@@ -1165,7 +1264,7 @@ Private Sub SectionBar(ws As Worksheet, r As Long, C1 As Long, C2 As Long, _
     ws.rows(r).rowHeight = 18
     With ws.Range(ws.Cells(r, C1), ws.Cells(r, C2))
         .Merge
-        .Value = title
+        .value = title
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = True
@@ -1191,7 +1290,7 @@ Private Sub Pair(ws As Worksheet, r As Long, lbl1 As String, val1 As String, _
     With ws.Range(ws.Cells(r, C_V1S), ws.Cells(r, C_V1E))
         .Merge
         .numberFormat = "@"
-        .Value = val1
+        .value = val1
         .Interior.Color = cWh()
         .Font.Color = cBlk()
         .Font.bold = (val1 <> "")
@@ -1245,7 +1344,7 @@ Private Sub ApplyHttpLink(rng As Range, ByVal url As String, ByVal displayText A
     If Len(Trim$(url)) = 0 Then Exit Sub
 
     Set anchor = rng.MergeArea.Cells(1, 1)
-    If Len(Trim$(displayText)) > 0 Then anchor.Value = displayText
+    If Len(Trim$(displayText)) > 0 Then anchor.value = displayText
 
     sz = anchor.Font.size
     wasBold = anchor.Font.bold
@@ -1344,7 +1443,7 @@ Private Sub MrgCell(ws As Worksheet, r As Long, C1 As Long, C2 As Long, _
                     sz As Long, align As Long)
     With ws.Range(ws.Cells(r, C1), ws.Cells(r, C2))
         .Merge
-        .Value = val
+        .value = val
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = bold
@@ -1358,7 +1457,7 @@ End Sub
 Private Sub Sgl(ws As Worksheet, r As Long, c As Long, val As String, _
                 bg As Long, fg As Long, bold As Boolean, sz As Long, align As Long)
     With ws.Cells(r, c)
-        .Value = val
+        .value = val
         .Interior.Color = bg
         .Font.Color = fg
         .Font.bold = bold
@@ -1459,7 +1558,7 @@ Public Sub RefreshJobClientFromImport()
         If lbl = "JOB ID" Then v = GF(j, "Job Code", "Job ID")
         If lbl = "CLIENT" Then v = JobClientName(j)
         If v <> "" Then
-            ws.Range(ws.Cells(r, C_V1S), ws.Cells(r, C_V1E)).Value = v
+            ws.Range(ws.Cells(r, C_V1S), ws.Cells(r, C_V1E)).value = v
             ws.Range(ws.Cells(r, C_V1S), ws.Cells(r, C_V1E)).Font.bold = True
         End If
     Next r
@@ -1573,7 +1672,7 @@ Private Sub LoadCsv(filePath As String, shName As String)
             data(ri + 1, c + 1) = CsvConv(fa(c))
         Next c
     Next ri
-    ws.Range(ws.Cells(1, 1), ws.Cells(nLines, nCols)).Value = data
+    ws.Range(ws.Cells(1, 1), ws.Cells(nLines, nCols)).value = data
 End Sub
 
 ' Public hunt used by Setup REFRESH CSVs and Data REFRESH / DD Tools.
@@ -1841,7 +1940,7 @@ Fail:
     errN = Err.Number
     errD = Err.Description
     On Error Resume Next
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = _
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).value = _
         "MOTOR SYNC ERR " & errN & ": " & errD
     Application.StatusBar = "Mud motor sync failed: " & errD
 End Sub
@@ -2089,7 +2188,7 @@ Fail:
     errN = Err.Number
     errD = Err.Description
     On Error Resume Next
-    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).Value = _
+    ThisWorkbook.Worksheets(SH_SETUP).Cells(1, 20).value = _
         "COSTS SYNC ERR " & errN & ": " & errD
     Application.StatusBar = "Costs sync failed: " & errD
     MsgBox "Costs sync failed:" & vbCrLf & vbCrLf & errN & " - " & errD, _
@@ -2138,15 +2237,15 @@ Private Sub SyncCostsSheet()
         End If
 
         For r = COSTS_FIRST_ROW To COSTS_LAST_ROW
-            If Len(Trim$(CStr(wsC.Cells(r, COSTS_COL_DAILY).Value & ""))) = 0 Then GoTo NextPrior
+            If Len(Trim$(CStr(wsC.Cells(r, COSTS_COL_DAILY).value & ""))) = 0 Then GoTo NextPrior
 
             Dim dSerial As Long
-            dSerial = ParseCostDateSerial(wsC.Cells(r, COSTS_COL_DATE).Value)
+            dSerial = ParseCostDateSerial(wsC.Cells(r, COSTS_COL_DATE).value)
             If dSerial = 0 And seed > 0 Then
                 dSerial = CLng(seed) + (r - COSTS_FIRST_ROW)
             End If
             If dSerial > 0 Then
-                dict(CStr(dSerial)) = CDbl(wsC.Cells(r, COSTS_COL_DAILY).Value)
+                dict(CStr(dSerial)) = CDbl(wsC.Cells(r, COSTS_COL_DAILY).value)
             End If
 NextPrior:
         Next r
@@ -2162,10 +2261,10 @@ NextPrior:
         For oc = 2 To lastO
             Dim ocDate As Long
             Dim ocCost As Double
-            ocDate = ParseCostDateSerial(wsO.Cells(oc, 2).Value)
+            ocDate = ParseCostDateSerial(wsO.Cells(oc, 2).value)
             If ocDate = 0 Then ocDate = ParseCostDateSerial(wsO.Cells(oc, 2).Value2)
-            If ocDate > 0 And IsNumeric(wsO.Cells(oc, 3).Value) Then
-                ocCost = CDbl(wsO.Cells(oc, 3).Value)
+            If ocDate > 0 And IsNumeric(wsO.Cells(oc, 3).value) Then
+                ocCost = CDbl(wsO.Cells(oc, 3).value)
                 dict(CStr(ocDate)) = ocCost
             End If
         Next oc
@@ -2235,13 +2334,13 @@ NextPrior:
     For i = LBound(keyList) To UBound(keyList)
         r = COSTS_FIRST_ROW + (i - LBound(keyList))
         wsC.Cells(r, COSTS_COL_DAILY).numberFormat = "$#,##0.00"
-        wsC.Cells(r, COSTS_COL_DAILY).Value = CDbl(dict(CStr(keyList(i))))
+        wsC.Cells(r, COSTS_COL_DAILY).value = CDbl(dict(CStr(keyList(i))))
 
         ' Date column is merged C:D � write via MergeArea
         With wsC.Cells(r, COSTS_COL_DATE).MergeArea.Cells(1, 1)
             .numberFormat = "[$-F800]dddd, mmmm dd, yyyy"
             If i = LBound(keyList) Or (Not consecutive) Then
-                .Value = keyList(i)
+                .value = keyList(i)
             Else
                 .formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
             End If
@@ -2261,7 +2360,7 @@ NextPrior:
     Dim firstEmpty As Long
     firstEmpty = COSTS_FIRST_ROW + dict.Count
     For r = firstEmpty To COSTS_LAST_ROW
-        If Len(Trim$(CStr(wsC.Cells(r, 2).Value & ""))) = 0 Then Exit For
+        If Len(Trim$(CStr(wsC.Cells(r, 2).value & ""))) = 0 Then Exit For
         With wsC.Cells(r, COSTS_COL_DATE).MergeArea.Cells(1, 1)
             .numberFormat = "[$-F800]dddd, mmmm dd, yyyy"
             .formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
@@ -2357,7 +2456,7 @@ Private Function SheetExists(nm As String) As Boolean
 End Function
 
 Private Function SafeStr(cell As Range) As String
-    On Error Resume Next: SafeStr = Trim(CStr(cell.Value)): On Error GoTo 0
+    On Error Resume Next: SafeStr = Trim(CStr(cell.value)): On Error GoTo 0
 End Function
 
 Private Function ColByName(ws As Worksheet, ParamArray names() As Variant) As Long
@@ -2464,7 +2563,7 @@ End Function
 Private Sub ImportSurveyPlanCsv(ByVal fPath As String)
     Dim survWs As Worksheet
     Set survWs = EnsureHiddenSheet(SH_SURVEY)
-    survWs.Cells(1, 1).Value = fPath
+    survWs.Cells(1, 1).value = fPath
 
     Dim fNum As Integer: fNum = FreeFile
     Open fPath For Input As #fNum
@@ -2489,7 +2588,7 @@ Private Sub ImportSurveyPlanCsv(ByVal fPath As String)
                     colCount = UBound(fields) + 1
                     Dim hc As Long
                     For hc = 0 To UBound(fields)
-                        survWs.Cells(2, hc + 1).Value = Trim(fields(hc))
+                        survWs.Cells(2, hc + 1).value = Trim(fields(hc))
                     Next hc
                     Exit For
                 End If
@@ -2502,9 +2601,9 @@ Private Sub ImportSurveyPlanCsv(ByVal fPath As String)
                 If dc < colCount Then
                     Dim cV As String: cV = Trim(fields(dc))
                     If IsNumeric(cV) Then
-                        survWs.Cells(outRow, dc + 1).Value = CDbl(cV)
+                        survWs.Cells(outRow, dc + 1).value = CDbl(cV)
                     Else
-                        survWs.Cells(outRow, dc + 1).Value = cV
+                        survWs.Cells(outRow, dc + 1).value = cV
                     End If
                 End If
             Next dc
@@ -2555,7 +2654,7 @@ Private Function ImportSurveyPlanPdf(ByVal fPath As String) As Boolean
         sibCsv = Left$(fPath, InStrRev(fPath, ".") - 1) & ".csv"
         If Dir(sibCsv) <> "" Then
             ImportSurveyPlanCsv sibCsv
-            Worksheets(SH_SURVEY).Cells(1, 1).Value = fPath
+            Worksheets(SH_SURVEY).Cells(1, 1).value = fPath
         Else
             WriteSurveyFromSections fPath, nSec, aMd, aInc, aAzm, aTvd, ans, aEW
         End If
@@ -3182,19 +3281,19 @@ Private Sub WritePlanSecSheet(ByVal fPath As String, ByVal n As Long, _
 
     Dim ws As Worksheet
     Set ws = EnsureHiddenSheet(SH_PLANSEC)
-    ws.Cells(1, 1).Value = fPath
-    ws.Cells(2, 1).Value = "MD"
-    ws.Cells(2, 2).Value = "INC"
-    ws.Cells(2, 3).Value = "AZM"
-    ws.Cells(2, 4).Value = "TVD"
-    ws.Cells(2, 5).Value = "NS"
-    ws.Cells(2, 6).Value = "EW"
-    ws.Cells(2, 7).Value = "DLS"
-    ws.Cells(2, 8).Value = "BUILD"
-    ws.Cells(2, 9).Value = "TURN"
-    ws.Cells(2, 10).Value = "ANNOT"
-    ws.Cells(2, 11).Value = "AUTONAME"
-    ws.Cells(2, 12).Value = "USERNAME"
+    ws.Cells(1, 1).value = fPath
+    ws.Cells(2, 1).value = "MD"
+    ws.Cells(2, 2).value = "INC"
+    ws.Cells(2, 3).value = "AZM"
+    ws.Cells(2, 4).value = "TVD"
+    ws.Cells(2, 5).value = "NS"
+    ws.Cells(2, 6).value = "EW"
+    ws.Cells(2, 7).value = "DLS"
+    ws.Cells(2, 8).value = "BUILD"
+    ws.Cells(2, 9).value = "TURN"
+    ws.Cells(2, 10).value = "ANNOT"
+    ws.Cells(2, 11).value = "AUTONAME"
+    ws.Cells(2, 12).value = "USERNAME"
     If n < 1 Then Exit Sub
     Dim arr() As Variant
     Dim i As Long
@@ -3220,13 +3319,13 @@ Private Sub WriteSurveyFromSections(ByVal fPath As String, ByVal n As Long, _
         ByRef aTvd() As Double, ByRef ans() As Double, ByRef aEW() As Double)
     Dim ws As Worksheet
     Set ws = EnsureHiddenSheet(SH_SURVEY)
-    ws.Cells(1, 1).Value = fPath
-    ws.Cells(2, 1).Value = "MD"
-    ws.Cells(2, 2).Value = "INC"
-    ws.Cells(2, 3).Value = "AZI"
-    ws.Cells(2, 4).Value = "TVD"
-    ws.Cells(2, 5).Value = "NS"
-    ws.Cells(2, 6).Value = "EW"
+    ws.Cells(1, 1).value = fPath
+    ws.Cells(2, 1).value = "MD"
+    ws.Cells(2, 2).value = "INC"
+    ws.Cells(2, 3).value = "AZI"
+    ws.Cells(2, 4).value = "TVD"
+    ws.Cells(2, 5).value = "NS"
+    ws.Cells(2, 6).value = "EW"
     If n < 1 Then Exit Sub
     Dim arr() As Variant
     Dim i As Long
@@ -3309,7 +3408,7 @@ NextCom:
     Dim aAuto() As String
     ReDim aAuto(0 To n - 1)
     NamePlanSectionTargets n, aMd, aInc, aAzm, aDls, aBld, aTrn, aAnn, aAuto
-    WritePlanSecSheet CStr(surv.Cells(1, 1).Value), n, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn, aAuto
+    WritePlanSecSheet CStr(surv.Cells(1, 1).value), n, aMd, aInc, aAzm, aTvd, ans, aEW, aDls, aBld, aTrn, aAnn, aAuto
 End Sub
 
 ' ================================================================================
@@ -3361,7 +3460,7 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
         acWs.name = SH_AC
         acWs.Visible = xlSheetVeryHidden
     End If
-    acWs.Cells(1, 1).Value = fPath
+    acWs.Cells(1, 1).value = fPath
 
     Dim pdfText As String: pdfText = ExtractPdfText(fPath)
 
@@ -3409,10 +3508,10 @@ Public Sub ImportAntiCollisionFile(ByVal fPath As String, _
 
     ' Write to hidden sheet in one block. Cells.Clear above already dropped
     ' the previous well's rows, so nothing from the last report remains.
-    acWs.Cells(2, 1).Value = "Offset Well - Wellbore - Design"
-    acWs.Cells(2, 2).Value = "Ref MD (m)"
-    acWs.Cells(2, 3).Value = "Between Centres (m)"
-    acWs.Cells(2, 4).Value = "Separation Factor"
+    acWs.Cells(2, 1).value = "Offset Well - Wellbore - Design"
+    acWs.Cells(2, 2).value = "Ref MD (m)"
+    acWs.Cells(2, 3).value = "Between Centres (m)"
+    acWs.Cells(2, 4).value = "Separation Factor"
     Dim i As Long
     If nHits > 0 Then
         Dim acArr() As Variant
@@ -3642,10 +3741,10 @@ Private Sub WriteAcConcerns(nHits As Long, aWell() As String, _
 
         For i = 0 To nShow - 1
             r = firstRow + i
-            ws.Cells(r, 2).MergeArea.Cells(1, 1).Value = sWell(i)
-            ws.Cells(r, 4).Value = sSF(i):  ws.Cells(r, 4).numberFormat = "0.000"
-            ws.Cells(r, 5).Value = sBC(i):  ws.Cells(r, 5).numberFormat = "0.00"
-            ws.Cells(r, 6).Value = sMD(i):  ws.Cells(r, 6).numberFormat = "0.00"
+            ws.Cells(r, 2).MergeArea.Cells(1, 1).value = sWell(i)
+            ws.Cells(r, 4).value = sSF(i):  ws.Cells(r, 4).numberFormat = "0.000"
+            ws.Cells(r, 5).value = sBC(i):  ws.Cells(r, 5).numberFormat = "0.00"
+            ws.Cells(r, 6).value = sMD(i):  ws.Cells(r, 6).numberFormat = "0.00"
             ws.Range(ws.Cells(r, 2), ws.Cells(r, 6)).Interior.Color = AcBandColor(sSF(i))
         Next i
     End If
@@ -4102,7 +4201,7 @@ Private Function ParseAcSummary(pdfText As String, aWell() As String, _
 
         Dim mdMs As Object: Set mdMs = reMD.Execute(Ln)
         If mdMs.Count < 2 Then GoTo NextAcLine
-        Dim refMdVal As Double: refMdVal = CDbl(Replace(mdMs(0).Value, ",", ""))
+        Dim refMdVal As Double: refMdVal = CDbl(Replace(mdMs(0).value, ",", ""))
 
         ' Clip to text after the SECOND comma-MD (the OffsetMD).
         Dim lastMd As Object: Set lastMd = mdMs(1)
@@ -4158,7 +4257,7 @@ Private Function ExtractNums(s As String, nums() As Double) As Long
     Dim ms As Object: Set ms = re.Execute(s)
     Dim m As Object
     For Each m In ms
-        Dim t As String: t = Replace(m.Value, ",", "")
+        Dim t As String: t = Replace(m.value, ",", "")
         nums(n) = CDbl(t): n = n + 1
         If n > 50 Then Exit For
     Next m
@@ -4241,7 +4340,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
     For c = 0 To 4
         Set cell = AcSetupCell(ws, r, c)
         With cell
-            .Value = hdrs(c)
+            .value = hdrs(c)
             .Interior.Color = cTeal()
             .Font.Color = cBlk()
             .Font.bold = True
@@ -4269,7 +4368,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
         ws.rows(r).rowHeight = 20
         With ws.Range(ws.Cells(r, BASE_COL), ws.Cells(r, BASE_COL + AC_COLS - 1))
             .Merge
-            .Value = "  No data  --  use Import AC button to load"
+            .value = "  No data  --  use Import AC button to load"
             .Interior.Color = cBg()
             .Font.Color = cDk()
             .Font.name = "Consolas"
@@ -4305,7 +4404,7 @@ Public Sub BuildAcTable(nHits As Long, aRefMD() As Double, aBetween() As Double,
             For c = 0 To 4
                 Set cell = AcSetupCell(ws, r, c)
                 With cell
-                    .Value = vals(c)
+                    .value = vals(c)
                     .Interior.Color = rowBg
                     If c = 3 Or c = 4 Then
                         .Font.Color = riskFg
@@ -4368,7 +4467,7 @@ Private Sub UpdateImportPathDisplay(shName As String)
         Dim btnArea As Range: Set btnArea = anchor.MergeArea
         Dim pathCell As Range
         Set pathCell = btnArea.Cells(1, btnArea.Columns.Count).Offset(0, 1)
-        pathCell.MergeArea.Cells(1, 1).Value = GetImportPath(shName)
+        pathCell.MergeArea.Cells(1, 1).value = GetImportPath(shName)
     End If
     On Error GoTo 0
 End Sub
@@ -4435,6 +4534,157 @@ NextAc:
     Next r
     BuildAcTable nHits, aRefMD, aBetween, aSF
 End Sub
+
+' Surgically add the "Sync Surveys" row + button to Setup!J31:R31 without
+' running RebuildSetup or touching any user data, notes, crew, plans, or AC.
+Public Sub EnsureSurveySyncButton()
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    Dim cL As Long: cL = C_CRL
+    Dim cR As Long: cR = C_LAST
+    Dim cBtnEnd As Long: cBtnEnd = cL + 2
+    Dim cPath As Long: cPath = cL + 3
+    Dim r As Long: r = 31
+    On Error GoTo Fail
+
+    Set ws = ThisWorkbook.Worksheets(SH_SETUP)
+    wasProt = SheetUnprotectForVba(ws)
+
+    Dim existingText As String
+    On Error Resume Next
+    existingText = Trim$(CStr(ws.Cells(r, cPath).value & ""))
+    On Error GoTo Fail
+
+    ws.rows(r).rowHeight = 20
+    With ws.Range(ws.Cells(r - 1, cL), ws.Cells(r - 1, cR)).Borders(xlEdgeBottom)
+        .LineStyle = xlContinuous: .Color = RGB(230, 230, 230): .Weight = xlHairline
+    End With
+
+    MrgCell ws, r, cL, cBtnEnd, "", cWh(), cBlk(), False, 8, xlHAlignCenter
+    MrgCell ws, r, cPath, cR, existingText, cWh(), cDk(), False, 7, xlHAlignLeft
+    With ws.Range(ws.Cells(r, cL), ws.Cells(r, cR))
+        .Borders(xlEdgeLeft).LineStyle = xlContinuous: .Borders(xlEdgeLeft).Color = cMed()
+        .Borders(xlEdgeRight).LineStyle = xlContinuous: .Borders(xlEdgeRight).Color = cMed()
+        .Borders(xlEdgeBottom).LineStyle = xlContinuous: .Borders(xlEdgeBottom).Color = cMed()
+    End With
+
+    On Error Resume Next
+    ws.names("OC_ImpSurvRow").Delete
+    On Error GoTo Fail
+    ws.names.Add name:="OC_ImpSurvRow", RefersToR1C1:="=R" & r & "C" & cL
+
+    Dim prevWb As Workbook, prevSheet As Object, prevScreen As Boolean
+    Dim prevWinState As Long, hasWin As Boolean
+    prevScreen = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    On Error Resume Next
+    Set prevWb = Application.ActiveWorkbook
+    Set prevSheet = ThisWorkbook.ActiveSheet
+    hasWin = (ThisWorkbook.Windows.Count > 0)
+    If hasWin Then
+        prevWinState = ThisWorkbook.Windows(1).WindowState
+        If prevWinState = xlMinimized Then ThisWorkbook.Windows(1).WindowState = xlNormal
+    End If
+    ThisWorkbook.Activate
+    ws.Activate
+    On Error GoTo Fail
+
+    Dim shp As Shape
+    For Each shp In ws.Shapes
+        If shp.name = "BtnSyncSurveys" Then shp.Delete
+    Next shp
+
+    Dim survCell As Range: Set survCell = ws.Cells(r, cL).MergeArea
+    Dim bSV As Button
+    Set bSV = ws.Buttons.Add(survCell.Left, survCell.Top, survCell.width, survCell.Height)
+    bSV.name = "BtnSyncSurveys"
+    bSV.OnAction = "'" & ThisWorkbook.name & "'!SyncWellSeekerSurveys"
+    bSV.Placement = xlMoveAndSize
+    StyleBtn bSV, "Sync Surveys", cWh(), cMed(), cBlk(), False
+
+    On Error Resume Next
+    If Not prevSheet Is Nothing Then prevSheet.Activate
+    If Not prevWb Is Nothing Then prevWb.Activate
+    If hasWin And prevWinState = xlMinimized Then ThisWorkbook.Windows(1).WindowState = prevWinState
+    Application.ScreenUpdating = prevScreen
+    On Error GoTo Fail
+
+    SheetReprotectAfterVba ws, wasProt
+    Exit Sub
+Fail:
+    On Error Resume Next
+    If Not prevSheet Is Nothing Then prevSheet.Activate
+    If Not prevWb Is Nothing Then prevWb.Activate
+    If hasWin And prevWinState = xlMinimized Then ThisWorkbook.Windows(1).WindowState = prevWinState
+    Application.ScreenUpdating = prevScreen
+    SheetReprotectAfterVba ws, wasProt
+End Sub
+
+' Shape only. Does not write Setup cells, so it is safe on the Field workbook.
+Public Sub EnsureBrowserSyncButton()
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim leftPos As Double
+    Dim topPos As Double
+    Dim widthPos As Double
+    Dim heightPos As Double
+    Dim host As Range
+    Dim anchor As Shape
+    Dim prevScreen As Boolean
+    Dim prevSheet As Object
+    Dim btn As Button
+    On Error GoTo Fail
+
+    prevScreen = Application.ScreenUpdating
+    Set ws = ThisWorkbook.Worksheets(SH_SETUP)
+    On Error Resume Next
+    Set prevSheet = ThisWorkbook.ActiveSheet
+    ThisWorkbook.Activate
+    ws.Activate
+    On Error GoTo Fail
+    For Each shp In ws.Shapes
+        If shp.name = "BtnBrowserSync" Then shp.Delete
+    Next shp
+
+    leftPos = 12
+    topPos = 8
+    widthPos = 150
+    heightPos = 20
+    On Error Resume Next
+    Set host = ws.Range("OC_BrowserSyncRow").MergeArea
+    Set anchor = ws.Shapes("BtnSyncSurveys")
+    On Error GoTo Fail
+    If Not host Is Nothing Then
+        leftPos = host.Left
+        topPos = host.Top
+        widthPos = host.width
+        heightPos = host.Height
+    ElseIf Not anchor Is Nothing Then
+        leftPos = anchor.Left + anchor.width + 6
+        topPos = anchor.Top
+        widthPos = anchor.width
+        heightPos = anchor.Height
+    End If
+
+    Application.ScreenUpdating = False
+    Set btn = ws.Buttons.Add(leftPos, topPos, widthPos, heightPos)
+    btn.name = "BtnBrowserSync"
+    btn.OnAction = "'" & ThisWorkbook.name & "'!BrowserHandoff_ApplyPending"
+    btn.Placement = xlMoveAndSize
+    StyleBtn btn, "Sync from Browser", cWh(), cMed(), cBlk(), False
+    On Error Resume Next
+    If Not prevSheet Is Nothing Then prevSheet.Activate
+    Application.ScreenUpdating = prevScreen
+    Exit Sub
+Fail:
+    On Error Resume Next
+    If Not prevSheet Is Nothing Then prevSheet.Activate
+    Application.ScreenUpdating = prevScreen
+End Sub
+
+
+
+
 
 
 

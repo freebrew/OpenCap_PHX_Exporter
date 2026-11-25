@@ -12,7 +12,7 @@ describe("Demo workbook", () => {
     expect(mapped.importLog.formulaCount).toBeGreaterThan(20_000);
     expect(mapped.importLog.sharedFormulaCount).toBeGreaterThan(12_000);
     expect(mapped.importLog.arrayFormulaCount).toBe(16);
-    expect(mapped.importLog.definedNameCount).toBe(987);
+    expect(mapped.importLog.definedNameCount).toBe(988);
     expect(mapped.importLog.rejectedExternalRefs).toHaveLength(0);
     expect(mapped.sidecar.veryHiddenSheets).toContain("_OC_Job");
     const slidesheet = Object.values(mapped.workbook.sheets).find((sheet) => sheet.name === "Slidesheet");

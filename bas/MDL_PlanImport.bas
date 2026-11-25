@@ -78,11 +78,16 @@ End Function
 Private Function ParsePlannedSurveys(ByVal pdfText As String, _
         ByRef md() As Double, ByRef inc() As Double, ByRef azm() As Double, _
         ByRef tvd() As Double, ByRef ns() As Double, ByRef ew() As Double) As Long
-    Dim lines() As String, i As Long, nn As Long, n As Long
+    Dim lines() As String, i As Long, nn As Long, n As Long, k As Long
     Dim nums() As Double, lastMd As Double
     Dim inSurvey As Boolean, Ln As String
+    Dim rowNums() As Variant, rowCnt() As Long
+    Dim mcN() As Double, mcE() As Double
+    Dim bestD As Double, candD As Double, bestN As Double, bestE As Double
+    Dim rn As Variant
     ReDim md(0 To 800): ReDim inc(0 To 800): ReDim azm(0 To 800)
     ReDim tvd(0 To 800): ReDim ns(0 To 800): ReDim ew(0 To 800)
+    ReDim rowNums(0 To 800): ReDim rowCnt(0 To 800)
     lines = Split(pdfText, Chr$(10))
     lastMd = -1#
     n = 0
@@ -101,24 +106,62 @@ Private Function ParsePlannedSurveys(ByVal pdfText As String, _
             GoTo NextLn
         End If
         If Not inSurvey Then GoTo NextLn
-        nn = ExtractNums(Ln, nums)
+        nn = ExtractNums(SplitGluedNums(Ln), nums)
         If nn >= 8 Then
             If nums(0) + 0.001 < lastMd Then GoTo NextLn
             If nums(1) < -0.01 Or nums(1) > 180.01 Then GoTo NextLn
             If nums(3) < -50# Or nums(3) > 12000# Then GoTo NextLn
             If n > 800 Then Exit For
-            ' MD / Inc / Azi / TVD are the first four numbers on both PostScript
-            ' and Crystal layouts. Do not take NS/EW from the PDF: Crystal glues
-            ' Subsea (KB-TVD) onto +E/-W so nums(5)/nums(6) become 0 / -TVDSS.
             md(n) = nums(0): inc(n) = nums(1): azm(n) = nums(2): tvd(n) = nums(3)
             ns(n) = 0#: ew(n) = 0#
+            rowNums(n) = nums
+            rowCnt(n) = nn
             lastMd = nums(0)
             n = n + 1
         End If
 NextLn:
     Next i
-    RebuildPlanNE n, md, inc, azm, ns, ew
+    If n > 0 Then
+        ReDim mcN(0 To n - 1): ReDim mcE(0 To n - 1)
+        RebuildPlanNE n, md, inc, azm, mcN, mcE
+        ' Prefer Compass's exact printed N/E when an adjacent token pair on the
+        ' line matches min-curvature N/E within 1 m (handles PostScript, Crystal
+        ' glued columns, and missing-Subsea rows); otherwise fall back to MC.
+        For i = 0 To n - 1
+            rn = rowNums(i)
+            bestD = 1E+30: bestN = mcN(i): bestE = mcE(i)
+            For k = 4 To rowCnt(i) - 2
+                candD = Sqr((CDbl(rn(k)) - mcN(i)) * (CDbl(rn(k)) - mcN(i)) _
+                          + (CDbl(rn(k + 1)) - mcE(i)) * (CDbl(rn(k + 1)) - mcE(i)))
+                If candD < bestD Then
+                    bestD = candD
+                    bestN = CDbl(rn(k))
+                    bestE = CDbl(rn(k + 1))
+                End If
+            Next k
+            If bestD <= 1# Then
+                ns(i) = bestN: ew(i) = bestE
+            Else
+                ns(i) = mcN(i): ew(i) = mcE(i)
+            End If
+        Next i
+    End If
     ParsePlannedSurveys = n
+End Function
+
+' Crystal Reports glues DLS + Subsea + NS without spaces (e.g. "0.000891.820.00"
+' or "4.500-1,837.00-337.46"). Insert spaces between adjacent decimal tokens.
+Private Function SplitGluedNums(ByVal s As String) As String
+    Dim re As Object, prev As String, cur As String
+    Set re = CreateObject("VBScript.RegExp")
+    re.Global = True
+    re.Pattern = "(\.\d{2,3})(-?\d{1,6}(?:,\d{3})*\.\d{2,3})"
+    cur = s
+    Do
+        prev = cur
+        cur = re.Replace(cur, "$1 $2")
+    Loop While cur <> prev
+    SplitGluedNums = cur
 End Function
 
 Private Function ParseFormations(ByVal pdfText As String, _
@@ -237,7 +280,7 @@ Private Function ExtractNums(ByVal s As String, ByRef nums() As Double) As Long
     re.Pattern = "-?\d{1,6}(?:,\d{3})*\.\d{2,3}"
     Set ms = re.Execute(s)
     For Each m In ms
-        t = Replace(m.Value, ",", "")
+        t = Replace(m.value, ",", "")
         nums(n) = CDbl(t)
         n = n + 1
         If n > 50 Then Exit For
@@ -411,6 +454,8 @@ Private Function LithologyForNorm(ByVal key As String) As String
             End If
     End Select
 End Function
+
+
 
 
 

@@ -83,7 +83,7 @@ Public Sub EnsureCostsFormButton()
     costW = 55#
     topPt = fullBtn.Top
     hPt = fullBtn.Height
-    fullRight = fullBtn.Left + fullBtn.Width
+    fullRight = fullBtn.Left + fullBtn.width
 
     ' Shift REFRESH right to make room
     refBtn.Left = fullRight + costW
@@ -145,13 +145,13 @@ Public Function CostsDateMap() As Object
     End If
 
     For r = COSTS_FIRST_ROW To COSTS_LAST_ROW
-        If Len(Trim$(CStr(ws.Cells(r, COSTS_COL_DAILY).Value & ""))) = 0 Then GoTo NextRow
-        dSerial = ParseCostDateLocal(ws.Cells(r, COSTS_COL_DATE).Value)
+        If Len(Trim$(CStr(ws.Cells(r, COSTS_COL_DAILY).value & ""))) = 0 Then GoTo NextRow
+        dSerial = ParseCostDateLocal(ws.Cells(r, COSTS_COL_DATE).value)
         If dSerial = 0 Then dSerial = ParseCostDateLocal(ws.Cells(r, COSTS_COL_DATE).Value2)
         If dSerial = 0 And seed > 0 Then dSerial = CLng(seed) + (r - COSTS_FIRST_ROW)
         If dSerial > 0 Then
-            If IsNumeric(ws.Cells(r, COSTS_COL_DAILY).Value) Then
-                dict(CStr(dSerial)) = CDbl(ws.Cells(r, COSTS_COL_DAILY).Value)
+            If IsNumeric(ws.Cells(r, COSTS_COL_DAILY).value) Then
+                dict(CStr(dSerial)) = CDbl(ws.Cells(r, COSTS_COL_DAILY).value)
             End If
         End If
 NextRow:
@@ -178,9 +178,9 @@ Public Function CostsFindRow(ByVal dateSerial As Long) As Long
     End If
 
     For r = COSTS_FIRST_ROW To COSTS_LAST_ROW
-        dSerial = ParseCostDateLocal(ws.Cells(r, COSTS_COL_DATE).Value)
+        dSerial = ParseCostDateLocal(ws.Cells(r, COSTS_COL_DATE).value)
         If dSerial = 0 Then dSerial = ParseCostDateLocal(ws.Cells(r, COSTS_COL_DATE).Value2)
-        If dSerial = 0 And seed > 0 And Len(Trim$(CStr(ws.Cells(r, COSTS_COL_DAILY).Value & ""))) > 0 Then
+        If dSerial = 0 And seed > 0 And Len(Trim$(CStr(ws.Cells(r, COSTS_COL_DAILY).value & ""))) > 0 Then
             dSerial = CLng(seed) + (r - COSTS_FIRST_ROW)
         End If
         If dSerial = dateSerial Then
@@ -207,9 +207,9 @@ Public Sub CostsGetDay(ByVal dateSerial As Long, _
     On Error GoTo 0
 
     found = True
-    daily = ws.Cells(r, COSTS_COL_DAILY).Value
-    total = ws.Cells(r, COSTS_COL_TOTAL).Value
-    batch = ws.Cells(r, COSTS_COL_BATCH).Value
+    daily = ws.Cells(r, COSTS_COL_DAILY).value
+    total = ws.Cells(r, COSTS_COL_TOTAL).value
+    batch = ws.Cells(r, COSTS_COL_BATCH).value
 End Sub
 
 ' Write daily cost (and optional batch) for an existing or new trailing day row.
@@ -232,7 +232,7 @@ Public Function CostsSetDay(ByVal dateSerial As Long, ByVal daily As Double, _
         ' Append on first empty daily cell in the day block
         firstEmpty = COSTS_FIRST_ROW
         Do While firstEmpty <= COSTS_LAST_ROW
-            If Len(Trim$(CStr(ws.Cells(firstEmpty, COSTS_COL_DAILY).Value & ""))) = 0 Then Exit Do
+            If Len(Trim$(CStr(ws.Cells(firstEmpty, COSTS_COL_DAILY).value & ""))) = 0 Then Exit Do
             firstEmpty = firstEmpty + 1
         Loop
         If firstEmpty > COSTS_LAST_ROW Then Exit Function
@@ -244,18 +244,18 @@ Public Function CostsSetDay(ByVal dateSerial As Long, ByVal daily As Double, _
     On Error GoTo FailWrite
 
     ws.Cells(r, COSTS_COL_DAILY).numberFormat = "$#,##0.00"
-    ws.Cells(r, COSTS_COL_DAILY).Value = daily
+    ws.Cells(r, COSTS_COL_DAILY).value = daily
 
     If isNew Then
         prevSerial = 0
         If r > COSTS_FIRST_ROW Then
-            prevSerial = ParseCostDateLocal(ws.Cells(r - 1, COSTS_COL_DATE).Value)
+            prevSerial = ParseCostDateLocal(ws.Cells(r - 1, COSTS_COL_DATE).value)
             If prevSerial = 0 Then prevSerial = ParseCostDateLocal(ws.Cells(r - 1, COSTS_COL_DATE).Value2)
         End If
         With ws.Cells(r, COSTS_COL_DATE).MergeArea.Cells(1, 1)
             .numberFormat = "[$-F800]dddd, mmmm dd, yyyy"
             If r = COSTS_FIRST_ROW Or prevSerial = 0 Or dateSerial <> prevSerial + 1 Then
-                .Value = dateSerial
+                .value = dateSerial
             Else
                 .formula = "=IF(E" & r & "<>"""",C" & (r - 1) & "+1,"""")"
             End If
@@ -271,7 +271,7 @@ Public Function CostsSetDay(ByVal dateSerial As Long, ByVal daily As Double, _
         End If
     End If
 
-    ws.Cells(r, COSTS_COL_BATCH).Value = Trim$(batchText)
+    ws.Cells(r, COSTS_COL_BATCH).value = Trim$(batchText)
 
     On Error Resume Next
     ws.Calculate

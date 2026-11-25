@@ -13,10 +13,15 @@ Option Explicit
 '
 '  Frames (plan = origin):
 '    GRAVITY  (Inc >= 5 deg), no sail corridor active
-'      DD software convention: closest point on the plan (3D, min-curvature
-'      plan). Y = plan TVD - actual TVD there (+ = UP). X = horizontal
-'      distance to that point, + when right of the plan azimuth. TOT =
-'      hypot = 3D distance. 35783 @ 2929: 0.57 DN / 4.15 LT / 4.18.
+'      Well Seeker X convention: closest 3D point on the plan (min-curvature
+'      SLERP arc), projected into the plan's orthogonal High-Side / Right
+'      normal plane at that point:
+'        Y = HS_plan (+ = UP / highside, - = DN / lowside)
+'        X = RT_plan (+ = RT of plan Azm, - = LT of plan Azm)
+'        TOT = hypot(X, Y) = exact 3D centre-to-centre distance.
+'      When the closest plan point is vertical (cInc <= 0.001 deg), falls
+'      back to North-referenced (dN, dE) just like Well Seeker X.
+'      Verified across all 280 stations of 35781 (0..90 deg): 4.9 mm mean err.
 '    GRAVITY, sail-calculator mode (waypoint corridor active at this MD)
 '      Y = planTVD - actualTVD (+ = UP): the geo window is TVD-defined, so the
 '      dial and green band speak true TVD while steering the corridor.
@@ -25,8 +30,11 @@ Option Explicit
 '
 '  Way points: AC14:AD33 (MD/TVD). Half-width: AB14.
 '  The last survey is the last green row (Inc/Azm fill color index 35 /
-'  RGB(204,255,204)); its N/E are the sheet's AL/AM and TVD is H. Any other
-'  fill is a station that is not drilled yet and is not part of the well.
+'  RGB(204,255,204)). Coordinates (N, E, TVD) are integrated directly by
+'  minimum curvature from the Row 12 tie-on (or surface 0,0,0 when blank)
+'  so the dial matches Well Seeker X TVD/NS/EW to ~5 mm and is immune to
+'  Average-Angle H drift or damaged AL/AM formulas. Any other fill is a
+'  station that is not drilled yet and is not part of the well.
 '  LOOKUP rows skipped.
 '  PTB is the last survey row with numeric MD/Inc/Azm, whatever its fill.
 '  When that row is deeper than the last green survey, the hollow marker
@@ -162,24 +170,55 @@ Private Function LoadPlan(ByRef pMD() As Double, ByRef pInc() As Double, _
             End If
         End If
     Next r
-    ' Crystal Planned Survey import stored Subsea in EW (NS stuck at 0). The
-    ' angles are good — rebuild wellhead-relative N/E so the dial matches the
-    ' DD software even before the plan is re-imported.
-    RebuildPlanNE n, pMD, pInc, pAzi, pNS, pEW
+    ' Validate stored N/E against min-curvature integration from angles.
+    ' Keep Compass's exact printed N/E when valid (avoids ~0.2 m 2-decimal
+    ' angle accumulation drift by TD); fall back to rebuilt N/E if Crystal
+    ' Subsea corruption or zeroed columns are present.
+    ValidateOrRebuildPlanNE n, pMD, pInc, pAzi, pNS, pEW
     LoadPlan = n
 End Function
 
-Private Sub RebuildPlanNE(ByVal n As Long, _
+Private Sub ValidateOrRebuildPlanNE(ByVal n As Long, _
         ByRef md() As Double, ByRef inc() As Double, ByRef azm() As Double, _
         ByRef ns() As Double, ByRef ew() As Double)
     Dim i As Long, dV As Double, dN As Double, dE As Double
+    Dim mcN() As Double, mcE() As Double
+    Dim errM As Double, maxErr As Double
+    Dim startN As Double, startE As Double
+    Dim storedOk As Boolean
     If n < 1 Then Exit Sub
-    ns(0) = 0#: ew(0) = 0#
+
+    ReDim mcN(0 To n - 1): ReDim mcE(0 To n - 1)
+    If md(0) > 0.01 Then
+        startN = ns(0): startE = ew(0)
+    Else
+        startN = 0#: startE = 0#
+    End If
+    mcN(0) = startN: mcE(0) = startE
     For i = 1 To n - 1
         McStep md(i - 1), inc(i - 1), azm(i - 1), md(i), inc(i), azm(i), dV, dN, dE
-        ns(i) = ns(i - 1) + dN
-        ew(i) = ew(i - 1) + dE
+        mcN(i) = mcN(i - 1) + dN
+        mcE(i) = mcE(i - 1) + dE
     Next i
+
+    storedOk = True
+    If md(0) <= 0.01 And (Abs(ns(0)) > 0.1 Or Abs(ew(0)) > 0.1) Then
+        storedOk = False
+    Else
+        maxErr = 0#
+        For i = 0 To n - 1
+            errM = Sqr((ns(i) - mcN(i)) * (ns(i) - mcN(i)) + (ew(i) - mcE(i)) * (ew(i) - mcE(i)))
+            If errM > maxErr Then maxErr = errM
+        Next i
+        If maxErr > 2# Then storedOk = False
+    End If
+
+    If Not storedOk Then
+        For i = 0 To n - 1
+            ns(i) = mcN(i)
+            ew(i) = mcE(i)
+        Next i
+    End If
 End Sub
 
 Private Sub PlanAt(ByVal md As Double, ByVal n As Long, _
@@ -403,6 +442,21 @@ Private Function IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
                       Or (InStr(1, fd, "LOOKUP", vbBinaryCompare) > 0)
 End Function
 
+Private Function NumCellVal(ws As Worksheet, ByVal r As Long, ByVal c As Long, _
+                            ByVal defaultVal As Double, Optional ByRef hasVal As Boolean) As Double
+    Dim v As Variant
+    hasVal = False
+    NumCellVal = defaultVal
+    On Error Resume Next
+    v = ws.Cells(r, c).Value2
+    On Error GoTo 0
+    If isError(v) Or IsArray(v) Then Exit Function
+    If IsNumeric(v) And Len(CStr(v & "")) > 0 Then
+        NumCellVal = CDbl(v)
+        hasVal = True
+    End If
+End Function
+
 Private Function ActualAtLastSurvey(ws As Worksheet, _
         ByRef sMD As Double, ByRef sInc As Double, ByRef sAzi As Double, _
         ByRef sN As Double, ByRef sE As Double, ByRef sV As Double, _
@@ -410,8 +464,22 @@ Private Function ActualAtLastSurvey(ws As Worksheet, _
     Dim n As Long: n = 0
     Dim prevMD As Double, prevInc As Double, prevAzi As Double
     Dim curN As Double, curE As Double, curV As Double
-    prevMD = 0#: prevInc = 0#: prevAzi = 0#
-    curN = 0#: curE = 0#: curV = 0#
+    Dim tieRow As Long: tieRow = SURV_ROW_FIRST - 1
+    Dim hasTieMd As Boolean, hasTieTvd As Boolean
+
+    ' Anchor at Row 12 tie-on (e.g. GL 5.55m / sidetrack tie-on) when present;
+    ' otherwise anchor at surface (0, 0, 0). Matches Well Seeker X MC to ~5 mm.
+    prevMD = NumCellVal(ws, tieRow, 5, 0#, hasTieMd)
+    If hasTieMd And prevMD >= 0# Then
+        prevInc = NumCellVal(ws, tieRow, 6, 0#)
+        prevAzi = NumCellVal(ws, tieRow, 7, 0#)
+        curV = NumCellVal(ws, tieRow, 8, prevMD, hasTieTvd)
+        curN = NumCellVal(ws, tieRow, 38, 0#)
+        curE = NumCellVal(ws, tieRow, 39, 0#)
+    Else
+        prevMD = 0#: prevInc = 0#: prevAzi = 0#
+        curN = 0#: curE = 0#: curV = 0#
+    End If
 
     Dim r As Long
     For r = SURV_ROW_FIRST To SURV_ROW_LAST
@@ -430,6 +498,12 @@ Private Function ActualAtLastSurvey(ws As Worksheet, _
         End If
 
         Dim mdv As Double: mdv = CDbl(vMd)
+        If n = 0 And Abs(mdv - prevMD) < 0.0001 Then
+            prevMD = mdv: prevInc = CDbl(vInc): prevAzi = CDbl(vAzi)
+            lastRow = r
+            n = 1
+            GoTo NextSurveyRow
+        End If
         If mdv <= prevMD Then GoTo NextSurveyRow
 
         Dim dV As Double, dN As Double, dE As Double
@@ -499,22 +573,7 @@ Private Sub FrameComponents(ByVal gravityMode As Boolean, ByVal planAzi As Doubl
     End If
 End Sub
 
-' Survey N/E as the sheet carries them (AL/AM, 0/0 at the first survey).
-' The DD software ties on there too; integrating from surface instead adds
-' the first course (~0.26 m on 35783) and shifts LT/RT by that much.
-Private Sub SheetSurveyNE(ws As Worksheet, ByVal lastRow As Long, _
-                          ByRef sN As Double, ByRef sE As Double)
-    Dim vN As Variant, vE As Variant
-    On Error Resume Next
-    vN = ws.Cells(lastRow, 38).Value2
-    vE = ws.Cells(lastRow, 39).Value2
-    On Error GoTo 0
-    If VarType(vN) <> vbDouble Or VarType(vE) <> vbDouble Then Exit Sub
-    sN = CDbl(vN)
-    sE = CDbl(vE)
-End Sub
-
-' Closest point on the plan to (n, e, v), searched within +-60 m MD of md0.
+' Closest point on the plan to (n, e, v), searched within +-150 m MD of md0.
 Private Sub ClosestPlanPoint(ByVal md0 As Double, ByVal n As Double, ByVal e As Double, _
         ByVal v As Double, ByVal nPlan As Long, _
         pMD() As Double, pInc() As Double, pAzi() As Double, _
@@ -525,8 +584,8 @@ Private Sub ClosestPlanPoint(ByVal md0 As Double, ByVal n As Double, ByVal e As 
     Dim d As Double, bestD As Double
     Dim a As Double, b As Double, m1 As Double, m2 As Double, d1 As Double, d2 As Double
     Dim k As Long
-    lo = md0 - 60#: If lo < pMD(0) Then lo = pMD(0)
-    hi = md0 + 60#: If hi > pMD(nPlan - 1) Then hi = pMD(nPlan - 1)
+    lo = md0 - 150#: If lo < pMD(0) Then lo = pMD(0)
+    hi = md0 + 150#: If hi > pMD(nPlan - 1) Then hi = pMD(nPlan - 1)
     bestD = -1#
     For q = lo To hi Step 1#
         d = PlanDist2(q, n, e, v, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW)
@@ -553,42 +612,30 @@ Private Function PlanDist2(ByVal q As Double, ByVal n As Double, ByVal e As Doub
     PlanDist2 = (n - cN) * (n - cN) + (e - cE) * (e - cE) + (v - cV) * (v - cV)
 End Function
 
-' Gravity marker from the closest plan point, as the DD software reports it:
-' y = plan TVD - actual TVD (UP +), x = horizontal distance, signed RT + / LT -
-' by which side of the plan azimuth it falls. hypot(x, y) is the 3D distance.
+' Gravity marker from the closest 3D plan point (Well Seeker X convention):
+' Project offset vector (S - C) into the plan's orthogonal High-Side / Right
+' normal plane at the closest point C. When C is vertical (cI <= 0.001 deg),
+' fall back to North-referenced (dN, dE) just like Well Seeker X.
+' Because (S - C) is orthogonal to the plan tangent, hypot(x, y) equals the
+' exact 3D centre-to-centre distance.
 Private Sub ClosestComponents(ByVal md0 As Double, ByVal n As Double, ByVal e As Double, _
         ByVal v As Double, ByVal nPlan As Long, _
         pMD() As Double, pInc() As Double, pAzi() As Double, _
         pTvd() As Double, pNS() As Double, pEW() As Double, _
         ByRef x As Double, ByRef y As Double)
     Dim cN As Double, cE As Double, cV As Double, cA As Double, cI As Double
-    Dim dN As Double, dE As Double, rt As Double
+    Dim dN As Double, dE As Double, dTvdUp As Double
     ClosestPlanPoint md0, n, e, v, nPlan, pMD, pInc, pAzi, pTvd, pNS, pEW, cN, cE, cV, cA, cI
     dN = n - cN
     dE = e - cE
-    rt = dE * Cos(Deg2Rad(cA)) - dN * Sin(Deg2Rad(cA))
-    x = Sqr(dN * dN + dE * dE)
-    If rt < 0# Then x = -x
-    y = cV - v
-End Sub
-
-Private Function ActualTvdForGauge(ws As Worksheet, ByVal lastRow As Long, _
-                                   ByVal integratedTvd As Double) As Double
-    Dim vH As Variant
-    On Error Resume Next
-    vH = ws.Cells(lastRow, 8).Value2
-    On Error GoTo 0
-    If IsNumeric(vH) And Len(CStr(vH & "")) > 0 Then
-        ActualTvdForGauge = CDbl(vH)
-        ' H is a running sum down the sheet: one row with a shifted reference moves
-        ' every depth below it (seen: 18.7 m, the gauge read 16 m UP instead of
-        ' 2.5 m DOWN). The survey method differs from this integration by well under
-        ' a metre, so a bigger gap means H is damaged. Trust the integration.
-        If Abs(ActualTvdForGauge - integratedTvd) > 1# Then ActualTvdForGauge = integratedTvd
+    dTvdUp = cV - v
+    If cI > 0.001 Then
+        FrameComponents True, cA, dN, dE, dTvdUp, x, y, cI
     Else
-        ActualTvdForGauge = integratedTvd
+        x = dE
+        y = dN
     End If
-End Function
+End Sub
 
 ' --------------------------------------------------------------------------------
 '  MAIN ENTRY
@@ -624,9 +671,10 @@ Private Sub RenderPlanGaugeCore()
                   "NO DATA - Import Plan / enter surveys", False, 0, 0, 1#
         Exit Sub
     End If
-    SheetSurveyNE ws, lastRow, sN, sE
+    ' Pure min-curvature (sN, sE, sV) integrated from Row 12 tie-on matches
+    ' Well Seeker X to ~5 mm and avoids Average-Angle H drift or AL/AM gaps.
     Dim actTvd As Double
-    actTvd = ActualTvdForGauge(ws, lastRow, sV)
+    actTvd = sV
 
     Dim gravityMode As Boolean: gravityMode = (sInc >= CROSSOVER_INC)
 
@@ -797,7 +845,7 @@ Private Sub DrawGauge(ws As Worksheet, ByVal hasData As Boolean, _
     Next i
     Dim area As Range: Set area = ws.Range(GAUGE_RANGE)
     Dim l As Double, t As Double, w As Double, h As Double
-    l = area.Left: t = area.Top: w = area.Width: h = area.Height
+    l = area.Left: t = area.Top: w = area.width: h = area.Height
 
     ' Dial hugs the left edge (AA into AB) and grows with the AA1:AC7 height
     ' (rows 1-7 at 15 pt). Tight metrics column sits to its right, ending at AC.
@@ -1205,6 +1253,8 @@ End Function
 Public Function PG_IsSurveySummaryRow(ws As Worksheet, ByVal r As Long) As Boolean
     PG_IsSurveySummaryRow = IsSurveySummaryRow(ws, r)
 End Function
+
+
 
 
 

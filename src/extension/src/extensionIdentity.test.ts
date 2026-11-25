@@ -34,6 +34,7 @@ describe("preview identity", () => {
     expect(source).toContain("version: PREVIEW_VERSION");
     expect(declared.version).toBe(PREVIEW_VERSION);
     expect(declared.key).toBe(PREVIEW_EXTENSION_KEY);
+    expect(declared.permissions).toContain("downloads.open");
     expect(declared.permissions).toContain("nativeMessaging");
     expect(declared.permissions).not.toContain("tabs");
     for (const host of MAIL_HOST_PERMISSIONS) expect(declared.host_permissions).toContain(host);

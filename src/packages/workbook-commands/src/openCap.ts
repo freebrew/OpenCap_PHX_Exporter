@@ -505,7 +505,7 @@ export interface CostDay {
   daily: number;
   /** The running total the sheet's formula shows, summed here so the form can display it. */
   total: number;
-  /** The batch note in column G. */
+  /** The batch note in column H. */
   batch: string;
   row: number;
 }
@@ -521,7 +521,7 @@ export function readCostDays(book: SheetBook): CostDay[] {
     const amount = typeof daily === "number" ? daily : vbaIsNumeric(String(daily)) ? vbaCdbl(String(daily)) : Number.NaN;
     if (Number.isNaN(amount)) continue;
     running += amount;
-    days.push({ date: costDateSerial(book.value(COSTS, row, 3)) || days[0]?.date + (row - COSTS_FIRST) || 0, daily: amount, total: running, batch: cellText(book.value(COSTS, row, 7)), row });
+    days.push({ date: costDateSerial(book.value(COSTS, row, 3)) || days[0]?.date + (row - COSTS_FIRST) || 0, daily: amount, total: running, batch: cellText(book.value(COSTS, row, 8)), row });
   }
   return days;
 }
@@ -535,7 +535,8 @@ export interface CostDayWrite {
 /**
  * CostsSetDay: write one day's cost. An existing date is updated in place; a new date appends
  * a row with the same date formula and running-total formula the CSV sync writes. The batch
- * note lands in column G. False when the date is not a date or the day block is full.
+ * note lands in column H. The running total stays in column G. False when the date is not a
+ * date or the day block is full.
  */
 export function writeCostDay(book: SheetBook, date: number, daily: number, batch: string): CostDayWrite | null {
   if (!book.hasSheet(COSTS) || date <= 0) return null;
@@ -556,17 +557,50 @@ export function writeCostDay(book: SheetBook, date: number, daily: number, batch
   }
   book.setFormat(COSTS, row, 5, FMT_MONEY);
   book.setValue(COSTS, row, 5, daily);
-  book.setValue(COSTS, row, 7, batch.trim());
+  book.setValue(COSTS, row, 8, batch.trim());
   if (added) {
     const dateCell = costCell(book, row, 3);
     book.setFormat(COSTS, dateCell.row, dateCell.col, FMT_COST_DATE);
     const previous = row > COSTS_FIRST ? costDateSerial(book.value(COSTS, row - 1, 3)) : 0;
     if (row === COSTS_FIRST || previous === 0 || date !== previous + 1) book.setValue(COSTS, dateCell.row, dateCell.col, date);
     else book.setFormula(COSTS, dateCell.row, dateCell.col, `=IF(E${row}<>"",C${row - 1}+1,"")`);
-    book.setFormat(COSTS, row, 6, FMT_MONEY);
-    book.setFormula(COSTS, row, 6, row === COSTS_FIRST ? `=IF(ISBLANK(E${row}),"",E${row})` : `=IF(ISBLANK(E${row}),"",SUM($E$${COSTS_FIRST}:E${row}))`);
   }
+  const totalFormula = row === COSTS_FIRST ? `=IF(ISBLANK(E${row}),"",E${row})` : `=IF(ISBLANK(E${row}),"",SUM($E$${COSTS_FIRST}:E${row}))`;
+  if (!sameCostFormula(book.formula(COSTS, row, 7), totalFormula)) {
+    book.setFormat(COSTS, row, 7, FMT_MONEY);
+    book.setFormula(COSTS, row, 7, totalFormula);
+  }
+  bindCostHeadline(book);
   return { added, row };
+}
+
+function sameCostFormula(have: string | null, want: string): boolean {
+  const compact = (value: string) => value.replace(/^=/, "").replace(/\s+/g, "").toUpperCase();
+  return compact(have ?? "") === compact(want);
+}
+
+/**
+ * Data!E3 is one day's cost: the last number in Costs!E, not the array lookup that was
+ * adding the previous day onto it. Costs!E73 uses the same last-number lookup.
+ */
+export function bindCostHeadline(book: SheetBook): boolean {
+  if (!book.hasSheet("Data") || !book.hasSheet(COSTS)) return false;
+  let last = 0;
+  for (let row = COSTS_LAST; row >= COSTS_FIRST; row -= 1) {
+    const daily = book.value(COSTS, row, 5);
+    if (cellText(daily) === "") continue;
+    const amount = typeof daily === "number" ? daily : vbaIsNumeric(String(daily)) ? vbaCdbl(String(daily)) : Number.NaN;
+    if (!Number.isFinite(amount)) continue;
+    last = row;
+    break;
+  }
+  if (last === 0) return false;
+  const before = book.writes.length;
+  const pointed = /COSTS!E(\d+)/i.exec(book.formula("Data", 3, 5) ?? "");
+  if (!pointed || Number(pointed[1]) !== last) book.setFormula("Data", 3, 5, `=IFERROR(Costs!E${last},"")`);
+  const lookup = book.formula(COSTS, 73, 5) ?? "";
+  if (/1\s*\//.test(lookup) || !/9\.9E\+307/i.test(lookup)) book.setFormula(COSTS, 73, 5, "=LOOKUP(9.9E+307,E3:E72)");
+  return book.writes.length > before;
 }
 
 /** SyncCostsSheet: the sheet's own dated costs (kept unless a new job), the CSV days laid over. */
@@ -626,6 +660,7 @@ export function syncCostsSheet(book: SheetBook, newJob: boolean): void {
     book.setFormat(COSTS, row, 7, FMT_MONEY);
     book.setFormula(COSTS, row, 7, `=IF(ISBLANK(E${row}),"",SUM($E$3:E${row}))`);
   }
+  bindCostHeadline(book);
 }
 
 // ---------------------------------------------------------------- Mud Motors On Location

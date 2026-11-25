@@ -53,7 +53,7 @@ function replyResult(reply: HostReply): TransportResult | null {
   return null;
 }
 
-function roundTrip(port: HostPort, message: unknown): Promise<HostReply> {
+function roundTrip(port: HostPort, message: unknown, timeoutMs = 20_000): Promise<HostReply> {
   return new Promise((resolve, reject) => {
     const finish = () => {
       clearTimeout(timer);
@@ -63,7 +63,7 @@ function roundTrip(port: HostPort, message: unknown): Promise<HostReply> {
     const timer = setTimeout(() => {
       finish();
       reject(new Error("The Outlook helper did not answer."));
-    }, 20_000);
+    }, timeoutMs);
     const onMessage = (reply: HostReply) => {
       finish();
       resolve(reply);
@@ -135,9 +135,9 @@ export function connectClassic(): HostPort {
   return chrome.runtime.connectNative(NATIVE_HOST_NAME);
 }
 
-export async function probeClassic(port: HostPort, origin: string): Promise<HostReply> {
+export async function probeClassic(port: HostPort, origin: string, timeoutMs = 20_000): Promise<HostReply> {
   try {
-    return await roundTrip(port, { command: "probe", origin });
+    return await roundTrip(port, { command: "probe", origin }, timeoutMs);
   } finally {
     port.disconnect();
   }

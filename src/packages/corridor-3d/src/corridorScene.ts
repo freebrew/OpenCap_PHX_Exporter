@@ -660,11 +660,16 @@ export function arcTvdGain(inc0: number, kap: number, a: number): number {
   return (Math.sin(inc0 + kap * a) - Math.sin(inc0)) / kap;
 }
 
-/** SolveArcCurvature: signed curvature that gains dTvd over toGo, clamped to +-40 deg/30 m. */
+/**
+ * SolveArcCurvature: signed curvature that gains dTvd over toGo, clamped to +-40 deg/30 m.
+ * The arc never turns more than half a revolution (k * toGo <= pi). Beyond that the TVD gain
+ * wraps around (sin of a many-radian angle) and stops being monotone in k, so the bracket tests
+ * below can return the 40 deg/30 m clamp for a target 1,000+ m ahead and the drawn arc shoots off the page.
+ */
 export function solveArcCurvature(inc0Deg: number, toGo: number, dTvd: number): number {
   if (toGo <= 0) return 0;
   const i1 = rad(inc0Deg);
-  const kMax = rad(40 / 30);
+  const kMax = Math.min(rad(40 / 30), Math.PI / toGo);
   let lo = -kMax;
   let hi = kMax;
   if (arcTvdGain(i1, lo, toGo) <= dTvd) return lo;

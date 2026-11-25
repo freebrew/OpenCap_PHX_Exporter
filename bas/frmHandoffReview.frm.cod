@@ -1,0 +1,144 @@
+Option Explicit
+
+' Conflict picker for a browser handoff. Built at run time, same as frmDLEntry.
+' Apply writes the chosen browser cells. Cancel and Reject write nothing and
+' move the bundle aside so the browser is not stuck behind it.
+
+Private WithEvents lst As MSForms.ListBox
+Private WithEvents btnToggle As MSForms.CommandButton
+Private WithEvents btnAllExcel As MSForms.CommandButton
+Private WithEvents btnAllBrowser As MSForms.CommandButton
+Private WithEvents btnApply As MSForms.CommandButton
+Private WithEvents btnCancel As MSForms.CommandButton
+Private WithEvents btnReject As MSForms.CommandButton
+
+Private lblSummary As MSForms.Label
+
+Private Sub UserForm_Initialize()
+    Me.Caption = "Browser handoff"
+    Me.Width = 640
+    Me.Height = 420
+    BuildControls
+    FillList
+    On Error Resume Next
+    MDL_ScreenGuard.PlaceFormOnExcel Me
+End Sub
+
+Private Sub BuildControls()
+    Set lblSummary = Me.Controls.Add("Forms.Label.1", "lblSummary")
+    With lblSummary
+        .Left = 12
+        .Top = 8
+        .Width = 600
+        .Height = 32
+        .Caption = gHO_Summary
+        .WordWrap = True
+    End With
+
+    Set lst = Me.Controls.Add("Forms.ListBox.1", "lstConflicts")
+    With lst
+        .Left = 12
+        .Top = 44
+        .Width = 600
+        .Height = 280
+        .ColumnCount = 5
+        .ColumnWidths = "120 pt;100 pt;110 pt;110 pt;70 pt"
+        .ColumnHeads = False
+        .MultiSelect = fmMultiSelectSingle
+    End With
+
+    Set btnToggle = AddButton("btnToggle", "Use the other value", 12, 334, 140)
+    Set btnAllExcel = AddButton("btnAllExcel", "All Excel", 160, 334, 90)
+    Set btnAllBrowser = AddButton("btnAllBrowser", "All Browser", 258, 334, 100)
+    Set btnApply = AddButton("btnApply", "Apply", 372, 334, 70)
+    Set btnCancel = AddButton("btnCancel", "Cancel", 450, 334, 70)
+    Set btnReject = AddButton("btnReject", "Reject", 528, 334, 70)
+End Sub
+
+Private Function AddButton(ByVal name As String, ByVal caption As String, ByVal left As Single, ByVal top As Single, ByVal width As Single) As MSForms.CommandButton
+    Dim btn As MSForms.CommandButton
+    Set btn = Me.Controls.Add("Forms.CommandButton.1", name)
+    btn.Left = left
+    btn.Top = top
+    btn.Width = width
+    btn.Height = 24
+    btn.Caption = caption
+    Set AddButton = btn
+End Function
+
+Private Sub FillList()
+    Dim i As Long
+    Dim keep As Long
+    keep = lst.ListIndex
+    lst.Clear
+    lst.AddItem "Sheet"
+    lst.List(0, 1) = "Baseline"
+    lst.List(0, 2) = "Excel"
+    lst.List(0, 3) = "Browser"
+    lst.List(0, 4) = "Use"
+    For i = 1 To gHO_N
+        lst.AddItem gHO_Addr(i)
+        lst.List(i, 1) = gHO_Base(i)
+        lst.List(i, 2) = gHO_Excel(i)
+        lst.List(i, 3) = gHO_Browser(i)
+        lst.List(i, 4) = IIf(gHO_Pick(i) = "browser", "Browser", "Excel")
+    Next i
+    If keep >= 0 And keep < lst.ListCount Then lst.ListIndex = keep
+End Sub
+
+Private Sub btnToggle_Click()
+    ToggleOne lst.ListIndex
+End Sub
+
+Private Sub lst_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
+    ToggleOne lst.ListIndex
+End Sub
+
+Private Sub ToggleOne(ByVal listIndex As Long)
+    Dim n As Long
+    If listIndex < 1 Then Exit Sub
+    n = listIndex
+    If n < 1 Or n > gHO_N Then Exit Sub
+    If gHO_Pick(n) = "browser" Then gHO_Pick(n) = "excel" Else gHO_Pick(n) = "browser"
+    FillList
+    If n < lst.ListCount Then lst.ListIndex = n
+End Sub
+
+Private Sub btnAllExcel_Click()
+    SetAll "excel"
+End Sub
+
+Private Sub btnAllBrowser_Click()
+    SetAll "browser"
+End Sub
+
+Private Sub SetAll(ByVal pick As String)
+    Dim i As Long
+    For i = 1 To gHO_N
+        gHO_Pick(i) = pick
+    Next i
+    FillList
+End Sub
+
+Private Sub btnApply_Click()
+    gHO_Result = "apply"
+    Me.Hide
+End Sub
+
+Private Sub btnCancel_Click()
+    gHO_Result = "cancel"
+    Me.Hide
+End Sub
+
+Private Sub btnReject_Click()
+    gHO_Result = "reject"
+    Me.Hide
+End Sub
+
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    If CloseMode = vbFormControlMenu Then
+        Cancel = True
+        If Len(gHO_Result) = 0 Then gHO_Result = "cancel"
+        Me.Hide
+    End If
+End Sub

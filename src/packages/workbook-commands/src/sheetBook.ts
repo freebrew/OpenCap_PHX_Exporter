@@ -10,6 +10,8 @@ export interface CellLook {
   fontSize?: number;
   hAlign?: "left" | "center" | "right";
   vAlign?: "middle";
+  /** One line. A long description stops at the cell edge instead of growing the row. */
+  wrap?: "clip";
 }
 
 export type CellScalar = string | number | boolean | null;
@@ -29,7 +31,9 @@ export type CellWrite =
   | { kind: "merge"; sheet: string; row: number; col: number; row2: number; col2: number }
   | { kind: "unmerge"; sheet: string; row: number; col: number; row2: number; col2: number }
   | { kind: "look"; sheet: string; row: number; col: number; row2: number; col2: number; look: CellLook }
-  | { kind: "border"; sheet: string; row: number; col: number; row2: number; col2: number; edge: "bottom" | "outside"; line: "thin" | "hair"; color: string };
+  | { kind: "border"; sheet: string; row: number; col: number; row2: number; col2: number; edge: "bottom" | "outside"; line: "thin" | "hair"; color: string }
+  /** Column width in pixels. `col` is 1-based, the same as every other write. */
+  | { kind: "width"; sheet: string; col: number; px: number };
 
 export interface CellArea {
   row: number;
@@ -52,6 +56,8 @@ interface RawStyle {
   ff?: string;
   fs?: number;
   bl?: number;
+  /** 1 left, 2 centre, 3 right. */
+  ht?: number;
 }
 
 interface RawSheet {
@@ -437,6 +443,10 @@ export class SheetBook {
 
   setFormat(sheet: string, row: number, col: number, pattern: string): void {
     this.writes.push({ kind: "format", sheet, row, col, pattern });
+  }
+
+  setColumnWidth(sheet: string, col: number, px: number): void {
+    this.writes.push({ kind: "width", sheet, col, px });
   }
 
   private rows(sheet: string): Record<string, Record<string, RawCell | null> | null> | null {

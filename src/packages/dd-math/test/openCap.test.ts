@@ -9,6 +9,8 @@ import {
   mudMotorSequence,
   parseOpenCapCsv,
   SheetBook,
+  bindCostHeadline,
+  bindLiveToolHours,
   toolHoursSync,
   vbaIsNumeric,
   type OpenCapSource,
@@ -172,9 +174,11 @@ describe("applyOpenCap (RefreshAllCsvData without the rebuild)", () => {
     applyOpenCap(book, sources, { lastJobId: "", folderPath: "Job" });
     expect([book.value("Data", 45, 2), book.value("Data", 46, 2), book.value("Data", 47, 2)]).toEqual(["PHX-525010-PTS", "PHX-525074-PTS", null]);
     // AG-100 ran on BHA 1 (40 h) and is on the selected BHA 2, whose live hours are Q24.
-    expect([book.value("Data", 31, 15), book.value("Data", 31, 17), book.value("Data", 31, 18)]).toEqual(["AG-100", 100, 45.5]);
+    expect([book.value("Data", 31, 15), book.value("Data", 31, 17)]).toEqual(["AG-100", 100]);
+    expect(book.formula("Data", 31, 18)).toBe("=Q24+40");
     expect(book.value("Data", 32, 15)).toBeNull();
-    expect([book.value("Data", 45, 15), book.value("Data", 45, 18)]).toEqual(["PHX-525074-PTS", 5.5]);
+    expect(book.value("Data", 45, 15)).toBe("PHX-525074-PTS");
+    expect(book.formula("Data", 45, 18)).toBe("=Q24");
     expect(book.formula("Data", 45, 6)).toBe("=IFERROR(VLOOKUP(B45,$O$45:$S$55,5,FALSE),IFERROR(VLOOKUP(B45,_TH_Hours!$A$2:$E$80,5,FALSE),\"\"))");
     const tracker = new Map<string, unknown[]>();
     for (let row = 2; row <= book.lastUsedRow("_TH_Hours", 1); row += 1) {
@@ -195,8 +199,18 @@ describe("applyOpenCap (RefreshAllCsvData without the rebuild)", () => {
     book.setValue("Data", 31, 17, 9);
     toolHoursSync(book);
     // BHA 1 is now the live one (Q24 = 5.5); BHA 2 adds its 12 h.
-    expect([book.value("Data", 31, 15), book.value("Data", 31, 17), book.value("Data", 31, 18)]).toEqual(["AG-100", null, 17.5]);
+    expect([book.value("Data", 31, 15), book.value("Data", 31, 17)]).toEqual(["AG-100", null]);
+    expect(book.formula("Data", 31, 18)).toBe("=Q24+12");
     expect(book.value("_TH_Hours", 2, 1)).toBe("AG-100");
+  });
+
+  it("follows the live circ total instead of a stamped hour count", () => {
+    const book = workbook();
+    book.setValue("Data", 31, 15, "1142");
+    book.setValue("Data", 31, 18, 25.75);
+    expect(bindLiveToolHours(book)).toBe(true);
+    expect(book.formula("Data", 31, 18)).toBe("=Q24");
+    expect(bindLiveToolHours(book)).toBe(false);
   });
 
   it("sorts the crew manifest by role, then by name", () => {
@@ -222,11 +236,26 @@ describe("applyOpenCap (RefreshAllCsvData without the rebuild)", () => {
     const added = writeCostDay(book, 46223, 250, "night batch");
     expect(added).toEqual({ added: true, row: 5 });
     expect(book.value("Costs", 5, 5)).toBe(250);
-    expect(book.value("Costs", 5, 7)).toBe("night batch");
-    expect(book.formula("Costs", 5, 6)).toBe("=IF(ISBLANK(E5),\"\",SUM($E$3:E5))");
+    expect(book.value("Costs", 5, 8)).toBe("night batch");
+    expect(book.formula("Costs", 5, 7)).toBe("=IF(ISBLANK(E5),\"\",SUM($E$3:E5))");
+    expect(book.formula("Data", 3, 5)).toBe("=IFERROR(Costs!E5,\"\")");
     // The same date again updates the row instead of adding another.
     expect(writeCostDay(book, 46223, 275, "")).toEqual({ added: false, row: 5 });
     expect(book.value("Costs", 5, 5)).toBe(275);
+  });
+
+  it("shows the latest daily cost, not the sum of the last two days", () => {
+    const book = workbook();
+    book.setFormula("Data", 3, 5, "=IFERROR(Costs!E73,\"\")");
+    book.setFormula("Costs", 73, 5, "=LOOKUP(2,1/(E3:E72<>\"\"),E3:E72)");
+    book.setValue("Costs", 14, 3, 46347);
+    book.setValue("Costs", 14, 5, 28672.5);
+    book.setValue("Costs", 15, 3, 46347);
+    book.setValue("Costs", 15, 5, 28597.5);
+    expect(bindCostHeadline(book)).toBe(true);
+    expect(book.formula("Data", 3, 5)).toBe("=IFERROR(Costs!E15,\"\")");
+    expect(book.formula("Costs", 73, 5)).toBe("=LOOKUP(9.9E+307,E3:E72)");
+    expect(bindCostHeadline(book)).toBe(false);
   });
 
   it("reports what it found when nothing loads", () => {

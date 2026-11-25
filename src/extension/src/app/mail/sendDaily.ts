@@ -3,7 +3,10 @@ import { jobField, readJobFields, type SheetBook, type SnapshotBook } from "../.
 import { nativeHostOrigin } from "../../extensionIdentity";
 import type { FolderEntry } from "../pickFile";
 import { writeArchive } from "./archive";
-import { composeOnPort, connectClassic } from "./classicHost";
+import { composeOnPort, connectClassic, probeClassic } from "./classicHost";
+import { DEFAULT_MAIL_CLIENT } from "./clients";
+import { openDesktopDraft, openDownloadedDraft } from "./desktopDraft";
+import { looksLikeClassic } from "./detect";
 import { createGmailDraft } from "./gmailDraft";
 import { openMailto } from "./genericMail";
 import { readNamedFiles } from "./jobFiles";
@@ -28,9 +31,41 @@ async function openUrl(url: string): Promise<void> {
   await chrome.tabs.create({ url });
 }
 
-function transportFor(client: "classic" | "microsoft" | "gmail" | "generic"): ReportTransport {
+function transportFor(client: "outlook" | "classic" | "microsoft" | "gmail" | "generic"): ReportTransport {
   let draftsUrl = "";
+  let draftDownloadId: number | null = null;
   switch (client) {
+    case "outlook":
+      return {
+        async run(draft, onPhase) {
+          // If the optional Classic Outlook native helper is already installed and Classic Outlook is active,
+          // use it directly. Otherwise save an editable X-Unsent: 1 .eml draft and launch Outlook (Classic or New).
+          try {
+            const origin = nativeHostOrigin(chrome.runtime.id);
+            const probe = await probeClassic(connectClassic(), origin, 2000);
+            if (
+              probe.ok === true &&
+              looksLikeClassic({
+                outlookRegistered: probe.outlookRegistered === true,
+                mailtoCommand: probe.mailtoCommand ?? "",
+                defaultClient: probe.defaultClient ?? "",
+              })
+            ) {
+              const classicResult = await composeOnPort(connectClassic(), draft, origin, () => onPhase("opening"));
+              if (classicResult.status !== "no-side-effect-failure") return classicResult;
+            }
+          } catch {
+            // Helper not installed or unavailable: continue straight to the default Outlook .eml draft.
+          }
+          const opened = await openDesktopDraft(draft, { onOpening: () => onPhase("opening") });
+          draftDownloadId = opened.downloadId;
+          return opened.result;
+        },
+        async retryOpen() {
+          if (draftDownloadId != null) return openDownloadedDraft(draftDownloadId);
+          return { status: "created-not-opened", id: "outlook", location: "Outlook", error: "Open Outlook and look for the compose window. A new draft was not created." };
+        },
+      };
     case "classic":
       return {
         async run(draft, onPhase) {
@@ -38,7 +73,7 @@ function transportFor(client: "classic" | "microsoft" | "gmail" | "generic"): Re
           try {
             port = connectClassic();
           } catch {
-            return { status: "no-side-effect-failure", error: "The Outlook helper is not installed. Use Install helper in Mail settings." };
+            return { status: "no-side-effect-failure", error: "The Classic Outlook helper is not installed. Choose “Outlook (Classic or New) — default”, or install the optional helper in Mail settings." };
           }
           return composeOnPort(port, draft, nativeHostOrigin(chrome.runtime.id), () => onPhase("opening"));
         },
@@ -94,14 +129,7 @@ export async function sendDailyReport(source: DailySource): Promise<void> {
     source.notify("An email report is already running.");
     return;
   }
-  const client = await readMailClient();
-  if (!client) {
-    source.openChooser();
-    const message = "Choose a mail client in Well tools, then email the report.";
-    setMailUi({ phase: "idle", message, canRetryOpen: false });
-    source.notify(message);
-    return;
-  }
+  const client = (await readMailClient()) ?? DEFAULT_MAIL_CLIENT;
   if (!source.snapshot) {
     const message = "The workbook is not open.";
     setMailUi({ phase: "failed", message, canRetryOpen: false });
@@ -137,6 +165,7 @@ export async function sendDailyReport(source: DailySource): Promise<void> {
       onPhase: (phase) => setMailUi({ phase, message: getMailUi().message, canRetryOpen: false }),
     });
     rememberRetry(transport, outcome);
+    if (outcome.canRetryOpen) source.openChooser();
     const missing = draft.missing.map((file) => file.name);
     const message = missing.length > 0 ? `Missing from the job folder: ${missing.join(", ")}. ${outcome.message}` : outcome.message;
     setMailUi({ phase: getMailUi().phase, message, canRetryOpen: outcome.canRetryOpen });

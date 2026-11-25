@@ -9,11 +9,12 @@ const GAUGE_ANCHOR: SheetAnchor = { col: 26, colOff: 0, row: 0, rowOff: 0, col2:
 
 /** Buttons the 35783 template carries. A workbook that lost one gets it back where the VBA puts it. */
 const TEMPLATE_BUTTONS: MacroButton[] = [
+  { sheet: "Setup", id: "BtnSyncSurveys", caption: "Sync Surveys", macro: "SyncWellSeekerSurveys", anchor: "9, 0, 30, 0, 12, 0, 31, 0" },
   { sheet: "Slidesheet", id: "btnClearSlidesheetRanges", caption: "Clear Ranges", macro: "ClearSlidesheetRanges", anchor: "25, 0, 0, 0, 26, 0, 2, 0" },
   { sheet: "Slidesheet", id: "btnPipeTallyForm", caption: "Pipe Tally Calculator", macro: "ShowPipeTallyForm", anchor: "25, 0, 2, 0, 26, 0, 5, 0" },
   { sheet: "Slidesheet", id: "btnEditTargets", caption: "Targets", macro: "ShowTargetEditor", anchor: "25, 0, 5, 0, 26, 0, 7, 0" },
-  { sheet: "DL Tracker", id: "btnDLTAdd", caption: "ADD ENTRY", macro: "DLT_AddEntry", anchor: "0, 6, 0, 3, 2, 3, 0, 38" },
-  { sheet: "DL Tracker", id: "btnDLTClear", caption: "CLEAR", macro: "DLT_ClearEntries", anchor: "20, 283, 0, 3, 20, 423, 0, 38" },
+  { sheet: "DL Tracker", id: "btnDLTAdd", caption: "ADD ENTRY", macro: "DLT_AddEntry", anchor: "0, 3, 0, 2, 2, -3, 0, 36" },
+  { sheet: "DL Tracker", id: "btnDLTClear", caption: "CLEAR", macro: "DLT_ClearEntries", anchor: "2, 3, 0, 2, 5, -3, 0, 36" },
 ];
 
 /** "leftCol, leftOff, topRow, topOff, rightCol, rightOff, bottomRow, bottomOff" (0-based, px). */

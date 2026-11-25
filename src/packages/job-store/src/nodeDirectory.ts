@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ExclusiveWriter, StoredDirectory, StoredFile } from "./directory.js";
 import { StoreError } from "./types.js";
@@ -71,9 +71,21 @@ export async function nodeDirectory(root: string): Promise<StoredDirectory> {
       }
       return storedFile(filePath);
     },
+    async getDirectory(name, create) {
+      const dirPath = path.join(root, name);
+      if (create) return nodeDirectory(dirPath);
+      try {
+        const info = await stat(dirPath);
+        return info.isDirectory() ? nodeDirectory(dirPath) : null;
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+        if (code === "ENOENT") return null;
+        throw error;
+      }
+    },
     async list() {
-      const names = await readdir(root);
-      return names.filter((name) => !name.endsWith(".lock"));
+      const entries = await readdir(root, { withFileTypes: true });
+      return entries.filter((entry) => entry.isFile() && !entry.name.endsWith(".lock")).map((entry) => entry.name);
     },
     async queryPermission() {
       return "granted";

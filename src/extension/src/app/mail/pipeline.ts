@@ -16,6 +16,7 @@ const CLASSIC_LIMIT = 64 * 1024 * 1024;
 
 export function limitsFor(client: MailClient): SizeLimits {
   switch (client) {
+    case "outlook":
     case "classic":
       return { fileBytes: CLASSIC_LIMIT, totalBytes: CLASSIC_LIMIT };
     case "microsoft":
@@ -51,11 +52,15 @@ function describe(client: MailClient, fileName: string, draft: MailDraft, result
   switch (result.status) {
     case "created-and-opened":
       if (client === "generic") {
-        return `The mail window has the recipients and subject. Attach these files yourself: ${names.join(", ") || "none"}. ${archive}`;
+        return `The mail window has the recipients and subject. Report HTML is copied (Ctrl+V). Attach these files yourself: ${names.join(", ") || "none"}. ${archive}`;
       }
+      if (client === "outlook") return `Outlook is open with the report draft. Nothing was sent. ${archive}`;
       if (client === "classic") return `Classic Outlook is open with the report. Nothing was sent. ${archive}`;
       return `Draft “${draft.subject}” is in Drafts. Nothing was sent. ${archive}`;
     case "created-not-opened":
+      if (client === "outlook") {
+        return `Report draft saved for Outlook (${result.error}). Click Open in Outlook (or open the downloaded .eml file). Nothing was sent. ${archive}`;
+      }
       return `The draft was created, but it did not open (${result.error}). Use Open Drafts. Emailing again would create a second draft. ${archive}`;
     case "indeterminate":
       return `${result.error} Check Drafts before trying again. ${archive}`;
@@ -164,9 +169,9 @@ export async function retryOpen(onPhase: (phase: MailPhase) => void = () => unde
     archived: true,
     canRetryOpen: result.status === "created-not-opened",
     message: result.status === "created-and-opened"
-      ? `Drafts is open. Nothing was sent.`
+      ? (result.location === "Outlook" ? "Outlook is open with the report draft. Nothing was sent." : "Drafts is open. Nothing was sent.")
       : result.status === "created-not-opened"
-        ? `Drafts still did not open (${result.error}). A new draft was not created.`
+        ? `Draft still did not open (${result.error}). A new draft was not created.`
         : `${result.status === "indeterminate" || result.status === "no-side-effect-failure" ? result.error : "Drafts did not open."} A new draft was not created.`,
   };
   if (!outcome.canRetryOpen) retry = null;

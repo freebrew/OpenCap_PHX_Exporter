@@ -1,4 +1,4 @@
-import { createRestorePoint, listBackups } from "./backups.js";
+import { createRestorePoint, listBackups, migrateLegacyBackups } from "./backups.js";
 import type { StoredDirectory, StoredFile } from "./directory.js";
 import { packMirror } from "./mirror.js";
 import type { JobRegistry } from "./registry.js";
@@ -51,6 +51,8 @@ export class JobSession {
   state: SaveState = "folder-safe";
   /** Why the last browser safety copy was not written, or "" when it was. */
   mirrorError = "";
+  /** Optional observer notified whenever `state` changes (including background autosave results). */
+  onStateChange?: (state: SaveState, error?: unknown) => void;
   private mirrorTimer: ReturnType<typeof setTimeout> | null = null;
   private folderTimer: ReturnType<typeof setTimeout> | null = null;
   private canonicalName: string;
@@ -64,6 +66,11 @@ export class JobSession {
     private envelope: PhxEnvelope | null,
   ) {
     this.canonicalName = fileName;
+  }
+
+  private setState(next: SaveState, error?: unknown): void {
+    this.state = next;
+    this.onStateChange?.(next, error);
   }
 
   get current(): PhxEnvelope | null {
@@ -84,7 +91,7 @@ export class JobSession {
 
   async replace(envelope: PhxEnvelope, options: { backup: boolean }): Promise<void> {
     this.envelope = envelope;
-    this.state = "dirty";
+    this.setState("dirty");
     await this.writeMirror();
     await this.writeFolder(options.backup);
   }
@@ -95,14 +102,14 @@ export class JobSession {
 
   noteEdit(envelope: PhxEnvelope): void {
     this.envelope = envelope;
-    this.state = "dirty";
+    this.setState("dirty");
     if (this.mirrorTimer) clearTimeout(this.mirrorTimer);
     this.mirrorTimer = setTimeout(() => {
       void this.writeMirror();
     }, 2_000);
     if (this.folderTimer) clearTimeout(this.folderTimer);
     this.folderTimer = setTimeout(() => {
-      void this.writeFolder(false);
+      void this.writeFolder(false).catch(() => undefined);
     }, 30_000);
   }
 
@@ -119,35 +126,35 @@ export class JobSession {
    */
   async writeMirror(): Promise<void> {
     if (!this.envelope) return;
-    this.state = "saving-mirror";
+    this.setState("saving-mirror");
     try {
       await this.registry.putMirror(await packMirror(this.jobId, this.envelope.savedAt, encodeEnvelope(this.envelope)));
       this.mirrorError = "";
-      if (this.state === "saving-mirror") this.state = "mirror-safe";
+      if (this.state === "saving-mirror") this.setState("mirror-safe");
     } catch (error) {
       this.mirrorError = error instanceof Error ? error.message : String(error);
-      if (this.state === "saving-mirror") this.state = "dirty";
+      if (this.state === "saving-mirror") this.setState("dirty");
     }
   }
 
   async writeFolder(backup: boolean): Promise<void> {
     if (!this.envelope) return;
-    const permission = await this.directory.queryPermission();
-    if (permission !== "granted") {
-      this.state = "permission-blocked";
-      return;
-    }
-    this.state = "saving-folder";
-    const file = await this.directory.getFile(this.canonicalName, true);
-    if (!file) throw new StoreError("invalid", "Snapshot file could not be created.");
-    const previous = await file.read();
-    if (backup && previous && previous.byteLength > 0) await createRestorePoint(this.directory, previous);
-    const bytes = encodeEnvelope(this.envelope);
     try {
+      const permission = await this.directory.queryPermission();
+      if (permission !== "granted") {
+        this.setState("permission-blocked");
+        return;
+      }
+      this.setState("saving-folder");
+      const file = await this.directory.getFile(this.canonicalName, true);
+      if (!file) throw new StoreError("invalid", "Snapshot file could not be created.");
+      const previous = await file.read();
+      if (backup && previous && previous.byteLength > 0) await createRestorePoint(this.directory, previous);
+      const bytes = encodeEnvelope(this.envelope);
       await verifiedWrite(file, bytes, previous && previous.byteLength > 0 ? previous : null);
-      this.state = "folder-safe";
+      this.setState("folder-safe");
     } catch (error) {
-      this.state = error instanceof StoreError && error.code === "concurrent" ? "concurrent-writer" : "save-error";
+      this.setState(error instanceof StoreError && error.code === "concurrent" ? "concurrent-writer" : "save-error", error);
       throw error;
     }
   }
@@ -187,6 +194,7 @@ export async function openJob(input: {
   try {
     const envelope = parseEnvelope(bytes);
     session.hold(envelope);
+    await migrateLegacyBackups(input.directory).catch(() => undefined);
     if (mirror && Date.parse(mirror.savedAt) > Date.parse(envelope.savedAt)) {
       return {
         session,

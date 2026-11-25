@@ -68,6 +68,62 @@ export function lastSurveyRow(book: SheetBook): number {
   return 0;
 }
 
+const STRIP_ROW = 506;
+const STRIP_COLS = [COL.E, COL.F, COL.G, COL.H, COL.J] as const;
+const DEPTH_METRES = '#####.00"m"';
+
+function sameFormula(have: string | null, want: string): boolean {
+  const compact = (value: string) => value.replace(/^=/, "").replace(/\s+/g, "").toUpperCase();
+  return compact(have ?? "") === compact(want);
+}
+
+/**
+ * Deepest station someone entered: survey MD, inclination and azimuth are numbers,
+ * and inclination and azimuth are not formulas. Projection rows calculate those
+ * angles, so they are not a survey. The green bar stays on lastSurveyRow.
+ */
+export function lastEnteredSurveyRow(book: SheetBook): number {
+  for (let r = Y_LAST; r >= SS_FIRST; r -= 1) {
+    if (!isNumber(book.value(SS_SHEET, r, COL.E))) continue;
+    if (!isNumber(book.value(SS_SHEET, r, COL.F)) || book.hasFormula(SS_SHEET, r, COL.F)) continue;
+    if (!isNumber(book.value(SS_SHEET, r, COL.G)) || book.hasFormula(SS_SHEET, r, COL.G)) continue;
+    return r;
+  }
+  return 0;
+}
+
+/** Data E7:E11 read Slidesheet row 506. Point that row at the latest entered survey. */
+export function syncLastSurveyStrip(book: SheetBook): boolean {
+  if (!book.hasSheet(SS_SHEET)) return false;
+  const before = book.writes.length;
+  const r = lastEnteredSurveyRow(book);
+  if (r < Y_DATA_FIRST) {
+    for (const col of STRIP_COLS) {
+      if (book.value(SS_SHEET, STRIP_ROW, col) != null || book.hasFormula(SS_SHEET, STRIP_ROW, col)) {
+        book.clear(SS_SHEET, { row: STRIP_ROW, col, row2: STRIP_ROW, col2: col });
+      }
+    }
+  } else {
+    for (const col of STRIP_COLS) {
+      const want = `=${a1Of(r, col)}`;
+      if (!sameFormula(book.formula(SS_SHEET, STRIP_ROW, col), want)) book.setFormula(SS_SHEET, STRIP_ROW, col, want);
+    }
+  }
+  return book.writes.length > before;
+}
+
+/** Data!E7 is a depth in metres. A degree format belongs on inclination and azimuth. */
+export function bindSurveyDepthMetres(book: SheetBook): boolean {
+  if (!book.hasSheet("Data")) return false;
+  const pattern = book.style("Data", 7, 5)?.n?.pattern ?? "";
+  if (pattern.includes("30")) return false;
+  if (/m/i.test(pattern) && !pattern.includes("°")) return false;
+  if (pattern !== "" && !pattern.includes("°")) return false;
+  if (book.writes.some((write) => write.kind === "format" && write.sheet === "Data" && write.row === 7 && write.col === 5)) return false;
+  book.setFormat("Data", 7, 5, DEPTH_METRES);
+  return true;
+}
+
 function lastSurveyBitMd(book: SheetBook): number {
   const r = lastSurveyRow(book);
   if (r < Y_DATA_FIRST) return 0;
@@ -407,17 +463,7 @@ export function prepareSlideComments(book: SheetBook): boolean {
       if (f !== original) book.setFormula(SS_SHEET, r, col, f);
     }
   }
-  const r = lastSurveyRow(book);
-  if (r < Y_DATA_FIRST) {
-    for (const col of [COL.E, COL.F, COL.G, COL.H, COL.J]) {
-      if (book.value(SS_SHEET, 506, col) != null || book.hasFormula(SS_SHEET, 506, col)) book.clear(SS_SHEET, { row: 506, col, row2: 506, col2: col });
-    }
-  } else {
-    for (const col of [COL.E, COL.F, COL.G, COL.H, COL.J]) {
-      const want = `=${a1Of(r, col)}`;
-      if ((book.formula(SS_SHEET, 506, col) ?? "").toUpperCase() !== want.toUpperCase()) book.setFormula(SS_SHEET, 506, col, want);
-    }
-  }
+  syncLastSurveyStrip(book);
   return book.writes.length > before;
 }
 

@@ -104,3 +104,8 @@ export function toMime(draft: MailDraft, boundaries = defaultBoundaries(draft)):
   lines.push(`--${boundaries.mixed}--`, "");
   return lines.join("\r\n");
 }
+
+/** Editable desktop-client draft (.eml). X-Unsent: 1 opens as an unsent compose in Classic Outlook and New Outlook. */
+export function toDraftMime(draft: MailDraft, boundaries = defaultBoundaries(draft)): string {
+  return `X-Unsent: 1\r\n${toMime(draft, boundaries)}`;
+}

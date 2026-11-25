@@ -187,20 +187,47 @@ export function serialHours(book: SheetBook): SerialHoursRow[] {
   return out;
 }
 
+const HEADER_FILL = "#D9D9D9";
+const BAND_FILL = "#E2EFDA";
+const GRID = "#000000";
+/** Excel character-widths from BuildDataSerialHoursTable, in pixels, so a description does not spill. */
+const COLUMN_PX: Array<[number, number]> = [[24, 150], [25, 360], [26, 92], [27, 78], [28, 58]];
+
+function paintRow(book: SheetBook, row: number, fill: string | null, descriptionLeft: boolean): void {
+  const area = { row, col: 24, row2: row, col2: 28 };
+  book.setLook(DATA, area, { bold: true, hAlign: "center", vAlign: "middle", fontFamily: "Calibri", fontSize: 11, wrap: "clip" });
+  if (descriptionLeft) book.setLook(DATA, { row, col: 25, row2: row, col2: 25 }, { bold: true, hAlign: "left", vAlign: "middle", fontFamily: "Calibri", fontSize: 11, wrap: "clip" });
+  book.setFill(DATA, area, fill);
+  book.setFontColor(DATA, area, "#000000");
+  for (let col = 24; col <= 28; col += 1) book.setBorder(DATA, { row, col, row2: row, col2: col }, "outside", "thin", GRID);
+}
+
 /**
  * BuildDataSerialHoursTable: Data!X2:AB, header on row 2, one row per serial from row 3.
  * Clears the whole block first so a shorter table never leaves the previous job's rows behind.
+ * Each BHA is one band, hours are 0.00, and the description sits left, the same as the sheet in Excel.
  */
 export function writeSerialHoursTable(book: SheetBook, rows: SerialHoursRow[]): number {
   if (!book.hasSheet(DATA)) return 0;
-  for (let row = SERIAL_HEADER_ROW; row <= SERIAL_CLEAR_TO; row += 1) {
-    for (let col = 24; col <= 28; col += 1) book.setValue(DATA, row, col, null);
-  }
+  book.clear(DATA, { row: SERIAL_HEADER_ROW, col: 24, row2: SERIAL_CLEAR_TO, col2: 28 }, true);
+  for (const [col, px] of COLUMN_PX) book.setColumnWidth(DATA, col, px);
   const headers = ["Serial", "Description", "Circ Hours", "HSLS", "BHA#"];
   headers.forEach((header, index) => book.setValue(DATA, SERIAL_HEADER_ROW, 24 + index, header));
+  paintRow(book, SERIAL_HEADER_ROW, HEADER_FILL, false);
+  let band = false;
+  let previous = -1;
   rows.forEach((row, index) => {
+    const at = SERIAL_FIRST_ROW + index;
+    if (row.bha !== previous) {
+      if (previous >= 0) band = !band;
+      previous = row.bha;
+    }
     const values: CellScalar[] = [row.serial, row.description, row.circHours, row.hsls, row.bha];
-    values.forEach((value, col) => book.setValue(DATA, SERIAL_FIRST_ROW + index, 24 + col, value));
+    values.forEach((value, col) => book.setValue(DATA, at, 24 + col, value));
+    book.setFormat(DATA, at, 26, "0.00");
+    book.setFormat(DATA, at, 27, "0.00");
+    book.setFormat(DATA, at, 28, "0");
+    paintRow(book, at, band ? BAND_FILL : null, true);
   });
   return rows.length;
 }

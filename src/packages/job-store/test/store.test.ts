@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
-import { describe, expect, it } from "vitest";
-import { MemoryDirectory } from "../src/directory.js";
+import { describe, expect, it, vi } from "vitest";
+import { BACKUP_DIR, BACKUP_FILE, listBackups } from "../src/backups.js";
+import { directoryFromHandle, MemoryDirectory } from "../src/directory.js";
 import { openRegistry } from "../src/registry.js";
 import { openJob } from "../src/session.js";
 import { createEnvelope, encodeEnvelope, parseEnvelope } from "../src/snapshot.js";
@@ -51,18 +52,28 @@ describe("snapshot envelope", () => {
 });
 
 describe("job session", () => {
-  it("saves exclusively, reloads, and restores a backup after a bad verification", async () => {
+  it("keeps only a single backup file inside OpenCap/ and never clutters the job root", async () => {
     const directory = new MemoryDirectory();
     const registry = await openRegistry();
     const first = envelope("2026-11-03T00:00:00.000Z");
+    const second = envelope("2026-11-03T00:00:02.000Z");
+    const third = envelope("2026-11-03T00:00:05.000Z");
     const opened = await openJob({ jobId: "job", label: "Willowbend", fileName: "job.phx.json", directory, registry });
     await opened.session.replace(first, { backup: true });
-    await opened.session.replace(envelope("2026-11-03T00:00:02.000Z"), { backup: true });
+    await opened.session.replace(second, { backup: true });
+    await opened.session.replace(third, { backup: true });
     const again = await openJob({ jobId: "job", label: "Willowbend", fileName: "job.phx.json", directory, registry });
-    expect(again.result.envelope?.savedAt).toBe("2026-11-03T00:00:02.000Z");
+    expect(again.result.envelope?.savedAt).toBe("2026-11-03T00:00:05.000Z");
     expect(again.result.recovery.kind).toBe("none");
-    const names = await directory.list();
-    expect(names.some((name) => name.includes("-recent-"))).toBe(true);
+
+    const rootNames = await directory.list();
+    expect(rootNames).toEqual(["job.phx.json"]);
+    const openCap = await directory.getDirectory(BACKUP_DIR, false);
+    expect(openCap).not.toBeNull();
+    expect(await openCap!.list()).toEqual([BACKUP_FILE]);
+    const backupBytes = await (await openCap!.getFile(BACKUP_FILE, false))!.read();
+    expect(parseEnvelope(backupBytes!).savedAt).toBe("2026-11-03T00:00:02.000Z");
+    expect(await listBackups(directory)).toEqual([`${BACKUP_DIR}/${BACKUP_FILE}`]);
   });
 
   it("does not create a backup for the automatic folder write", async () => {
@@ -74,10 +85,11 @@ describe("job session", () => {
     await opened.session.writeFolder(false);
     const names = await directory.list();
     expect(names.some((name) => name.includes("backup"))).toBe(false);
+    expect(await directory.getDirectory(BACKUP_DIR, false)).toBeNull();
     expect(opened.session.state).toBe("folder-safe");
   });
 
-  it("keeps a corrupt canonical and offers backups", async () => {
+  it("keeps a corrupt canonical and offers the single OpenCap backup", async () => {
     const directory = new MemoryDirectory();
     const registry = await openRegistry();
     const seeded = await openJob({ jobId: "job3", label: "Willowbend", fileName: "job.phx.json", directory, registry });
@@ -89,9 +101,36 @@ describe("job session", () => {
     await writer?.close();
     const opened = await openJob({ jobId: "job3", label: "Willowbend", fileName: "job.phx.json", directory, registry });
     expect(opened.result.recovery.kind).toBe("corrupt");
-    if (opened.result.recovery.kind === "corrupt") expect(opened.result.recovery.backups.length).toBeGreaterThan(0);
+    if (opened.result.recovery.kind === "corrupt") {
+      expect(opened.result.recovery.backups).toEqual([`${BACKUP_DIR}/${BACKUP_FILE}`]);
+    }
     const still = await file?.read();
     expect(new TextDecoder().decode(still ?? new Uint8Array())).toBe("{");
+  });
+
+  it("migrates legacy root multi-backups into a single OpenCap/.phx-backup.json on open", async () => {
+    const directory = new MemoryDirectory();
+    const registry = await openRegistry();
+    const writeRaw = async (dir: MemoryDirectory, name: string, bytes: Uint8Array) => {
+      const f = await dir.getFile(name, true);
+      const w = await f!.writeExclusive();
+      await w.write(bytes);
+      await w.close();
+    };
+    await writeRaw(directory, "job.phx.json", encodeEnvelope(envelope("2026-11-05T00:00:00.000Z")));
+    await writeRaw(directory, ".phx-backup-weekly-2026-W44.json", encodeEnvelope(envelope("2026-11-01T00:00:00.000Z")));
+    await writeRaw(directory, ".phx-backup-daily-2026-11-03.json", encodeEnvelope(envelope("2026-11-03T00:00:00.000Z")));
+    await writeRaw(directory, ".phx-backup-recent-2026-11-04T01-00-00-000Z.json", encodeEnvelope(envelope("2026-11-04T01:00:00.000Z")));
+    await writeRaw(directory, ".phx-backup-recent-2026-11-04T05-00-00-000Z.json", encodeEnvelope(envelope("2026-11-04T05:00:00.000Z")));
+
+    const opened = await openJob({ jobId: "job-legacy", label: "Willowbend", fileName: "job.phx.json", directory, registry });
+    expect(opened.result.recovery.kind).toBe("none");
+    expect(await directory.list()).toEqual(["job.phx.json"]);
+    const openCap = await directory.getDirectory(BACKUP_DIR, false);
+    expect(openCap).not.toBeNull();
+    expect(await openCap!.list()).toEqual([BACKUP_FILE]);
+    const migrated = await (await openCap!.getFile(BACKUP_FILE, false))!.read();
+    expect(parseEnvelope(migrated!).savedAt).toBe("2026-11-04T05:00:00.000Z");
   });
 
   it("reports a newer mirror without overwriting the folder", async () => {
@@ -111,5 +150,44 @@ describe("job session", () => {
     const first = await file?.writeExclusive();
     await expect(file?.writeExclusive()).rejects.toBeInstanceOf(StoreError);
     await first?.abort();
+  });
+
+  it("rethrows NotFoundError when create=true so a disconnected folder is reported instead of null", async () => {
+    const notFound = new DOMException("The path supplied exists, but was not an entry of requested type.", "NotFoundError");
+    const directory = directoryFromHandle({
+      getFileHandle: async () => { throw notFound; },
+      getDirectoryHandle: async () => { throw notFound; },
+      entries: async function* () {},
+      queryPermission: async () => "granted",
+      requestPermission: async () => "granted",
+    });
+    expect(await directory.getFile("job.phx.json", false)).toBeNull();
+    expect(await directory.getDirectory("OpenCap", false)).toBeNull();
+    await expect(directory.getFile("job.phx.json", true)).rejects.toBe(notFound);
+    await expect(directory.getDirectory("OpenCap", true)).rejects.toBe(notFound);
+  });
+
+  it("transitions to save-error and notifies onStateChange without unhandled rejection when background autosave fails", async () => {
+    const notFound = new DOMException("Folder gone", "NotFoundError");
+    const directory = directoryFromHandle({
+      getFileHandle: async () => { throw notFound; },
+      entries: async function* () {},
+      queryPermission: async () => "granted",
+      requestPermission: async () => "granted",
+    });
+    const registry = await openRegistry();
+    const opened = await openJob({ jobId: "job-gone", label: "Gone", fileName: "job.phx.json", directory, registry });
+    const seen: Array<{ state: string; error: unknown }> = [];
+    opened.session.onStateChange = (state, error) => seen.push({ state, error });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      opened.session.noteEdit(envelope("2026-11-03T00:00:01.000Z"));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(opened.session.state).toBe("save-error");
+      expect(seen.some((entry) => entry.state === "save-error" && entry.error === notFound)).toBe(true);
+      opened.session.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

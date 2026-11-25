@@ -39,7 +39,7 @@ export function chooseSuggestion(input: SuggestionInput): { client: MailClient |
     case "gmail":
       return { client: "gmail", reason: input.connected === "gmail" && tabs.length === 0 ? "This browser is signed in to Gmail." : "Gmail is open." };
     case null:
-      return { client: null, reason: "Choose the mail client for this report." };
+      return { client: "outlook", reason: "Calls Outlook (Classic or New) by default. No helper install or sign-in needed." };
     default: {
       const never: never = only;
       return never;

@@ -11,7 +11,7 @@ Sub NEW_SS()
         
     Application.GoTo Reference:="Print_Area"
 
-    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=name, _
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, fileName:=name, _
     Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, _
         OpenAfterPublish:=True
     Range("B7:B25").Select

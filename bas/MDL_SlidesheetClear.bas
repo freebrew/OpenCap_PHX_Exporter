@@ -576,15 +576,58 @@ Clean:
     On Error Resume Next
     SheetReprotectAfterVba ss, wasProt
     Application.EnableEvents = prevEvents
+    EnsureSurveyDepthMetres
 End Sub
 
-' Data!E7:E11 read Slidesheet E/F/G/H/J506. Those cells must point at the
-' last GREEN survey row (Inc/Azm fill), not LOOKUP-last-nonblank — yellow
-' projection rows are not material for Last Survey or plan distance.
+' Deepest row someone entered: MD, Inc and Azm are numbers, and Inc and Azm
+' are not formulas. Yellow projection rows calculate the angles, so they are
+' not the last survey. The green bar stays on LastSlidesheetSurveyRow.
+Private Function LastEnteredSurveyRow(ByVal ss As Worksheet) As Long
+    Dim r As Long
+    LastEnteredSurveyRow = 0
+    For r = Y_LAST To Y_DATA_FIRST Step -1
+        If IsNumberValue(ss.Cells(r, "E").Value2) Then
+            If IsNumberValue(ss.Cells(r, "F").Value2) Then
+                If IsNumberValue(ss.Cells(r, "G").Value2) Then
+                    If Not ss.Cells(r, "F").HasFormula Then
+                        If Not ss.Cells(r, "G").HasFormula Then
+                            LastEnteredSurveyRow = r
+                            Exit Function
+                        End If
+                    End If
+                End If
+            End If
+        End If
+    Next r
+End Function
+
+' Data!E7 is metres. Inclination and azimuth keep the degree format.
+Private Sub EnsureSurveyDepthMetres()
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    Dim fmt As String
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("Data")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    On Error GoTo DoneDepth
+    wasProt = SheetUnprotectForVba(ws)
+    fmt = CStr(ws.Range("E7").NumberFormat & "")
+    If InStr(1, fmt, ChrW(176), vbBinaryCompare) > 0 Then
+        If InStr(1, fmt, "30", vbBinaryCompare) = 0 Then
+            ws.Range("E7").NumberFormat = "#####.00""m"""
+        End If
+    End If
+DoneDepth:
+    SheetReprotectAfterVba ws, wasProt
+End Sub
+
+' Data!E7:E11 read Slidesheet E/F/G/H/J506. Those cells point at the latest
+' entered survey (MD + Inc + Azm), not a yellow projection row.
 Private Sub EnsureLastSurveyAzmLookup(ByVal ss As Worksheet)
     Dim r As Long
     Dim addr As String
-    r = MDL_ContDI.LastSlidesheetSurveyRow()
+    r = LastEnteredSurveyRow(ss)
     If r < Y_DATA_FIRST Then
         ss.Range("E506:H506,J506").ClearContents
         Exit Sub
@@ -620,7 +663,7 @@ Private Function FitLeftRightInCell(ByVal leftPart As String, ByVal rightPart As
 
     leftPts = MeasureTextWidthPts(leftPart, cell)
     rightPts = MeasureTextWidthPts(rightPart, cell)
-    avail = cell.Width - CELL_MARGIN_PTS
+    avail = cell.width - CELL_MARGIN_PTS
     If spacePts <= 0# Then spacePts = 1#
 
     PAD = CLng(Application.WorksheetFunction.Round((avail - leftPts - rightPts) / spacePts, 0))
@@ -642,7 +685,7 @@ Private Function FitCommentParts(ByVal leftPart As String, ByVal midPart As Stri
     leftPts = MeasureTextWidthPts(leftPart, cell)
     midPts = MeasureTextWidthPts(midPart, cell)
     rotPts = MeasureTextWidthPts(rotPart, cell)
-    avail = cell.Width - CELL_MARGIN_PTS
+    avail = cell.width - CELL_MARGIN_PTS
     gapPts = spacePts * 2#
 
     If Len(leftPart) = 0 And Len(midPart) = 0 Then
@@ -745,7 +788,7 @@ Private Function MeasureTextWidthPts(ByVal txt As String, ByVal proto As Range) 
         .Font.size = sz
         .Font.bold = bld
     End With
-    MeasureTextWidthPts = shp.Width
+    MeasureTextWidthPts = shp.width
     If ownShape Then shp.Delete
 
     If Not m_measureCache Is Nothing Then m_measureCache(key) = MeasureTextWidthPts
@@ -1131,7 +1174,7 @@ Public Sub EnsureSlidesheetClearButton()
     ss.Shapes(BTN_NAME).Delete
     On Error GoTo 0
 
-    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.Width, rng.Height)
+    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.width, rng.Height)
     btn.name = BTN_NAME
     btn.caption = BTN_CAPTION
     btn.OnAction = "'" & ThisWorkbook.name & "'!ClearSlidesheetRanges"
@@ -1161,12 +1204,12 @@ Public Sub EnsureTargetButton()
     On Error GoTo Fail
     If Not shp Is Nothing Then
         ' The first build was taller than Z6. Snap it back onto that cell.
-        If Abs(shp.Height - rng.Height) > 2# Or Abs(shp.Width - rng.Width) > 2# _
+        If Abs(shp.Height - rng.Height) > 2# Or Abs(shp.width - rng.width) > 2# _
                 Or Abs(shp.Top - rng.Top) > 2# Or Abs(shp.Left - rng.Left) > 2# Then
             wasProt = SheetUnprotectForVba(ss)
             shp.Left = rng.Left
             shp.Top = rng.Top
-            shp.Width = rng.Width
+            shp.width = rng.width
             shp.Height = rng.Height
             SheetReprotectAfterVba ss, wasProt
         End If
@@ -1174,7 +1217,7 @@ Public Sub EnsureTargetButton()
     End If
 
     wasProt = SheetUnprotectForVba(ss)
-    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.Width, rng.Height)
+    Set btn = ss.Buttons.Add(rng.Left, rng.Top, rng.width, rng.Height)
     btn.name = BTN_TGT
     btn.caption = "Targets"
     btn.OnAction = "'" & ThisWorkbook.name & "'!ShowTargetEditor"
@@ -1572,7 +1615,7 @@ Public Sub RememberPlanTargetOverride(ByVal Target As Range)
             If nm = "" Or Not IsKnownTargetName(nm) Then
                 ps.Cells(row, 12).ClearContents
             Else
-                ps.Cells(row, 12).Value = nm
+                ps.Cells(row, 12).value = nm
             End If
             GoTo NextOv
         End If
@@ -1751,7 +1794,7 @@ Public Function TargetEditorStore(ByVal planRow As Long, ByVal nm As String, _
     End If
     wasProt = SheetUnprotectForVba(ps)
     On Error GoTo Fail
-    ps.Cells(planRow, 12).Value = showNm
+    ps.Cells(planRow, 12).value = showNm
     WriteTargetOverride ps, planRow, OVR_MD, 1, md
     WriteTargetOverride ps, planRow, OVR_INC, 2, incD
     WriteTargetOverride ps, planRow, OVR_AZM, 3, azmD
@@ -1928,7 +1971,7 @@ End Function
 Public Sub CheckSurveyRowsAfterEntry(ByVal Target As Range)
     Dim ss As Worksheet
     Dim r As Long, r1 As Long, r2 As Long
-    Dim bad As Long
+    Dim Bad As Long
     If m_repairDeclined Or m_repairBusy Then Exit Sub
     On Error GoTo Done
     Set ss = ThisWorkbook.Worksheets(SS_SHEET)
@@ -1936,10 +1979,10 @@ Public Sub CheckSurveyRowsAfterEntry(ByVal Target As Range)
     r2 = Target.row + Target.rows.Count - 1
     If r2 - r1 > 40 Then r2 = r1 + 40
     For r = r1 To r2 + 1
-        If SurveyRowDamaged(ss, r) Then bad = r: Exit For
+        If SurveyRowDamaged(ss, r) Then Bad = r: Exit For
     Next r
-    If bad = 0 Then GoTo Done
-    If MsgBox("The survey formulas on row " & bad & " are damaged (a cell was moved, cut or" & _
+    If Bad = 0 Then GoTo Done
+    If MsgBox("The survey formulas on row " & Bad & " are damaged (a cell was moved, cut or" & _
               " dragged), so TVD, N/E and the proximity gauge are wrong from there down." & _
               vbCrLf & vbCrLf & "Put the formulas back now? Your typed surveys are not changed.", _
               vbYesNo + vbExclamation, "Slidesheet survey formulas") = vbYes Then

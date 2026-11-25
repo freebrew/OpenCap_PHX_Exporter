@@ -1,8 +1,8 @@
 Attribute VB_Name = "MDL_DownlinkTracker"
 Option Explicit
 
-' DL Tracker tab. ADD ENTRY (A1) opens
-' frmDLEntry prefilled from the last entry; CLEAR (U1) empties the log.
+' DL Tracker tab. ADD ENTRY (A1:B1) opens frmDLEntry prefilled from the last
+' entry; CLEAR (C1:E1) empties typed log cells only. CLIENT sits in F1:G1.
 ' Entry writes touch only unlocked, non-formula cells, so D/L Setting (H),
 ' Dnlk # (B), hidden helper columns and the command tables (AA:AR) stay.
 ' The tab is protected with a blank password; buttons and the Dnlk # repair
@@ -144,6 +144,8 @@ End Sub
 Public Function DLT_ClearLog(ByVal ws As Worksheet) As Long
     Dim c As Range
     Dim n As Long
+    Dim r As Long
+    Dim wasProt As Boolean
     Dim prevScreen As Boolean, prevEvents As Boolean
     Dim prevCalc As XlCalculation
 
@@ -155,6 +157,7 @@ Public Function DLT_ClearLog(ByVal ws As Worksheet) As Long
     Application.Calculation = xlCalculationManual
 
     On Error GoTo Fail
+    wasProt = DltUnprotect(ws)
     For Each c In ws.Range(DLT_LOG).Cells
         If Not c.Locked Then
             If Not c.HasFormula Then
@@ -165,6 +168,9 @@ Public Function DLT_ClearLog(ByVal ws As Worksheet) As Long
             End If
         End If
     Next c
+    For r = DLT_FIRST To DLT_LAST
+        PutSettingFormula ws, r
+    Next r
     DLT_ClearLog = n
     GoTo Restore
 
@@ -172,13 +178,13 @@ Fail:
     DLT_ClearLog = -1
 
 Restore:
+    DltReprotect ws, wasProt
     Application.Calculation = prevCalc
     Application.EnableEvents = prevEvents
     Application.ScreenUpdating = prevScreen
 End Function
 
-' ADD ENTRY on A1 (left of the CLIENT label) and CLEAR on U1, both in the
-' frozen header row so they stay on screen while scrolling the log.
+' ADD ENTRY on A1:B1, CLEAR on C1:E1, CLIENT on F1:G1. Frozen header row.
 Public Sub DLT_EnsureButtons()
     Dim ws As Worksheet
     Dim wasProt As Boolean
@@ -187,8 +193,9 @@ Public Sub DLT_EnsureButtons()
     If ws Is Nothing Then Exit Sub
     wasProt = DltUnprotect(ws)
     On Error GoTo Restore
-    PlaceButton ws, DLT_ADD_BTN, ws.Range("A1"), "ADD ENTRY", "DLT_AddEntry", True
-    PlaceButton ws, DLT_BTN, ws.Range("U1"), "CLEAR", "DLT_ClearEntries", False
+    PaintHeaderChrome ws
+    PlaceButton ws, DLT_ADD_BTN, ws.Range("A1:B1"), "ADD ENTRY", "DLT_AddEntry"
+    PlaceButton ws, DLT_BTN, ws.Range("C1:E1"), "CLEAR", "DLT_ClearEntries"
 Restore:
     DltReprotect ws, wasProt
 End Sub
@@ -197,30 +204,98 @@ Public Sub DLT_EnsureClearButton()
     DLT_EnsureButtons
 End Sub
 
-' Called from Workbook_SheetActivate: add the buttons only when one is missing.
+' Called from Workbook_SheetActivate: paint the header and buttons when the
+' layout is still the old A1:G1 CLIENT bar / CLEAR-on-U1, or a button is gone.
 Public Sub DLT_EnsureButtonsIfMissing()
     Dim ws As Worksheet
     Set ws = DltSheet()
     If ws Is Nothing Then Exit Sub
-    If HasShape(ws, DLT_ADD_BTN) And HasShape(ws, DLT_BTN) Then Exit Sub
+    EnsureSettingOnLog ws
+    If HeaderChromeOk(ws) And HasShape(ws, DLT_ADD_BTN) And HasShape(ws, DLT_BTN) Then Exit Sub
     DLT_EnsureButtons
 End Sub
 
+Private Function HeaderChromeOk(ByVal ws As Worksheet) As Boolean
+    On Error GoTo Done
+    If ws.Range("A1").MergeArea.Address(False, False) <> "A1:B1" Then Exit Function
+    If ws.Range("C1").MergeArea.Address(False, False) <> "C1:E1" Then Exit Function
+    If ws.Range("F1").MergeArea.Address(False, False) <> "F1:G1" Then Exit Function
+    If UCase$(Trim$(CStr(ws.Range("F1").Value2 & ""))) <> "CLIENT" Then Exit Function
+    HeaderChromeOk = True
+Done:
+End Function
+
+' A1:B1 ADD ENTRY, C1:E1 CLEAR, F1:G1 CLIENT. Does not touch H1 (client name)
+' or the rest of the identity row (RIG / well / job #).
+Private Sub PaintHeaderChrome(ByVal ws As Worksheet)
+    Dim gray As Long
+    Dim fSize As Double
+    Dim fName As String
+
+    gray = ws.Range("A1").Interior.Color
+    If gray = 0 Then gray = RGB(191, 191, 191)
+    fSize = ws.Range("A1").Font.size
+    If fSize < 8# Then fSize = 11#
+    fName = ws.Range("A1").Font.name
+    If Len(fName) = 0 Then fName = "Calibri"
+
+    On Error Resume Next
+    ws.Range("A1:G1").UnMerge
+    On Error GoTo 0
+    ws.Range("A1:E1").ClearContents
+    On Error Resume Next
+    ws.Range("A1:B1").Merge
+    ws.Range("C1:E1").Merge
+    ws.Range("F1:G1").Merge
+    On Error GoTo 0
+
+    With ws.Range("A1:G1")
+        .Interior.Color = gray
+        .Font.bold = True
+        .Font.size = fSize
+        .Font.name = fName
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .Locked = True
+    End With
+    ws.Range("F1").value = "CLIENT"
+End Sub
+
+' Cheap self-heal: if the first or last entry row lost its H formula, put it
+' back on every log row. The template still has H further down after a clear.
+Private Sub EnsureSettingOnLog(ByVal ws As Worksheet)
+    Dim lastR As Long
+    Dim wasProt As Boolean
+    Dim need As Boolean
+    Dim r As Long
+    wasProt = DltUnprotect(ws)
+    On Error GoTo Restore
+    lastR = DLT_LastEntryRow(ws)
+    If lastR < DLT_FIRST Then lastR = DLT_FIRST
+    need = (CStr(ws.Cells(DLT_FIRST, DLC_SET).formula) <> SettingFormula(DLT_FIRST)) _
+        Or (CStr(ws.Cells(lastR, DLC_SET).formula) <> SettingFormula(lastR))
+    If need Then
+        For r = DLT_FIRST To DLT_LAST
+            PutSettingFormula ws, r
+        Next r
+    End If
+Restore:
+    DltReprotect ws, wasProt
+End Sub
+
 Private Sub PlaceButton(ByVal ws As Worksheet, ByVal nm As String, ByVal anchor As Range, _
-                        ByVal caption As String, ByVal action As String, ByVal atLeft As Boolean)
-    Const BTN_W As Double = 84
+                        ByVal caption As String, ByVal action As String)
     Dim btn As Object
-    Dim x As Double
+    Dim w As Double, h As Double
 
     On Error Resume Next
     ws.Buttons(nm).Delete
     On Error GoTo 0
-    If atLeft Then
-        x = anchor.Left + 4
-    Else
-        x = anchor.Left + anchor.Width - BTN_W - 4
-    End If
-    Set btn = ws.Buttons.Add(x, anchor.Top + 2, BTN_W, anchor.Height - 4)
+    w = anchor.width - 6
+    h = anchor.Height - 4
+    If w < 24 Then w = 24
+    If h < 12 Then h = 12
+    Set btn = ws.Buttons.Add(anchor.Left + 3, anchor.Top + 2, w, h)
     btn.name = nm
     btn.caption = caption
     btn.OnAction = action
@@ -277,6 +352,70 @@ Private Function CounterFormula(ByVal r As Long) As String
     Else
         CounterFormula = "=IF(D" & r & "="""","""",B" & (r - 1) & "+1)"
     End If
+End Function
+
+' The template's H formula: VLOOKUP the command on that DL page. A half-cleared
+' log (or an older write that stored the setting as a value) leaves H blank;
+' WriteEntry never fills H, so the formula has to be on the row.
+Private Function SettingFormula(ByVal r As Long) As String
+    Dim c As String, d As String, inner As String
+    c = "C" & r
+    d = "D" & r
+    inner = "IF(" & c & "=0,VLOOKUP(" & d & ",$AA$3:$AB$66,2,FALSE)," & _
+            "IF(" & c & "=1,VLOOKUP(" & d & ",$AC$3:$AD$66,2,FALSE)," & _
+            "IF(" & c & "=2,VLOOKUP(" & d & ",$AE$3:$AF$66,2,FALSE)," & _
+            "IF(" & c & "=3,VLOOKUP(" & d & ",$AG$3:$AH$66,2,FALSE)," & _
+            "IF(" & c & "=7,VLOOKUP(" & d & ",$AI$3:$AJ$66,2,FALSE)," & _
+            "IF(" & c & "=""S"",VLOOKUP(" & d & ",$AK$3:$AL$66,2,FALSE),""""))))))"
+    SettingFormula = "=IF(" & c & "="""","""",IF(IFERROR(" & inner & ","""")=0,"""",IFERROR(" & inner & ","""")))"
+End Function
+
+Private Sub PutSettingFormula(ByVal ws As Worksheet, ByVal r As Long)
+    Dim cell As Range
+    Dim f As String
+    f = SettingFormula(r)
+    Set cell = ws.Cells(r, DLC_SET)
+    If CStr(cell.formula) = f Then
+        cell.Locked = True
+        cell.FormulaHidden = True
+        Exit Sub
+    End If
+    cell.formula = f
+    cell.Locked = True
+    cell.FormulaHidden = True
+End Sub
+
+Private Sub EnsureSettingFormula(ByVal ws As Worksheet, ByVal r As Long)
+    Dim wasProt As Boolean
+    If CStr(ws.Cells(r, DLC_SET).formula) = SettingFormula(r) Then Exit Sub
+    wasProt = DltUnprotect(ws)
+    On Error Resume Next
+    PutSettingFormula ws, r
+    On Error GoTo 0
+    DltReprotect ws, wasProt
+End Sub
+
+' Restore D/L Setting formulas on every log row. Typed columns are not touched.
+Public Function DLT_RepairSettingFormulas() As Long
+    Dim ws As Worksheet
+    Dim wasProt As Boolean
+    Dim r As Long, n As Long
+    Dim f As String
+
+    Set ws = DltSheet()
+    If ws Is Nothing Then Exit Function
+    wasProt = DltUnprotect(ws)
+    On Error GoTo Restore
+    For r = DLT_FIRST To DLT_LAST
+        f = SettingFormula(r)
+        If CStr(ws.Cells(r, DLC_SET).formula) <> f Then
+            PutSettingFormula ws, r
+            n = n + 1
+        End If
+    Next r
+Restore:
+    DltReprotect ws, wasProt
+    DLT_RepairSettingFormulas = n
 End Function
 
 ' ================================================================================
@@ -448,12 +587,27 @@ End Function
 '  TF/INC (I) AND SR%/AZI (J) FROM THE D/L SETTING
 ' ================================================================================
 
-' Nearest row above on the same DL page with numeric I and J.
+' Baseline I/J for an increment: last same-page row, or INC/AZM typed on the
+' inbound "Go to Page N" row. Stops at a page change so a return to HIA does
+' not reuse the previous visit.
 Public Function DLT_PrevIJ(ByVal ws As Worksheet, ByVal beforeRow As Long, ByVal PageKey As String, _
                            ByRef prevI As Double, ByRef prevJ As Double) As Boolean
     Dim r As Long
+    Dim dest As String, rowPage As String
     For r = beforeRow - 1 To DLT_FIRST Step -1
-        If DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2) = PageKey Then
+        dest = DLT_GoToDest(RowSetting(ws, r))
+        If Len(dest) > 0 Then
+            If dest = PageKey Then
+                If IsNumber(ws.Cells(r, DLC_I).Value2) And IsNumber(ws.Cells(r, DLC_J).Value2) Then
+                    prevI = CDbl(ws.Cells(r, DLC_I).Value2)
+                    prevJ = CDbl(ws.Cells(r, DLC_J).Value2)
+                    DLT_PrevIJ = True
+                End If
+            End If
+            Exit Function
+        End If
+        rowPage = DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2)
+        If rowPage = PageKey Then
             If IsNumber(ws.Cells(r, DLC_I).Value2) And IsNumber(ws.Cells(r, DLC_J).Value2) Then
                 prevI = CDbl(ws.Cells(r, DLC_I).Value2)
                 prevJ = CDbl(ws.Cells(r, DLC_J).Value2)
@@ -462,6 +616,22 @@ Public Function DLT_PrevIJ(ByVal ws As Worksheet, ByVal beforeRow As Long, ByVal
             End If
         End If
     Next r
+End Function
+
+' D/L Setting text for log row r (table lookup, then the H formula result).
+Private Function RowSetting(ByVal ws As Worksheet, ByVal r As Long) As String
+    Dim cmd As String
+    cmd = Trim$(CStr(ws.Cells(r, DLC_CMD).Value2 & ""))
+    RowSetting = DLT_LookupSetting(ws, DLT_PageKey(ws.Cells(r, DLC_PAGE).Value2), cmd)
+    If Len(RowSetting) = 0 Then RowSetting = Trim$(CStr(ws.Cells(r, DLC_SET).Value2 & ""))
+End Function
+
+' "Go to Page 3: HIA Mode" -> "3". Blank when this row is not a page change.
+Private Function DLT_GoToDest(ByVal setting As String) As String
+    Dim ch As String
+    If Left$(Trim$(setting), 11) <> "Go to Page " Then Exit Function
+    ch = mid$(Trim$(setting), 12, 1)
+    If ch Like "[0-9]" Then DLT_GoToDest = ch
 End Function
 
 ' "Set TF = 324 degrees, SR = 100%"         -> I 324, J 100
@@ -527,6 +697,14 @@ Public Sub DLT_RefreshIJ(ByVal ws As Worksheet, ByVal r As Long)
         If hasPrev Then WriteIJ ws, r, pI, pJ
         Exit Sub
     End If
+    ' First command after a blank go-to: INC/AZM typed on this row is the start.
+    If Not hasPrev Then
+        If IsNumber(ws.Cells(r, DLC_I).Value2) And IsNumber(ws.Cells(r, DLC_J).Value2) Then
+            pI = CDbl(ws.Cells(r, DLC_I).Value2)
+            pJ = CDbl(ws.Cells(r, DLC_J).Value2)
+            hasPrev = True
+        End If
+    End If
     setting = DLT_LookupSetting(ws, PageKey, cmd)
     Select Case DLT_ComputeIJ(setting, hasPrev, pI, pJ, oI, oJ)
         Case DLT_IJ_SET: WriteIJ ws, r, oI, oJ
@@ -551,6 +729,7 @@ Public Sub DLT_OnSheetChange(ByVal ws As Worksheet, ByVal Target As Range)
     lastRow = 0
     For Each c In hit.Cells
         If c.row <> lastRow Then
+            EnsureSettingFormula ws, c.row
             DLT_RefreshIJ ws, c.row
             lastRow = c.row
         End If
@@ -574,6 +753,7 @@ Public Sub DLT_WriteEntry(ByVal ws As Worksheet, ByVal r As Long, ByRef vals() A
     Application.EnableEvents = False
     On Error GoTo Done
     EnsureCounter ws, r
+    EnsureSettingFormula ws, r
     For c = DLC_RUN To DLC_NOTE
         If c <> DLC_NUM And c <> DLC_SET Then
             Set cell = ws.Cells(r, c)
@@ -731,10 +911,10 @@ Private Function ScrollOpenCombo(ByVal lParam As LongPtr) As Boolean
     If cbo Is Nothing Then Exit Function
     If TypeName(cbo) <> "ComboBox" Then Exit Function
     If cbo.ListCount < 1 Then Exit Function
-    i = cbo.ListIndex - lines
+    i = cbo.listIndex - lines
     If i < 0 Then i = 0
     If i > cbo.ListCount - 1 Then i = cbo.ListCount - 1
-    If i <> cbo.ListIndex Then cbo.ListIndex = i
+    If i <> cbo.listIndex Then cbo.listIndex = i
     ScrollOpenCombo = True
 Done:
 End Function
@@ -778,6 +958,10 @@ Private Sub DltReprotect(ByVal ws As Worksheet, ByVal wasProt As Boolean)
                AllowDeletingRows:=mPDelRows, AllowSorting:=mPSort, _
                AllowFiltering:=mPFilter, AllowUsingPivotTables:=mPPivot
 End Sub
+
+
+
+
 
 
 

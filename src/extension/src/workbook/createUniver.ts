@@ -1,5 +1,5 @@
 import { commandBlocksHandoff, normalizeSnapshotFormulas } from "@phx/xlsx-bridge";
-import { BorderStyleTypes, BorderType, CellValueType, HorizontalAlign, LocaleType, VerticalAlign, type IWorkbookData } from "@univerjs/core";
+import { BorderStyleTypes, BorderType, CellValueType, HorizontalAlign, LocaleType, VerticalAlign, WrapStrategy, type IWorkbookData } from "@univerjs/core";
 import { UniverDataValidationPlugin } from "@univerjs/data-validation";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import sheetsCoreEnUS from "@univerjs/preset-sheets-core/locales/en-US";
@@ -22,7 +22,34 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 import type { CellWrite } from "../../../packages/workbook-commands/src/index";
 import { legacyUdfEntries } from "./formulaEntries";
 import type { EditedRange, SheetAnchor, SheetPlacement, WorkbookHost } from "./facade";
+import { presentColumnFreeze, restoreColumnFreeze, type KeptColumnFreeze } from "./columnFreeze";
 import { normalizeSlidesheetRowHeights } from "./slidesheetLayout";
+
+interface SheetChrome {
+  rowHeader?: { width?: number; hidden?: number };
+  columnHeader?: { height?: number; hidden?: number };
+}
+
+function sheetChrome(snapshot: unknown): SheetChrome[] {
+  const sheets = (snapshot as { sheets?: Record<string, SheetChrome> } | null)?.sheets;
+  return sheets ? Object.values(sheets).filter((sheet): sheet is SheetChrome => sheet != null) : [];
+}
+
+/** Row numbers and A/B/C letters are preview chrome. The sheet's own headings stay. */
+function hideSheetChrome(snapshot: unknown): void {
+  for (const sheet of sheetChrome(snapshot)) {
+    sheet.rowHeader = { width: sheet.rowHeader?.width ?? 46, hidden: 1 };
+    sheet.columnHeader = { height: sheet.columnHeader?.height ?? 20, hidden: 1 };
+  }
+}
+
+/** A saved snapshot keeps Excel's header gutter. The preview hides it again on load. */
+function showSheetChrome(snapshot: unknown): void {
+  for (const sheet of sheetChrome(snapshot)) {
+    if (sheet.rowHeader) delete sheet.rowHeader.hidden;
+    if (sheet.columnHeader) delete sheet.columnHeader.hidden;
+  }
+}
 
 const SET_RANGE_VALUES = "sheet.command.set-range-values";
 const CLEAR_CONTENT = "sheet.command.clear-selection-content";
@@ -90,6 +117,7 @@ export function createWorkbookHost(container: HTMLElement): WorkbookHost {
   showMenus(false);
 
   let unitId: string | null = null;
+  let keptColumnFreezes: KeptColumnFreeze[] = [];
   let applying = 0;
   let guard = true;
   let blockedListener: ((id: string, executed: boolean) => void) | null = null;
@@ -128,6 +156,11 @@ export function createWorkbookHost(container: HTMLElement): WorkbookHost {
     const workbook = univerAPI.getActiveWorkbook();
     const sheet = workbook?.getSheetByName(write.sheet);
     if (!workbook || !sheet) return;
+    if (write.kind === "width") {
+      if (write.col > sheet.getMaxColumns()) sheet.setColumnCount(write.col);
+      sheet.setColumnWidth(write.col - 1, write.px);
+      return;
+    }
     // Excel's grid is unbounded here; a Univer sheet only has the rows and columns it was saved with.
     const tableWidth = write.kind === "table" ? Math.max(1, ...write.values.map((line) => line.length)) : 1;
     const lastRow = "row2" in write ? write.row2 : write.kind === "table" ? write.row + Math.max(1, write.values.length) - 1 : write.row;
@@ -189,6 +222,7 @@ export function createWorkbookHost(container: HTMLElement): WorkbookHost {
         if (fontSize) style(write, "fs", fontSize);
         if (hAlign) style(write, "ht", hAlign === "left" ? HorizontalAlign.LEFT : hAlign === "center" ? HorizontalAlign.CENTER : HorizontalAlign.RIGHT);
         if (vAlign) style(write, "vt", VerticalAlign.MIDDLE);
+        if (write.look.wrap === "clip") area(write).setWrapStrategy(WrapStrategy.CLIP);
         return;
       }
       case "border":
@@ -259,8 +293,20 @@ export function createWorkbookHost(container: HTMLElement): WorkbookHost {
         if (unitId) univerAPI.disposeUnit(unitId);
         const normalized = normalizeSnapshotFormulas(snapshot ?? {});
         normalizeSlidesheetRowHeights(normalized);
-        const workbook = univerAPI.createWorkbook(normalized as Partial<IWorkbookData>);
+        const presented = presentColumnFreeze(normalized);
+        keptColumnFreezes = presented.kept;
+        hideSheetChrome(presented.view);
+        const workbook = univerAPI.createWorkbook(presented.view as Partial<IWorkbookData>);
         unitId = workbook.getId();
+        // The snapshot merge can still leave a frozen column. Clear it on the live sheet.
+        for (const entry of keptColumnFreezes) {
+          workbook.getSheetByName(entry.name)?.setFreeze({
+            xSplit: 0,
+            ySplit: entry.freeze.ySplit,
+            startRow: entry.freeze.ySplit > 0 ? entry.freeze.startRow : -1,
+            startColumn: -1,
+          });
+        }
       } finally {
         guard = true;
       }
@@ -271,12 +317,16 @@ export function createWorkbookHost(container: HTMLElement): WorkbookHost {
       try {
         univerAPI.disposeUnit(unitId);
         unitId = null;
+        keptColumnFreezes = [];
       } finally {
         guard = true;
       }
     },
     snapshot() {
-      return univerAPI.getActiveWorkbook()?.save() ?? null;
+      const saved = univerAPI.getActiveWorkbook()?.save() ?? null;
+      if (!saved) return null;
+      showSheetChrome(saved);
+      return restoreColumnFreeze(saved, keptColumnFreezes);
     },
     onDirty(listener) {
       let timer = 0;

@@ -4,26 +4,26 @@ Private m_busy As Boolean
 
 Private Sub UserForm_Initialize()
     m_busy = True
-    Me.Caption = "Day Roll - Depth and Hours"
+    Me.caption = "Day Roll - Depth and Hours"
 
-    lblBHA.Caption = "BHA # " & CStr(gDayRoll_BHA)
-    lblPeriod.Caption = "Period: " & gDayRoll_Period & "  (row " & CStr(gDayRoll_TargetRow) & ")"
-    lblPriorBit.Caption = Format$(gDayRoll_PriorBit, "0.##")
-    lblPriorCirc.Caption = Format$(gDayRoll_PriorCirc, "0.##")
-    lblSlide.Caption = Format$(gDayRoll_SlideHrs, "0.##") & " hrs"
+    lblBHA.caption = "BHA # " & CStr(gDayRoll_BHA)
+    lblPeriod.caption = "Period: " & gDayRoll_Period & "  (row " & CStr(gDayRoll_TargetRow) & ")"
+    lblPriorBit.caption = Format$(gDayRoll_PriorBit, "0.##")
+    lblPriorCirc.caption = Format$(gDayRoll_PriorCirc, "0.##")
+    lblSlide.caption = Format$(gDayRoll_SlideHrs, "0.##") & " hrs"
 
     If gDayRoll_HasStartDepth Then
-        lblStartDepth.Caption = Format$(gDayRoll_StartDepth, "0.##")
+        lblStartDepth.caption = Format$(gDayRoll_StartDepth, "0.##")
     Else
-        lblStartDepth.Caption = "(none)"
+        lblStartDepth.caption = "(none)"
     End If
 
-    txtEndDepth.Text = ""
-    txtBitTotal.Text = ""
-    txtCircTotal.Text = ""
-    lblBitDelta.Caption = "-"
-    lblCircDelta.Caption = "-"
-    lblStatus.Caption = "Enter End Depth and Pason running totals."
+    txtEndDepth.text = ""
+    txtBitTotal.text = ""
+    txtCircTotal.text = ""
+    lblBitDelta.caption = "-"
+    lblCircDelta.caption = "-"
+    lblStatus.caption = "Enter End Depth and Pason running totals."
     lblStatus.ForeColor = &H404040
 
     m_busy = False
@@ -79,25 +79,25 @@ Private Sub RefreshPreview()
     Dim errMsg As String
     Dim parseErr As String
 
-    If Len(Trim$(txtBitTotal.Text)) = 0 And Len(Trim$(txtCircTotal.Text)) = 0 _
-       And Len(Trim$(txtEndDepth.Text)) = 0 Then
-        lblBitDelta.Caption = "-"
-        lblCircDelta.Caption = "-"
+    If Len(Trim$(txtBitTotal.text)) = 0 And Len(Trim$(txtCircTotal.text)) = 0 _
+       And Len(Trim$(txtEndDepth.text)) = 0 Then
+        lblBitDelta.caption = "-"
+        lblCircDelta.caption = "-"
         ShowStatus "Enter End Depth and Pason running totals.", False
         Exit Sub
     End If
 
     If Not ParseInputs(bitTotal, circTotal, endDepth, parseErr) Then
-        lblBitDelta.Caption = "-"
-        lblCircDelta.Caption = "-"
+        lblBitDelta.caption = "-"
+        lblCircDelta.caption = "-"
         ShowStatus parseErr, True
         Exit Sub
     End If
 
     bitDelta = Round(bitTotal - gDayRoll_PriorBit, 4)
     circDelta = Round(circTotal - gDayRoll_PriorCirc, 4)
-    lblBitDelta.Caption = Format$(bitDelta, "0.####")
-    lblCircDelta.Caption = Format$(circDelta, "0.####")
+    lblBitDelta.caption = Format$(bitDelta, "0.####")
+    lblCircDelta.caption = Format$(circDelta, "0.####")
 
     If DayRoll_ValidateHourDeltas(bitDelta, circDelta, gDayRoll_SlideHrs, _
                                   gDayRoll_Period, errMsg) Then
@@ -117,9 +117,9 @@ Private Function ParseInputs(ByRef bitTotal As Double, _
 
     ParseInputs = False
     errMsg = ""
-    bitTxt = Trim$(txtBitTotal.Text)
-    circTxt = Trim$(txtCircTotal.Text)
-    endTxt = Trim$(txtEndDepth.Text)
+    bitTxt = Trim$(txtBitTotal.text)
+    circTxt = Trim$(txtCircTotal.text)
+    endTxt = Trim$(txtEndDepth.text)
 
     If Len(endTxt) = 0 Then
         errMsg = "End Depth is required."
@@ -143,25 +143,39 @@ Private Function ParseInputs(ByRef bitTotal As Double, _
         Exit Function
     End If
 
-    If Len(bitTxt) = 0 Or Len(circTxt) = 0 Then
-        errMsg = "Both Bit Total and Circ Total are required."
+    ' Blank means no new hours. Zero is a real total, including a zero start.
+    If Len(bitTxt) = 0 Then
+        bitTotal = gDayRoll_PriorBit
+    ElseIf IsNumeric(bitTxt) Then
+        bitTotal = CDbl(bitTxt)
+    Else
+        errMsg = "Bit Total must be numeric."
         Exit Function
     End If
-    If Not IsNumeric(bitTxt) Or Not IsNumeric(circTxt) Then
-        errMsg = "Bit Total and Circ Total must be numeric."
+    If Len(circTxt) = 0 Then
+        circTotal = gDayRoll_PriorCirc
+    ElseIf IsNumeric(circTxt) Then
+        circTotal = CDbl(circTxt)
+    Else
+        errMsg = "Circ Total must be numeric."
         Exit Function
     End If
-
-    bitTotal = CDbl(bitTxt)
-    circTotal = CDbl(circTxt)
     ParseInputs = True
 End Function
 
 Private Sub ShowStatus(ByVal msg As String, ByVal isError As Boolean)
-    lblStatus.Caption = msg
+    lblStatus.caption = msg
     If isError Then
         lblStatus.ForeColor = &HFF&
     Else
         lblStatus.ForeColor = &H404040
     End If
 End Sub
+
+
+
+
+
+
+
+
