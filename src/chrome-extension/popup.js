@@ -62,7 +62,7 @@
 
   const offerInstall = (version) => {
     const label = version ? `Version ${version} is ready.` : "A store update is ready.";
-    showUpdate(`${label} Install update restarts the extension with the new version.`, "install");
+    showUpdate(`${label} Installs automatically when idle, or click Install update now.`, "install");
   };
 
   const checkForStoreUpdate = async () => {

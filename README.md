@@ -232,7 +232,7 @@ A degree of azimuth walk only moves the bit `sin(Inc)` as far as a degree of bui
 3. **Load unpacked** → `src/chrome-extension/`.
 4. Log into FieldCap, open the extension popup, enter Job ID, **Fetch & Build CSVs**.
 
-**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.19.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
+**Chrome Web Store / Edge Add-ons zip:** `dist/OpenCap_DataExporter_v3.2.20.zip` (rebuild with `src/chrome-extension/pack-store.ps1`). Same Chromium package; Edge uses `chrome.*` with a `browser` fallback. Listing screenshots live in `remotion/out/`.
 
 ---
 
@@ -254,7 +254,7 @@ PHX_FieldCap/
 ├── backups/                         ← local only (gitignored)
 ├── docs/                            ← overviews, corridor/gauge PNGs
 └── src/
-    ├── chrome-extension/            ← Manifest V3, v3.2.19
+    ├── chrome-extension/            ← Manifest V3, v3.2.20
     ├── excel/MDL_DDTools.bas
     └── ...
 ```
@@ -262,6 +262,11 @@ PHX_FieldCap/
 ---
 
 ## Changelog
+
+### v3.2.20 — Automatic Chrome Web Store update checks & idle auto-install
+
+- Background service worker now checks the Chrome Web Store / Edge Add-ons server automatically on browser startup and every 30 minutes (`chrome.runtime.requestUpdateCheck`), without needing to click **Check for update**.
+- Downloaded updates install automatically via `chrome.runtime.reload()` as soon as no fetch is running and the popup is closed; if you are actively using the popup, it shows the green **Install update** button and installs automatically once idle.
 
 ### v3.2.19 — Excel rounding and in-hole days
 

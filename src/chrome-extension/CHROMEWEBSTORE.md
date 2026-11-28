@@ -1,8 +1,8 @@
 # Chrome Web Store Listing — OpenCap Data Exporter
 
-> Last Updated: 2026-11-25
+> Last Updated: 2026-11-26
 > Store item: `egafclljokidcoiipaiojlaamgkooffb` (update to an existing listing)
-> Upload: `dist/OpenCap_DataExporter_v3.2.19.zip` (built by `pack-store.ps1`; this file is not in the zip)
+> Upload: `dist/OpenCap_DataExporter_v3.2.20.zip` (built by `pack-store.ps1`; this file is not in the zip)
 
 ## Store Listing
 
@@ -78,7 +78,7 @@ All `remotion/out/` renders are from 2026-05-28 and show the v3.1.4 dark popup a
 | `activeTab` | permissions | Reads the Job ID from the FieldCap page the user has open when they click the toolbar icon, so they do not have to type it. |
 | `scripting` | permissions | Re-attaches the page reader to a FieldCap tab that was already open before the extension was installed or updated, so the ticket and activity grids on screen can be read without reloading the page. On Microsoft Edge, also runs the FieldCap data request inside the open FieldCap tab, where the login cookies only travel with requests made from that tab. |
 | `webRequest` | permissions | When the user turns on the optional "sniffing" diagnostic, records the addresses of FieldCap requests on `*.phxtech.com` so a new FieldCap data endpoint can be identified. Observes only; never blocks or changes requests, and is not used on any other site. |
-| `alarms` | permissions | While a store update is waiting, restarts the one-minute toolbar "UP" badge pulse after the background worker sleeps. Cleared once the update is installed. It does not fetch data. |
+| `alarms` | permissions | Checks the store for extension updates every 30 minutes and, while an update is waiting on an open popup or active fetch, retries automatic installation every minute once idle. It does not fetch FieldCap data. |
 | `https://fieldcap-cdn.phxtech.com/*` | host_permissions | The FieldCap web app and its data service. The exporter reads the job the user asked for with the session they are already logged into. |
 | `*://*.phxtech.com/*` | host_permissions | Other FieldCap hosts under the same company domain that serve job, crew, BHA, inventory and ticket data, and where the content script reads the Job ID and hides the reminder dialog. No access to any other domain. |
 
@@ -129,6 +129,7 @@ https://freebrew.github.io/OpenCap_PHX_Exporter/privacy.html
 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
+| 3.2.20 | 2026-11-26 | Automatic 30-minute store update checks and idle auto-install without manual clicks. | Draft |
 | 3.2.19 | 2026-11-25 | Excel-style rounding; zero rows for in-hole days in the by-day file. Includes 3.2.16–3.2.18: slide hours capped at bit hours, activity-log detail CSV, by-day merge keeps earlier days, `alarms` permission. | Draft |
 | 3.2.15 | 2026-10-25 | Spreadsheet popup theme | Last packed |
 | 3.2.14 | 2026-10-25 | Standalone privacy policy URL | Resubmitted after rejection |

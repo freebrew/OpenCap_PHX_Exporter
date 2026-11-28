@@ -1,10 +1,12 @@
 import { startOpenCapExporter } from "virtual:opencap-exporter";
 import { metadataEntities, odataRows, stationFields, surveyStations, type StationFields, type SurveyStation } from "../../packages/fieldcap-sync/src/index";
+import { startAutoUpdate } from "./autoUpdate";
 import { fieldCapGet } from "./fieldcapFetch";
 
 // The OpenCap exporter's service worker runs here unchanged: FETCH_ALL on the "fieldcap-fetch"
 // port, its content script on FieldCap tabs, and its CSVs in chrome.storage.local. It only reads.
-// Its update badge and icon would land on the preview's own button, so those calls do nothing here.
+// Its update badge, alarms, and reload belong to standalone Exporter only — Slidesheet manages
+// its own safe auto-update via startAutoUpdate() below.
 const quietAction = {
   setIcon: async () => undefined,
   setTitle: async () => undefined,
@@ -12,7 +14,40 @@ const quietAction = {
   setBadgeBackgroundColor: async () => undefined,
   setBadgeTextColor: async () => undefined,
 };
-startOpenCapExporter(new Proxy(chrome, { get: (target, key) => (key === "action" ? quietAction : Reflect.get(target, key)) }), () => undefined);
+const noopEvent = { addListener: () => undefined, removeListener: () => undefined };
+const exporterRuntime = new Proxy(chrome.runtime, {
+  get(target, key) {
+    if (key === "onUpdateAvailable" || key === "onStartup") return noopEvent;
+    if (key === "requestUpdateCheck" || key === "reload") return () => undefined;
+    const val = Reflect.get(target, key);
+    return typeof val === "function" ? val.bind(target) : val;
+  },
+});
+const exporterAlarms = new Proxy(chrome.alarms, {
+  get(target, key) {
+    if (key === "create") {
+      return (name: string, info: chrome.alarms.AlarmCreateInfo) => {
+        if (name.startsWith("opencap-update-")) return;
+        target.create(name, info);
+      };
+    }
+    const val = Reflect.get(target, key);
+    return typeof val === "function" ? val.bind(target) : val;
+  },
+});
+startOpenCapExporter(
+  new Proxy(chrome, {
+    get(target, key) {
+      if (key === "action") return quietAction;
+      if (key === "runtime") return exporterRuntime;
+      if (key === "alarms") return exporterAlarms;
+      return Reflect.get(target, key);
+    },
+  }),
+  () => undefined,
+);
+
+startAutoUpdate();
 
 const EXPORTER_SCRIPT: chrome.scripting.RegisteredContentScript = {
   id: "opencap-exporter",

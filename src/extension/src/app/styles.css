@@ -30,6 +30,12 @@ body {
   opacity: 0.85;
 }
 
+.update-ready {
+  background: #2e8b57;
+  color: white;
+  font-weight: 600;
+}
+
 .job-picker {
   max-width: 460px;
   font-variant-numeric: tabular-nums;

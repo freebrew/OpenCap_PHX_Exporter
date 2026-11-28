@@ -70,6 +70,7 @@ import { WellsView } from "./WellsView";
 import { commitHandoff, latestReceipt, pendingHandoffs, workbookToken } from "./handoffFolder";
 import { SyncConflictDialog } from "./SyncConflictDialog";
 import { opWrites, scalarWrites } from "./syncWrites";
+import { APPLY_UPDATE_MESSAGE, isNewerVersion, PENDING_UPDATE_KEY } from "../autoUpdate";
 import { PREVIEW_VERSION } from "../version";
 
 interface StagedImport {
@@ -190,6 +191,8 @@ export function App() {
   const [bookOpen, setBookOpen] = useState(false);
   /** The .xlsm in the open folder that has no snapshot yet. */
   const [folderXlsm, setFolderXlsm] = useState("");
+  /** A newer Chrome Web Store version is downloaded and waiting to install. */
+  const [pendingUpdate, setPendingUpdate] = useState("");
 
   function stamp(workbook: unknown, sidecar: unknown, patch?: { hash?: string; baseline?: unknown; blocks?: string[] }): PhxEnvelope {
     const previous = session.current?.current;
@@ -202,6 +205,32 @@ export function App() {
       importBaseline: patch && "baseline" in patch ? patch.baseline : previous?.importBaseline,
       handoffBlocks: blocks,
     });
+  }
+
+  useEffect(() => {
+    const storage = globalThis.chrome?.storage?.local;
+    const onChanged = globalThis.chrome?.storage?.onChanged;
+    if (!storage) return;
+    let cancelled = false;
+    const apply = (value: unknown) => {
+      if (cancelled) return;
+      setPendingUpdate(isNewerVersion(value, PREVIEW_VERSION) ? String(value) : "");
+    };
+    void storage.get(PENDING_UPDATE_KEY).then((stored) => apply(stored?.[PENDING_UPDATE_KEY]), () => undefined);
+    if (!onChanged) return () => { cancelled = true; };
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "local" && changes[PENDING_UPDATE_KEY]) apply(changes[PENDING_UPDATE_KEY].newValue);
+    };
+    onChanged.addListener(listener);
+    return () => {
+      cancelled = true;
+      onChanged.removeListener(listener);
+    };
+  }, []);
+
+  async function applyStoreUpdate() {
+    if (session.current) await saveNow();
+    globalThis.chrome?.runtime?.sendMessage?.({ type: APPLY_UPDATE_MESSAGE });
   }
 
   useEffect(() => {
@@ -1507,6 +1536,16 @@ export function App() {
       <div className="toolbar">
         <strong>PHX preview</strong>
         <span className="stamp">{PREVIEW_VERSION}</span>
+        {pendingUpdate && (
+          <button
+            type="button"
+            className="update-ready"
+            title="Saves your workbook, installs the new Chrome Web Store version, and reopens this tab"
+            onClick={() => void applyStoreUpdate()}
+          >
+            Update v{pendingUpdate}
+          </button>
+        )}
         <div className="view-switch" role="group" aria-label="View">
           <button type="button" aria-pressed={surface === "sheets"} onClick={() => setSurface("sheets")}>Sheets</button>
           <button type="button" aria-pressed={surface === "wells"} onClick={() => setSurface("wells")}>3D Wells</button>

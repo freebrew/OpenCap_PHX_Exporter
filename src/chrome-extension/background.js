@@ -32,9 +32,17 @@ const KEY_CSV_ACTIVITY_LOG = "fieldcap_csv_activity_log";
 const KEY_TICKET_ENTITY = "fieldcap_ticket_entity";
 const KEY_PENDING_UPDATE = "fieldcap_pending_update";
 const UPDATE_ALARM = "opencap-update-pulse";
+const UPDATE_CHECK_ALARM = "opencap-update-check";
+const UPDATE_CHECK_PERIOD_MINUTES = 30;
 let updatePulseTimer = null;
 let updatePulseOn = false;
 let updateIconBitmap = null;
+let activeFetchCount = 0;
+
+const installedFromStore = () => {
+  const url = chrome.runtime.getManifest?.().update_url || "";
+  return url.length > 0;
+};
 
 const cmpVer = (a, b) => {
   const pa = String(a || "").split(".").map((n) => parseInt(n, 10) || 0);
@@ -108,10 +116,88 @@ const stopUpdateIconPulse = () => {
   });
 };
 
+// Auto-check Chrome Web Store / Edge Add-ons periodically and auto-install when safe.
+const canAutoReloadForUpdate = async () => {
+  if (activeFetchCount > 0) return false;
+  if (typeof chrome.runtime.getContexts === "function") {
+    try {
+      const views = await chrome.runtime.getContexts({ contextTypes: ["POPUP", "TAB"] });
+      if (Array.isArray(views) && views.length > 0) return false;
+    } catch (_) {
+      // Ignore if getContexts is unavailable; fall through safely.
+    }
+  }
+  return true;
+};
+
+const tryAutoInstallUpdate = async () => {
+  try {
+    const stored = await chrome.storage.local.get(KEY_PENDING_UPDATE);
+    const pending = stored?.[KEY_PENDING_UPDATE] || "";
+    if (!pendingIsNewer(pending)) {
+      if (pending) await chrome.storage.local.remove(KEY_PENDING_UPDATE);
+      stopUpdateIconPulse();
+      return false;
+    }
+    if (!(await canAutoReloadForUpdate())) {
+      startUpdateIconPulse();
+      return false;
+    }
+    stopUpdateIconPulse();
+    await chrome.storage.local.remove(KEY_PENDING_UPDATE);
+    chrome.runtime.reload();
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
+const scheduleUpdateCheckAlarm = () => {
+  if (!installedFromStore() || !chrome.alarms?.create) return;
+  chrome.alarms.get(UPDATE_CHECK_ALARM, (existing) => {
+    if (!existing) chrome.alarms.create(UPDATE_CHECK_ALARM, { periodInMinutes: UPDATE_CHECK_PERIOD_MINUTES });
+  });
+};
+
+const checkForStoreUpdateBackground = () => {
+  if (!installedFromStore() || typeof chrome.runtime.requestUpdateCheck !== "function") return;
+  try {
+    chrome.runtime.requestUpdateCheck((status, details) => {
+      if (chrome.runtime.lastError) return;
+      if (status === "update_available") {
+        const version = details && details.version ? String(details.version) : "";
+        if (version) {
+          chrome.storage.local.set({ [KEY_PENDING_UPDATE]: version }, () => {
+            void tryAutoInstallUpdate();
+          });
+        } else {
+          void tryAutoInstallUpdate();
+        }
+      } else if (status === "no_update") {
+        chrome.storage.local.get(KEY_PENDING_UPDATE, (stored) => {
+          if (stored?.[KEY_PENDING_UPDATE] && !pendingIsNewer(stored[KEY_PENDING_UPDATE])) {
+            chrome.storage.local.remove(KEY_PENDING_UPDATE);
+            stopUpdateIconPulse();
+          }
+        });
+      }
+    });
+  } catch (_) {
+    // Ignore transient store check errors; next alarm retries.
+  }
+};
+
 // Chrome downloads a Web Store update, then waits until we reload.
+// Install automatically if idle and no popup is open; otherwise pulse and install as soon as idle.
 chrome.runtime.onUpdateAvailable.addListener((details) => {
   const version = details && details.version ? String(details.version) : "";
-  if (version) chrome.storage.local.set({ [KEY_PENDING_UPDATE]: version });
+  if (version) {
+    chrome.storage.local.set({ [KEY_PENDING_UPDATE]: version }, () => {
+      void tryAutoInstallUpdate();
+    });
+  } else {
+    void tryAutoInstallUpdate();
+  }
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -119,7 +205,15 @@ chrome.runtime.onInstalled.addListener((details) => {
     stopUpdateIconPulse();
     chrome.storage.local.remove(KEY_PENDING_UPDATE);
   }
+  scheduleUpdateCheckAlarm();
 });
+
+if (chrome.runtime.onStartup?.addListener) {
+  chrome.runtime.onStartup.addListener(() => {
+    scheduleUpdateCheckAlarm();
+    checkForStoreUpdateBackground();
+  });
+}
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes[KEY_PENDING_UPDATE]) return;
@@ -128,15 +222,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === UPDATE_CHECK_ALARM) {
+    checkForStoreUpdateBackground();
+    return;
+  }
   if (alarm.name !== UPDATE_ALARM) return;
-  chrome.storage.local.get(KEY_PENDING_UPDATE, (stored) => {
-    if (pendingIsNewer(stored[KEY_PENDING_UPDATE])) startUpdateIconPulse();
-    else stopUpdateIconPulse();
-  });
+  void tryAutoInstallUpdate();
 });
 
+scheduleUpdateCheckAlarm();
 chrome.storage.local.get(KEY_PENDING_UPDATE, (stored) => {
-  if (pendingIsNewer(stored[KEY_PENDING_UPDATE])) startUpdateIconPulse();
+  if (pendingIsNewer(stored[KEY_PENDING_UPDATE])) void tryAutoInstallUpdate();
 });
 const KEY_INTERCEPT = "fieldcap_intercepted_assemblies"; // keyed by ToolAssemblyId
 const KEY_BHA_GRID = "fieldcap_bha_grid_rows"; // { [jobId]: { [bhaNumber]: canonicalRow } }
@@ -3083,6 +3179,7 @@ chrome.runtime.onConnect.addListener((port) => {
       return;
     }
 
+    activeFetchCount += 1;
     try {
       await pickEdgeFetchTab(jobId);
       send({ type: "PROGRESS", pct: 3, label: "Scraping live data…" });
@@ -3151,7 +3248,9 @@ chrome.runtime.onConnect.addListener((port) => {
     } catch (err) {
       send({ type: "DONE", ok: false, error: err.message });
     } finally {
+      activeFetchCount = Math.max(0, activeFetchCount - 1);
       edgeFetchTabId = 0;
+      void tryAutoInstallUpdate();
     }
   });
 });
@@ -3173,6 +3272,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     (async () => {
+      activeFetchCount += 1;
       try {
       await pickEdgeFetchTab(jobId);
       let liveData = (flags.bha || flags.jobDetails || flags.ticketCosts)
@@ -3236,7 +3336,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse({ ok: true, ...meta });
         });
       } finally {
+        activeFetchCount = Math.max(0, activeFetchCount - 1);
         edgeFetchTabId = 0;
+        void tryAutoInstallUpdate();
       }
       })().catch((err) => {
       sendResponse({ ok: false, error: err.message });
